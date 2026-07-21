@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>政企采购供应链平台 — UI 设计稿</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  background: #f0f2f5; color: #333; min-height: 100vh;
+}
+/* Header */
+.header {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  padding: 48px 0 60px; text-align: center; color: #fff;
+}
+.header h1 { font-size: 32px; font-weight: 700; margin-bottom: 8px; }
+.header p { font-size: 16px; opacity: 0.75; }
+.header .badge-row { margin-top: 20px; display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; }
+.header .badge-row .badge {
+  padding: 6px 16px; border-radius: 20px; font-size: 13px; font-weight: 500;
+}
+.badge.blue { background: rgba(26,111,181,0.3); color: #90caf9; }
+.badge.green { background: rgba(67,160,71,0.3); color: #a5d6a7; }
+.badge.orange { background: rgba(239,108,0,0.3); color: #ffcc80; }
+
+/* Container */
+.container { max-width: 1200px; margin: -30px auto 40px; padding: 0 24px; }
+
+/* Cards */
+.card-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-bottom: 40px; }
+.card {
+  background: #fff; border-radius: 16px; padding: 32px 28px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.06); transition: all 0.3s;
+  cursor: pointer; text-decoration: none; color: inherit; display: block;
+  border: 2px solid transparent; position: relative; overflow: hidden;
+}
+.card:hover { transform: translateY(-4px); box-shadow: 0 12px 40px rgba(0,0,0,0.12); border-color: #1a6fb5; }
+.card-icon { font-size: 48px; margin-bottom: 20px; display: block; }
+.card h2 { font-size: 22px; margin-bottom: 10px; color: #1a1a2e; }
+.card p { font-size: 14px; color: #777; line-height: 1.6; }
+.card .features { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 6px; }
+.card .features span {
+  padding: 4px 10px; background: #f0f5ff; color: #1a6fb5;
+  border-radius: 4px; font-size: 12px; font-weight: 500;
+}
+.card .tag {
+  position: absolute; top: 16px; right: 16px;
+  padding: 4px 10px; border-radius: 12px; font-size: 11px; font-weight: 600;
+}
+.tag.admin { background: #fff3e0; color: #ef6c00; }
+.tag.web { background: #e3f2fd; color: #1a6fb5; }
+.tag.h5 { background: #e8f5e9; color: #43a047; }
+
+/* Section */
+.section-title { font-size: 20px; font-weight: 700; margin-bottom: 20px; color: #1a1a2e; padding-bottom: 12px; border-bottom: 2px solid #e8e8e8; }
+
+/* Design Tokens */
+.tokens-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-bottom: 40px; }
+.token-card {
+  background: #fff; border-radius: 12px; padding: 20px; box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+}
+.token-card h4 { font-size: 12px; text-transform: uppercase; color: #999; margin-bottom: 12px; letter-spacing: 1px; }
+.color-swatch { display: flex; gap: 10px; flex-wrap: wrap; }
+.color-dot { width: 36px; height: 36px; border-radius: 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.12); }
+.color-dot.c1 { background: #1a6fb5; } .color-dot.c2 { background: #1e2a3a; }
+.color-dot.c3 { background: #e74c3c; } .color-dot.c4 { background: #f5f6fa; }
+.color-dot.c5 { background: #43a047; } .color-dot.c6 { background: #ef6c00; }
+
+.font-list { font-size: 13px; color: #555; line-height: 1.8; }
+.font-list .big { font-size: 18px; font-weight: 700; }
+.font-list .mid { font-size: 14px; }
+.font-list .small { font-size: 12px; color: #999; }
+
+/* Footer */
+.footer { text-align: center; padding: 40px; color: #999; font-size: 13px; }
+
+/* Diff Table */
+.diff-table { width: 100%; border-collapse: collapse; margin-bottom: 40px; background: #fff; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 12px rgba(0,0,0,0.04); }
+.diff-table th { background: #1a1a2e; color: #fff; padding: 14px 16px; font-size: 14px; text-align: left; }
+.diff-table td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid #f0f0f0; color: #555; }
+.diff-table tr:last-child td { border-bottom: none; }
+.diff-table .highlight { color: #e74c3c; font-weight: 600; }
+
+@media (max-width: 900px) {
+  .card-row { grid-template-columns: 1fr; }
+  .tokens-grid { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>🏗️ 政企采购供应链平台</h1>
+  <p>UI 设计稿 v2.0 — 管理后台 + Web 客户端 + H5 客户端</p>
+  <div class="badge-row">
+    <span class="badge blue">SPU + SKU 双层</span>
+    <span class="badge green">协议企业会员</span>
+    <span class="badge orange">三列比价</span>
+    <span class="badge blue">多地址子订单</span>
+    <span class="badge green">动态导航配置</span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- 下载区 -->
+  <div style="text-align:center;margin-bottom:32px;background:#fff;border-radius:16px;padding:24px;box-shadow:0 4px 20px rgba(0,0,0,.06);">
+    <a href="./ui-design.zip" download style="display:inline-block;padding:14px 36px;background:#1a6fb5;color:#fff;border-radius:8px;font-size:16px;font-weight:600;text-decoration:none;transition:.2s;">📥 下载全部设计稿 (ZIP, 40KB)</a>
+    <p style="margin-top:10px;font-size:13px;color:#999;">点击下载完整压缩包，解压后在本地浏览器打开 index.html 即可浏览</p>
+  </div>
+
+  <!-- 三端入口 -->
+  <div class="section-title">📱 设计稿入口</div>
+  <div class="card-row">
+
+    <a href="./admin/index.html" class="card">
+      <span class="tag admin">管理后台</span>
+      <div class="card-icon">⚙️</div>
+      <h2>管理后台</h2>
+      <p>平台运营管理端，包含仪表盘、商品管理、协议管理、方案管理、平台专区、导航配置等完整功能。</p>
+      <div class="features">
+        <span>仪表盘</span><span>协议管理</span><span>方案管理</span>
+        <span>平台专区</span><span>导航配置</span><span>订单管理</span>
+      </div>
+    </a>
+
+    <a href="./web/index.html" class="card">
+      <span class="tag web">Web 客户端</span>
+      <div class="card-icon">🖥️</div>
+      <h2>Web 客户端</h2>
+      <p>桌面端商城，顶部支持一键切换"普通会员"和"协议企业会员"，直观对比两种状态下的价格、Logo、下单权限差异。</p>
+      <div class="features">
+        <span>首页</span><span>商品详情</span><span>国网专区·三列比价</span>
+        <span>方案详情</span><span>多地址下单</span><span>常购清单</span>
+      </div>
+    </a>
+
+    <a href="./h5/index.html" class="card">
+      <span class="tag h5">H5 客户端</span>
+      <div class="card-icon">📱</div>
+      <h2>H5 客户端</h2>
+      <p>移动端商城，手机外壳模拟器展示，5 Tab 底部导航，同样支持普通会员/协议企业会员状态切换。</p>
+      <div class="features">
+        <span>首页</span><span>方案</span><span>分类</span>
+        <span>购物车</span><span>我的</span><span>常购清单</span>
+      </div>
+    </a>
+
+  </div>
+
+  <!-- 设计系统 -->
+  <div class="section-title">🎨 设计系统</div>
+  <div class="tokens-grid">
+    <div class="token-card">
+      <h4>主色调</h4>
+      <div class="color-swatch">
+        <div class="color-dot c1"></div>
+        <div class="color-dot c2"></div>
+      </div>
+      <div class="font-list" style="margin-top:8px;">
+        <div>#1a6fb5 品牌蓝</div>
+        <div>#1e2a3a 深蓝黑</div>
+      </div>
+    </div>
+    <div class="token-card">
+      <h4>功能色</h4>
+      <div class="color-swatch">
+        <div class="color-dot c3"></div>
+        <div class="color-dot c5"></div>
+        <div class="color-dot c6"></div>
+      </div>
+      <div class="font-list" style="margin-top:8px;">
+        <div>#e74c3c 价格/强调</div>
+        <div>#43a047 成功/库存</div>
+        <div>#ef6c00 警告/标签</div>
+      </div>
+    </div>
+    <div class="token-card">
+      <h4>字体层级</h4>
+      <div class="font-list">
+        <div class="big">大标题 18-22px</div>
+        <div class="mid">正文 14px</div>
+        <div class="small">辅助文字 12px</div>
+        <div class="small" style="margin-top:4px;">系统默认字体栈</div>
+      </div>
+    </div>
+    <div class="token-card">
+      <h4>背景色</h4>
+      <div class="color-swatch">
+        <div class="color-dot c4"></div>
+        <div style="width:36px;height:36px;background:#fff;border-radius:8px;border:1px solid #eee;"></div>
+      </div>
+      <div class="font-list" style="margin-top:8px;">
+        <div>#f5f6fa 页面背景</div>
+        <div>#ffffff 卡片/内容</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 关键差异对比 -->
+  <div class="section-title">🔑 核心差异：普通会员 vs 协议企业会员</div>
+  <table class="diff-table">
+    <thead>
+      <tr>
+        <th style="width:25%">对比维度</th>
+        <th style="width:37%">普通会员</th>
+        <th style="width:38%">协议企业会员</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>商品价格</strong></td>
+        <td>显示通用会员价</td>
+        <td class="highlight">显示协议折扣价（红色大字）</td>
+      </tr>
+      <tr>
+        <td><strong>"专属"Logo</strong></td>
+        <td>无</td>
+        <td class="highlight">商品卡片右上角，红色文字，左倾 45°</td>
+      </tr>
+      <tr>
+        <td><strong>下单权限</strong></td>
+        <td>按钮置灰，提示"暂无有效协议，请联系客服"</td>
+        <td class="highlight">正常下单</td>
+      </tr>
+      <tr>
+        <td><strong>专区比价</strong></td>
+        <td>"我的拿货价"显示"登录后查看"</td>
+        <td class="highlight">三列完整比价：原价 / 平台售价 / 拿货价</td>
+      </tr>
+      <tr>
+        <td><strong>方案价格</strong></td>
+        <td>显示方案折扣价（不可下单）</td>
+        <td class="highlight">min(方案折扣价, 协议折扣价)，标注"协议价更优"</td>
+      </tr>
+      <tr>
+        <td><strong>购物车</strong></td>
+        <td>结算按钮置灰</td>
+        <td class="highlight">正常结算</td>
+      </tr>
+      <tr>
+        <td><strong>个人中心</strong></td>
+        <td>"普通会员" + 红色"暂无有效协议"提示</td>
+        <td class="highlight">企业名称 + 协议有效期 + "已生效"标签</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- 快速跳转 -->
+  <div class="section-title">🔗 快速跳转（关键页面）</div>
+  <div class="card-row" style="grid-template-columns: repeat(2, 1fr);">
+    <a href="./admin/index.html" class="card" style="padding: 24px 20px;">
+      <h2 style="font-size:16px;">📝 管理后台 → 创建协议</h2>
+      <p style="font-size:13px;">协议表单 + 商品折扣配置 + 批量设置</p>
+    </a>
+    <a href="./admin/index.html" class="card" style="padding: 24px 20px;">
+      <h2 style="font-size:16px;">🎯 管理后台 → 创建方案</h2>
+      <p style="font-size:13px;">方案信息 + 商品清单 + Web/H5 预览</p>
+    </a>
+    <a href="./web/index.html" class="card" style="padding: 24px 20px;">
+      <h2 style="font-size:16px;">🏷️ Web 端 → 商品详情（协议会员视角）</h2>
+      <p style="font-size:13px;">"专属"Logo 左倾45° + 协议折扣价 + 可下单</p>
+    </a>
+    <a href="./web/index.html" class="card" style="padding: 24px 20px;">
+      <h2 style="font-size:16px;">📊 Web 端 → 国网专区·三列比价</h2>
+      <p style="font-size:13px;">市场原价 / 国网平台售价(参考) / 我的拿货价</p>
+    </a>
+  </div>
+
+</div>
+
+<div class="footer">
+  政企采购供应链平台 UI 设计稿 &copy; 2026 | 版本 v2.0
+</div>
+
+<script>
+// 确保在各类 webview / 本地文件环境下都能跳转
+document.querySelectorAll('a.card').forEach(function(link){
+  link.addEventListener('click', function(e){
+    var href = this.getAttribute('href');
+    if(href && href.indexOf('http') !== 0){
+      e.preventDefault();
+      window.location.href = href;
+    }
+  });
+});
+</script>
+
+</body>
+</html>
