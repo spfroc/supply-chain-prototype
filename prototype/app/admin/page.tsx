@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { addDemoRecord, DemoRecord, useBrowserRecords } from "../lib/browserDb";
 
 const menus = [
   ["概", "经营概览"], ["商", "商品管理"], ["企", "企业管理"], ["协", "协议管理"],
@@ -101,14 +102,23 @@ const moduleConfigs: Record<string, ModuleConfig> = {
 
 function AdminModule({ active, notify }: { active:string; notify:(message:string)=>void }) {
   const config = moduleConfigs[active];
+  const { records } = useBrowserRecords(active);
+  const { records: enterpriseRecords } = useBrowserRecords("企业管理");
   const [tab, setTab] = useState(config?.tabs[0] ?? "基础设置");
   const [keyword, setKeyword] = useState("");
   const [modal, setModal] = useState(false);
   const [saved, setSaved] = useState<Record<number,boolean>>({});
+  const [form,setForm]=useState({name:"",company:"",description:"",effectiveDate:"2026-07-16",status:"正常 / 启用",price:""});
 
   if (active === "系统设置") return <SystemSettings notify={notify} />;
   if (!config) return null;
-  const rows = config.rows.filter(row => row.join(" ").includes(keyword));
+  const rows = [...records.map(record=>recordToRow(active,record)),...config.rows].filter(row => row.join(" ").includes(keyword));
+  const saveRecord=async()=>{
+    if(!form.name.trim()){ notify(`请输入${config.entity}名称`); return; }
+    if(active==="协议管理"&&!form.company){ notify("请选择签约企业"); return; }
+    await addDemoRecord({module:active,name:form.name.trim(),company:form.company,description:form.description,effectiveDate:form.effectiveDate,status:form.status,price:Number(form.price)||undefined});
+    setModal(false); setForm({name:"",company:"",description:"",effectiveDate:"2026-07-16",status:"正常 / 启用",price:""}); notify(`${config.entity}已保存到浏览器数据库`);
+  };
   return <>
     <div className="moduleTitle"><div><span>运营管理　/　{active}</span><h1>{active}</h1><p>{config.subtitle}</p></div><button className="modulePrimary" onClick={()=>setModal(true)}>＋ {config.primary}</button></div>
     <div className="moduleMetrics">{config.metrics.map((metric,index)=><article key={metric[0]}><div><span>{metric[0]}</span><strong>{metric[1]}</strong><small>{metric[2]}</small></div><i className={`moduleIcon tone${index}`}>{["总","启","待","注"][index]}</i></article>)}</div>
@@ -118,14 +128,26 @@ function AdminModule({ active, notify }: { active:string; notify:(message:string
       <div className="moduleTable"><table><thead><tr><th><input type="checkbox" aria-label="全选" /></th>{config.columns.map(column=><th key={column}>{column}</th>)}<th>操作</th></tr></thead><tbody>{rows.map((row,rowIndex)=><tr key={row[0]}><td><input type="checkbox" aria-label={`选择${row[0]}`} /></td>{row.map((cell,index)=><td key={index}>{index===0?<strong>{cell}</strong>:index===config.columns.length-1?<span className={`moduleStatus ${saved[rowIndex]?"updated":cell}`}>{saved[rowIndex]?"已更新":cell}</span>:cell}</td>)}<td><div className="rowActions"><button onClick={()=>notify(`正在查看：${row[0]}`)}>查看</button><button onClick={()=>{setSaved(value=>({...value,[rowIndex]:true}));notify(`${config.entity}状态已更新`);}}>{active==="企业管理"&&row.at(-1)==="待审核"?"审核":"编辑"}</button><button>•••</button></div></td></tr>)}</tbody></table>{rows.length===0&&<div className="moduleEmpty">没有找到匹配记录</div>}</div>
       <div className="modulePager"><span>每页 20 条</span><button disabled>‹</button><button className="active">1</button><button>2</button><button>3</button><button>›</button></div>
     </article>
-    {modal&&<div className="moduleOverlay" onMouseDown={()=>setModal(false)}><section className="moduleModal" onMouseDown={event=>event.stopPropagation()}><header><div><h2>{config.primary}</h2></div><button onClick={()=>setModal(false)}>×</button></header><div className="moduleForm"><label><span>{config.entity}名称 *</span><input placeholder={`请输入${config.entity}名称`} /></label>{active==="协议管理"&&<label><span>签约企业 *</span><select defaultValue=""><option value="" disabled>请选择签约企业</option><option>山东高速集团有限公司</option><option>济南城市建设集团有限公司</option><option>山东能源集团有限公司</option><option>青岛海信网络科技股份有限公司</option></select></label>}<label className="wide"><span>说明与备注</span><textarea placeholder="请输入相关说明、业务范围或内部备注" /></label><label><span>生效日期</span><ChineseDateField /></label><label><span>状态</span><select><option>正常 / 启用</option><option>暂存草稿</option></select></label></div><footer><button onClick={()=>setModal(false)}>取消</button><button className="modulePrimary" onClick={()=>{setModal(false);notify(`${config.entity}已保存`);}}>保存并提交</button></footer></section></div>}
+    {modal&&<div className="moduleOverlay" onMouseDown={()=>setModal(false)}><section className="moduleModal" onMouseDown={event=>event.stopPropagation()}><header><div><h2>{config.primary}</h2></div><button onClick={()=>setModal(false)}>×</button></header><div className="moduleForm"><label><span>{config.entity}名称 *</span><input value={form.name} onChange={event=>setForm({...form,name:event.target.value})} placeholder={`请输入${config.entity}名称`} /></label>{active==="协议管理"&&<label><span>签约企业 *</span><select value={form.company} onChange={event=>setForm({...form,company:event.target.value})}><option value="" disabled>请选择签约企业</option><option>山东高速集团有限公司</option><option>济南城市建设集团有限公司</option><option>山东能源集团有限公司</option><option>青岛海信网络科技股份有限公司</option>{enterpriseRecords.map(enterprise=><option key={enterprise.id}>{enterprise.name}</option>)}</select></label>}{active==="商品管理"&&<label><span>销售价格 *</span><input type="number" min="0" value={form.price} onChange={event=>setForm({...form,price:event.target.value})} placeholder="请输入商品销售价格" /></label>}<label className="wide"><span>说明与备注</span><textarea value={form.description} onChange={event=>setForm({...form,description:event.target.value})} placeholder="请输入相关说明、业务范围或内部备注" /></label><label><span>生效日期</span><ChineseDateField value={form.effectiveDate} onChange={effectiveDate=>setForm({...form,effectiveDate})} /></label><label><span>状态</span><select value={form.status} onChange={event=>setForm({...form,status:event.target.value})}><option>正常 / 启用</option><option>暂存草稿</option></select></label></div><footer><button onClick={()=>setModal(false)}>取消</button><button className="modulePrimary" onClick={()=>void saveRecord()}>保存并提交</button></footer></section></div>}
   </>;
 }
 
-function ChineseDateField() {
-  const [value,setValue]=useState("2026-07-16");
+function ChineseDateField({value,onChange}:{value:string;onChange:(value:string)=>void}) {
   const [year,month,day]=value.split("-").map(Number);
-  return <div className="chineseDateField"><span>{year}年{month}月{day}日</span><i>日</i><input type="date" lang="zh-CN" value={value} onChange={event=>setValue(event.target.value)} aria-label="选择生效日期" /></div>;
+  return <div className="chineseDateField"><span>{year}年{month}月{day}日</span><i>日</i><input type="date" lang="zh-CN" value={value} onChange={event=>onChange(event.target.value)} aria-label="选择生效日期" /></div>;
+}
+
+function recordToRow(module:string,record:DemoRecord):string[]{
+  const date=record.effectiveDate?record.effectiveDate.split("-").map(Number):[];
+  const displayDate=date.length===3?`${date[0]}年${date[1]}月${date[2]}日`:"刚刚";
+  const code=record.id.slice(0,8).toUpperCase();
+  if(module==="商品管理") return [`SPU-${code}`,record.name,record.description||"自营商品",`¥${(record.price||0).toLocaleString("zh-CN")}`,"0","在售",displayDate];
+  if(module==="企业管理") return [record.name,"保存后生成","待补充","1","—","待完善",displayDate];
+  if(module==="协议管理") return [`AGR-${code}`,record.name,record.company||"—","0","¥0",displayDate,"待生效"];
+  if(module==="订单管理") return [`PO-${code}`,record.name,"—","¥0","待确认","待付款",displayDate];
+  if(module==="方案管理") return [`SOL-${code}`,record.name,record.description||"通用场景","0","¥0","0 / 0","草稿"];
+  if(module==="发票管理") return [`INV-${code}`,"—",record.name,"待补充","¥0",displayDate,"待处理"];
+  return [record.name,"平台内容","当前用户","0",displayDate,"草稿",displayDate];
 }
 
 function SystemSettings({ notify }: { notify:(message:string)=>void }) {

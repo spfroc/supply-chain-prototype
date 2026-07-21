@@ -8,3 +8,4 @@ prototype/.next/
 prototype/out/
 prototype/.wrangler/
 prototype/.git.generated-backup/
+.playwright-cli/

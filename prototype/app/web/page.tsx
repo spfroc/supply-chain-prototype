@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useBrowserRecords } from "../lib/browserDb";
 
 type ShopView = "home" | "products" | "zone" | "solutions" | "cart" | "mine";
 
@@ -21,19 +22,22 @@ const products = [
 const money = (value:number) => `¥${value.toLocaleString("zh-CN")}`;
 
 export default function WebShopPage() {
+  const { records } = useBrowserRecords("商品管理");
+  const { records: agreements } = useBrowserRecords("协议管理");
   const [view, setView] = useState<ShopView>("home");
   const [cart, setCart] = useState(3);
   const [query, setQuery] = useState("");
   const [notice, setNotice] = useState("");
-  const filtered = useMemo(() => products.filter((item) => `${item.name}${item.model}`.includes(query)), [query]);
+  const catalogProducts = useMemo(() => [...records.map((record,index)=>({name:record.name,model:record.description||"后台新建自营商品",icon:"新",price:record.price||0,market:Math.round((record.price||0)*1.15),color:["ice","mint","sand","lilac"][index%4],tag:"新建"})),...products], [records]);
+  const filtered = useMemo(() => catalogProducts.filter((item) => `${item.name}${item.model}`.includes(query)), [query,catalogProducts]);
   const notify = (text:string) => { setNotice(text); window.setTimeout(() => setNotice(""), 1800); };
   const add = () => { setCart((value) => value + 1); notify("已按企业协议价加入购物车"); };
 
   return <main className="shopWeb">
-    <div className="shopUtility"><div className="shopContainer"><span>您好，欢迎来到政企采购供应链平台</span><div><strong>山东高速数字科技</strong><i />协议有效至2027年6月30日<a href="../admin/">管理后台</a><button onClick={() => setView("mine")}>客户服务</button></div></div></div>
+    <div className="shopUtility"><div className="shopContainer"><span>您好，欢迎来到政企采购供应链平台</span><div><strong>山东高速数字科技</strong><i />{agreements[0]?`当前协议：${agreements[0].name}`:"协议有效至2027年6月30日"}<a href="../admin/">管理后台</a><button onClick={() => setView("mine")}>客户服务</button></div></div></div>
     <header className="shopHeader"><div className="shopContainer shopHeaderRow"><button className="shopLogo" onClick={() => setView("home")}><span>政</span><div><strong>政企采购供应链</strong><small>GOVERNMENT & ENTERPRISE PROCUREMENT</small></div></button><label className="shopSearch"><input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="搜索商品、品牌、型号..." /><button onClick={()=>setView("products")}>搜索</button><span>热门：复印纸　打印机　会议平板　办公椅</span></label><div className="shopHeaderActions"><button onClick={()=>setView("mine")}><i>◎</i><span>我的采购</span></button><button onClick={()=>setView("cart")}><i>▱</i><span>购物车</span><b>{cart}</b></button></div></div><nav className="shopNav"><div className="shopContainer"><button className="allCats" onClick={()=>setView("products")}><i>☰</i>全部商品分类</button>{[["home","首页"],["products","办公集采"],["zone","政采专区"],["solutions","场景方案"],["products","常购清单"],["products","企业福利"]].map(([id,label])=><button key={label} className={view===id?"active":""} onClick={()=>setView(id as ShopView)}>{label}</button>)}</div></nav></header>
 
-    {view === "home" && <ShopHome add={add} setView={setView} />}
+    {view === "home" && <ShopHome add={add} setView={setView} items={catalogProducts} />}
     {view === "products" && <ProductListing items={filtered} add={add} />}
     {view === "zone" && <ZonePage add={add} />}
     {view === "solutions" && <SolutionsPage />}
@@ -44,12 +48,12 @@ export default function WebShopPage() {
   </main>;
 }
 
-function ShopHome({ add, setView }: { add:()=>void; setView:(view:ShopView)=>void }) {
+function ShopHome({ add, setView, items }: { add:()=>void; setView:(view:ShopView)=>void; items:typeof products }) {
   return <><section className="shopHero"><div className="shopContainer heroLayout"><aside className="categoryMenu">{categories.map((category,index)=><button key={category}><span>{["纸","文","电","办","家","居","劳","工","数","食"][index]}</span>{category}<i>›</i></button>)}</aside><article className="shopBanner"><div className="bannerCopy"><span>2026 政企集采季</span><h1>办公采购<br /><em>一站配齐</em></h1><p>企业协议专属价格 · 自营正品保障 · 全国配送</p><button onClick={()=>setView("products")}>立即选购</button></div><div className="bannerProducts"><div className="bannerLaptop">💻</div><div className="bannerPrinter">🖨️</div><span>协议商品<br /><strong>128</strong> 款</span></div><div className="shopDots"><i className="active"/><i/><i/><i/></div></article><aside className="shopMember"><div className="memberHead"><div>鲁</div><strong>下午好，张经理</strong><span>山东高速数字科技</span></div><div className="memberAgreement"><span><i/>企业协议已生效</span><strong>专属价格已匹配</strong><small>有效期至2027年6月30日</small></div><div className="memberLinks"><button onClick={()=>setView("cart")}><i>▱</i>待结算<b>3</b></button><button onClick={()=>setView("mine")}><i>□</i>待收货<b>2</b></button><button><i>♡</i>常购<b>24</b></button></div><button className="contact">联系专属客户经理</button></aside></div></section>
   <section className="shopContainer platformStrip"><div className="stripTitle"><span>政采专区</span><small>主流采购平台价格参考</small></div>{[["国","国网专区","国家电网电子商务平台"],["军","军网专区","军队采购网商品专区"],["齐","齐鲁云采","山东省政府采购商城"],["铁","国铁商城","铁路物资采购平台"],["青","青慧采","青岛阳光采购平台"]].map((item,index)=><button key={item[1]} onClick={()=>setView("zone")}><i className={`platform${index}`}>{item[0]}</i><span><strong>{item[1]}</strong><small>{item[2]}</small></span><em>›</em></button>)}</section>
-  <section className="shopContainer shopSection"><div className="shopSectionTitle"><div><i></i><h2>企业常购</h2><span>高频采购 · 快速补货</span></div><button onClick={()=>setView("products")}>查看全部 ›</button></div><div className="shopProductGrid">{products.slice(0,5).map((product)=><ShopProduct key={product.name} product={product} add={add}/>)}</div></section>
+  <section className="shopContainer shopSection"><div className="shopSectionTitle"><div><i></i><h2>企业常购</h2><span>高频采购 · 快速补货</span></div><button onClick={()=>setView("products")}>查看全部 ›</button></div><div className="shopProductGrid">{items.slice(0,5).map((product)=><ShopProduct key={product.name} product={product} add={add}/>)}</div></section>
   <section className="shopContainer shopSection"><div className="shopSectionTitle"><div><i className="green"></i><h2>场景方案</h2><span>按需组合 · 整体交付</span></div><button onClick={()=>setView("solutions")}>全部方案 ›</button></div><div className="solutionShowcase">{[["智慧办公整体解决方案","办公设备 · 网络部署 · 安防监控","办公","blue"],["智能会议室改造方案","视频会议 · 显示设备 · 音频系统","会议","orange"],["园区安防监控部署方案","摄像头 · NVR · 综合布线","安防","purple"]].map(item=><article key={item[0]} className={item[3]}><div><span>SCENE SOLUTION</span><h3>{item[0]}</h3><p>{item[1]}</p><button onClick={()=>setView("solutions")}>查看方案 →</button></div><b>{item[2]}</b></article>)}</div></section>
-  <section className="shopContainer shopSection"><div className="shopSectionTitle"><div><i className="red"></i><h2>热门商品</h2><span>自营正品 · 协议低价</span></div><button onClick={()=>setView("products")}>更多商品 ›</button></div><div className="shopProductGrid">{products.slice(5,10).map((product)=><ShopProduct key={product.name} product={product} add={add}/>)}</div></section></>;
+  <section className="shopContainer shopSection"><div className="shopSectionTitle"><div><i className="red"></i><h2>热门商品</h2><span>自营正品 · 协议低价</span></div><button onClick={()=>setView("products")}>更多商品 ›</button></div><div className="shopProductGrid">{items.slice(5,10).map((product)=><ShopProduct key={product.name} product={product} add={add}/>)}</div></section></>;
 }
 
 function ShopProduct({ product, add }: { product:typeof products[number]; add:()=>void }) { return <article className="shopProduct"><div className={`shopProductImage ${product.color}`}><span>{product.tag}</span><b>{product.icon}</b><em>自营</em></div><div className="shopProductInfo"><h3>{product.name}</h3><p>{product.model}</p><div className="delivery"><span>现货</span>预计明日送达</div><div className="shopPrice"><span><small>协议价</small><strong>{money(product.price)}</strong><del>{money(product.market)}</del></span><button onClick={add}>＋</button></div></div></article>; }
