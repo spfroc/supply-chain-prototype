@@ -15,7 +15,11 @@ export type DemoRecord = {
   effectiveDate?: string;
   status?: string;
   price?: number;
+  data?: Record<string, string | number | boolean | string[]>;
+  rowData?: string[];
+  deleted?: boolean;
   createdAt: string;
+  updatedAt?: string;
 };
 
 function openDb(): Promise<IDBDatabase> {
@@ -59,6 +63,39 @@ export async function addDemoRecord(input: Omit<DemoRecord,"id"|"createdAt">): P
   channel.postMessage(input.module);
   channel.close();
   return record;
+}
+
+export async function saveDemoRecord(record: DemoRecord): Promise<DemoRecord> {
+  const saved={...record,updatedAt:new Date().toISOString()};
+  const db=await openDb();
+  await new Promise<void>((resolve,reject)=>{
+    const transaction=db.transaction(STORE_NAME,"readwrite");
+    transaction.objectStore(STORE_NAME).put(saved);
+    transaction.oncomplete=()=>resolve();
+    transaction.onerror=()=>reject(transaction.error);
+  });
+  db.close();
+  announce(saved.module);
+  return saved;
+}
+
+export async function deleteDemoRecord(record: DemoRecord): Promise<void> {
+  const db=await openDb();
+  await new Promise<void>((resolve,reject)=>{
+    const transaction=db.transaction(STORE_NAME,"readwrite");
+    transaction.objectStore(STORE_NAME).delete(record.id);
+    transaction.oncomplete=()=>resolve();
+    transaction.onerror=()=>reject(transaction.error);
+  });
+  db.close();
+  announce(record.module);
+}
+
+function announce(module:string){
+  window.dispatchEvent(new CustomEvent("demo-db-change",{detail:module}));
+  const channel=new BroadcastChannel(CHANNEL_NAME);
+  channel.postMessage(module);
+  channel.close();
 }
 
 export function useBrowserRecords(module: string) {
