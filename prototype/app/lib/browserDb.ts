@@ -15,7 +15,7 @@ export type DemoRecord = {
   effectiveDate?: string;
   status?: string;
   price?: number;
-  data?: Record<string, string | number | boolean | string[]>;
+  data?: Record<string, string | number | boolean | string[] | number[]>;
   rowData?: string[];
   deleted?: boolean;
   createdAt: string;
