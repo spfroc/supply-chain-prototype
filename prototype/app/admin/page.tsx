@@ -5,7 +5,8 @@ import { addDemoRecord, deleteDemoRecord, DemoRecord, saveDemoRecord, useBrowser
 
 const menus = [
   ["概", "经营概览"], ["商", "商品管理"], ["企", "企业管理"], ["协", "协议管理"],
-  ["单", "订单管理"], ["案", "方案管理"], ["台", "平台管理"], ["票", "发票管理"], ["文", "内容管理"], ["设", "系统设置"],
+  ["单", "订单管理"], ["案", "方案管理"], ["台", "平台管理"], ["票", "发票管理"], ["文", "内容管理"],
+  ["导", "导航栏管理"], ["轮", "首页轮播图"], ["设", "系统设置"],
 ];
 
 const orders = [
@@ -103,6 +104,18 @@ const moduleConfigs: Record<string, ModuleConfig> = {
     metrics:[["已发布文章","128","本月新增 12"],["草稿","6","待编辑"],["累计阅读","86,420","本月 +18%"],["导航入口","12","启用 10 个"]],
     columns:["文章标题","内容分类","作者","浏览量","发布时间","状态","更新时间"],
     rows:[["政企采购平台夏季办公集采活动正式启动","平台公告","运营中心","6,820","2026年7月18日","已发布","7月21日 14:32"],["企业协议采购下单操作指南","帮助中心","王运营","12,680","2026年7月12日","已发布","7月20日 16:08"],["办公设备采购常见问题解答","采购指南","李编辑","8,260","2026年7月8日","已发布","7月19日 11:20"],["关于线下银行转账付款的说明","平台公告","财务中心","9,860","2026年7月1日","已发布","7月18日 09:42"],["第三季度场景方案推荐专题","营销活动","赵运营","—","—","草稿","7月21日 13:16"]]
+  },
+  "导航栏管理": {
+    subtitle:"配置 Web 与 H5 客户端导航入口、跳转位置和显示顺序", entity:"导航", primary:"新增导航", tabs:["导航列表"],
+    metrics:[["导航入口","8","启用 7 个"],["Web导航","5","桌面客户端"],["H5导航","3","移动客户端"],["已停用","1","前端不展示"]],
+    columns:["导航名称","适用终端","跳转地址","排序","打开方式","状态"],
+    rows:[["首页","Web / H5","/web/","10","当前窗口","启用"],["办公集采","Web","/web/?view=products","20","当前窗口","启用"],["政采专区","Web","/web/?view=zone","30","当前窗口","启用"],["场景方案","Web / H5","/web/?view=solutions","40","当前窗口","启用"],["企业福利","Web","/web/?view=benefits","50","当前窗口","停用"]]
+  },
+  "首页轮播图": {
+    subtitle:"维护 Web 与 H5 首页焦点图、投放终端和跳转内容", entity:"轮播图", primary:"新增轮播图", tabs:["轮播图列表"],
+    metrics:[["轮播图","4","全部终端"],["展示中","3","前端可见"],["待投放","1","等待生效"],["累计点击","28,620","本月 +16%"]],
+    columns:["轮播标题","投放终端","图片","跳转地址","排序","状态"],
+    rows:[["2026政企集采季","Web / H5","首页集采横幅","/web/?view=products","10","启用"],["智慧办公解决方案","Web","办公方案横幅","/web/?view=solutions","20","启用"],["企业协议专属价格","H5","协议商品横幅","/h5/","30","启用"],["秋季办公焕新","Web / H5","待上传","/web/?view=products","40","待投放"]]
   }
 };
 
@@ -172,6 +185,8 @@ function getViewConfig(active:string,tab:string,base?:ModuleConfig){
   if(active==="内容管理"&&tab==="导航配置")return {...fallback,module:"导航管理",entity:"导航",primary:"新增导航",columns:["导航名称","跳转地址","排序","打开方式","状态"],rows:[["首页","/web/","10","当前窗口","启用"],["办公集采","/web/?view=products","20","当前窗口","启用"]],nameIndex:0};
   if(active==="内容管理"&&tab==="文章分类")return {...fallback,module:"文章分类",entity:"文章分类",primary:"新增文章分类",columns:["分类名称","文章数","排序","状态"],rows:[["平台公告","28","10","启用"],["帮助中心","36","20","启用"]],nameIndex:0};
   if(active==="内容管理"&&tab==="首页内容")return {...fallback,module:"轮播图管理",entity:"轮播图",primary:"新增轮播图",columns:["标题","图片","跳转地址","排序","状态"],rows:[["2026政企集采季","首页横幅","/web/?view=products","10","启用"]],nameIndex:0};
+  if(active==="导航栏管理")return {...fallback,module:"导航管理",nameIndex:0};
+  if(active==="首页轮播图")return {...fallback,module:"轮播图管理",nameIndex:0};
   return fallback;
 }
 function getFormFields(active:string,tab:string,enterprises:DemoRecord[]):FieldDef[]{
@@ -182,6 +197,8 @@ function getFormFields(active:string,tab:string,enterprises:DemoRecord[]):FieldD
   if(active==="平台管理")return [{key:"platform",label:"平台名称",required:true},{key:"platformType",label:"平台类型"},{key:"product",label:"关联商品"},{key:"price",label:"平台售价",type:"number"},{key:"link",label:"平台商品链接",wide:true},{key:"clicks",label:"点击量",type:"number"},{key:"status",label:"上架状态",type:"select",options:["已上架","已下架"]}];
   if(active==="内容管理"&&tab==="导航配置")return [{key:"name",label:"导航名称",required:true},{key:"link",label:"跳转地址"},{key:"sort",label:"排序",type:"number"},{key:"target",label:"打开方式",type:"select",options:["当前窗口","新窗口"]},{key:"status",label:"状态",type:"select",options:["启用","停用"]}];
   if(active==="内容管理"&&tab==="首页内容")return [{key:"title",label:"轮播图标题",required:true},{key:"image",label:"轮播图片",type:"image",wide:true},{key:"link",label:"跳转地址"},{key:"sort",label:"排序",type:"number"},{key:"status",label:"状态",type:"select",options:["启用","停用"]}];
+  if(active==="导航栏管理")return [{key:"name",label:"导航名称",required:true},{key:"terminal",label:"适用终端",type:"select",options:["Web / H5","Web","H5"]},{key:"link",label:"跳转地址",wide:true},{key:"sort",label:"排序",type:"number"},{key:"target",label:"打开方式",type:"select",options:["当前窗口","新窗口"]},{key:"status",label:"状态",type:"select",options:["启用","停用"]}];
+  if(active==="首页轮播图")return [{key:"title",label:"轮播图标题",required:true,wide:true},{key:"terminal",label:"投放终端",type:"select",options:["Web / H5","Web","H5"]},{key:"image",label:"轮播图片",type:"image",wide:true},{key:"link",label:"跳转地址",wide:true},{key:"sort",label:"排序",type:"number"},{key:"status",label:"状态",type:"select",options:["启用","待投放","停用"]}];
   if(active==="企业管理")return [{key:"name",label:"企业名称",required:true},{key:"creditCode",label:"统一社会信用代码"},{key:"contact",label:"联系人"},{key:"phone",label:"联系电话"},{key:"address",label:"企业地址",wide:true},{key:"status",label:"企业状态",type:"select",options:["已认证","待审核","已停用"]}];
   if(active==="协议管理")return [{key:"name",label:"协议名称",required:true},{key:"company",label:"签约企业",type:"select",options:["山东高速集团有限公司","济南城市建设集团有限公司","山东能源集团有限公司",...enterprises.map(item=>item.name)]},{key:"amount",label:"协议金额",type:"number"},{key:"effectiveDate",label:"生效日期",type:"date"},{key:"endDate",label:"结束日期",type:"date"},{key:"description",label:"协议说明",type:"textarea",wide:true},{key:"status",label:"状态",type:"select",options:["生效中","待生效","已停用"]}];
   if(active==="方案管理")return [{key:"name",label:"方案名称",required:true},{key:"scene",label:"适用场景"},{key:"cover",label:"方案封面",type:"image"},{key:"price",label:"方案价格",type:"number"},{key:"description",label:"方案简介",type:"textarea",wide:true},{key:"detail",label:"方案详情",type:"textarea",wide:true},{key:"status",label:"状态",type:"select",options:["已上架","草稿","已下架"]}];
@@ -195,8 +212,8 @@ function DynamicField({field,value,setValue}:{field:FieldDef;value:string;setVal
   const upload=(file?:File)=>{if(!file)return;const reader=new FileReader();reader.onload=()=>setValue(String(reader.result));reader.readAsDataURL(file);};
   return <label className={field.wide?"wide":""}><span>{field.label}{field.required?" *":""}</span>{field.type==="textarea"?<textarea value={value} onChange={event=>setValue(event.target.value)} placeholder={`请输入${field.label}`}/>:field.type==="select"?<select value={value} onChange={event=>setValue(event.target.value)}>{field.options?.map(option=><option key={option}>{option}</option>)}</select>:field.type==="date"?<ChineseDateField value={value||"2026-07-23"} onChange={setValue}/>:field.type==="image"?<div className="imageUploader"><input value={value.startsWith("data:")?"已选择本地图片":value} onChange={event=>setValue(event.target.value)} placeholder="输入图片地址或选择本地图片"/><input type="file" accept="image/*" onChange={event=>upload(event.target.files?.[0])}/>{value&&<b style={{backgroundImage:`url(${value})`}}/>}</div>:<input type={field.type==="number"?"number":"text"} value={value} onChange={event=>setValue(event.target.value)} placeholder={`请输入${field.label}`}/>}</label>;
 }
-function formFromItem(active:string,tab:string,item:RowItem,fields:FieldDef[]):AdminForm{const values=defaultForm(fields);const data=item.record?.data??{};for(const field of fields)if(data[field.key]!==undefined)values[field.key]=String(data[field.key]);const index=active==="商品管理"&&tab==="商品列表"?1:active==="协议管理"?1:0;values.name=String(data.name??item.row[index]??"");if(values.title!==undefined)values.title=item.row[0];if(values.platform!==undefined)values.platform=item.row[0];return values;}
-function applyFormToRow(active:string,tab:string,row:string[],form:AdminForm){const next=[...row];const index=active==="商品管理"&&tab==="商品列表"?1:active==="协议管理"?1:0;next[index]=form.name||form.title||form.platform||next[index];if(form.status)next[next.length-1]=form.status;if(active==="商品管理"&&tab==="商品列表"){next[2]=[form.category,form.brand].filter(Boolean).join(" / ")||next[2];next[3]=`¥${Number(form.price||0).toLocaleString("zh-CN")}`;next[4]=form.stock||next[4];}return next;}
+function formFromItem(active:string,tab:string,item:RowItem,fields:FieldDef[]):AdminForm{const values=defaultForm(fields);const data=item.record?.data??{};for(const field of fields)if(data[field.key]!==undefined)values[field.key]=String(data[field.key]);const index=active==="商品管理"&&tab==="商品列表"?1:active==="协议管理"?1:0;values.name=String(data.name??item.row[index]??"");if(values.title!==undefined)values.title=item.row[0];if(values.platform!==undefined)values.platform=item.row[0];if(active==="导航栏管理"&&!item.record){values.terminal=item.row[1];values.link=item.row[2];values.sort=item.row[3];values.target=item.row[4];values.status=item.row[5];}if(active==="首页轮播图"&&!item.record){values.terminal=item.row[1];values.link=item.row[3];values.sort=item.row[4];values.status=item.row[5];}return values;}
+function applyFormToRow(active:string,tab:string,row:string[],form:AdminForm){const next=[...row];const index=active==="商品管理"&&tab==="商品列表"?1:active==="协议管理"?1:0;next[index]=form.name||form.title||form.platform||next[index];if(form.status)next[next.length-1]=form.status;if(active==="商品管理"&&tab==="商品列表"){next[2]=[form.category,form.brand].filter(Boolean).join(" / ")||next[2];next[3]=`¥${Number(form.price||0).toLocaleString("zh-CN")}`;next[4]=form.stock||next[4];}if(active==="导航栏管理"){next[1]=form.terminal||next[1];next[2]=form.link||next[2];next[3]=form.sort||next[3];next[4]=form.target||next[4];}if(active==="首页轮播图"){next[1]=form.terminal||next[1];next[2]=form.image?"已上传":next[2];next[3]=form.link||next[3];next[4]=form.sort||next[4];}return next;}
 
 function recordToRow(module:string,record:DemoRecord,columns?:string[]):string[]{
   const date=record.effectiveDate?record.effectiveDate.split("-").map(Number):[];
@@ -209,8 +226,8 @@ function recordToRow(module:string,record:DemoRecord,columns?:string[]):string[]
   if(module==="商品规格")return [record.name,String(data.values||"—"),String(data.category||"—"),String(data.sort||0),record.status||"启用"];
   if(module==="平台管理")return [String(data.platform||record.name),String(data.platformType||"—"),String(data.product||"—"),`¥${Number(record.price||0).toLocaleString("zh-CN")}`,String(data.link||"—"),String(data.clicks||0),record.status||"已上架"];
   if(module==="平台商品关联")return [String(data.platform||record.name),String(data.product||"—"),`¥${Number(record.price||0).toLocaleString("zh-CN")}`,String(data.link||"—"),String(data.clicks||0),record.status||"已上架"];
-  if(module==="导航管理")return [record.name,String(data.link||"/"),String(data.sort||0),String(data.target||"当前窗口"),record.status||"启用"];
-  if(module==="轮播图管理")return [record.name,data.image?"已上传":"—",String(data.link||"/"),String(data.sort||0),record.status||"启用"];
+  if(module==="导航管理")return columns?.length===6?[record.name,String(data.terminal||"Web / H5"),String(data.link||"/"),String(data.sort||0),String(data.target||"当前窗口"),record.status||"启用"]:[record.name,String(data.link||"/"),String(data.sort||0),String(data.target||"当前窗口"),record.status||"启用"];
+  if(module==="轮播图管理")return columns?.length===6?[record.name,String(data.terminal||"Web / H5"),data.image?"已上传":"—",String(data.link||"/"),String(data.sort||0),record.status||"启用"]:[record.name,data.image?"已上传":"—",String(data.link||"/"),String(data.sort||0),record.status||"启用"];
   if(module==="企业管理") return [record.name,"保存后生成","待补充","1","—","待完善",displayDate];
   if(module==="协议管理") return [`AGR-${code}`,record.name,record.company||"—","0","¥0",displayDate,"待生效"];
   if(module==="订单管理") return [`PO-${code}`,record.name,"—","¥0","待确认","待付款",displayDate];
