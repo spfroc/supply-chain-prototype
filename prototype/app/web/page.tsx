@@ -20,11 +20,26 @@ const products = [
 ];
 
 const money = (value:number) => `¥${value.toLocaleString("zh-CN")}`;
+const defaultNavigation=[
+  {name:"首页",terminal:"Web / H5",link:"/web/",sort:10,target:"当前窗口",status:"启用"},
+  {name:"办公集采",terminal:"Web",link:"/web/?view=products",sort:20,target:"当前窗口",status:"启用"},
+  {name:"政采专区",terminal:"Web",link:"/web/?view=zone",sort:30,target:"当前窗口",status:"启用"},
+  {name:"场景方案",terminal:"Web / H5",link:"/web/?view=solutions",sort:40,target:"当前窗口",status:"启用"},
+  {name:"企业福利",terminal:"Web",link:"/web/?view=benefits",sort:50,target:"当前窗口",status:"停用"},
+];
+
+function navigationView(link:string):ShopView|undefined {
+  if(link.includes("view=products")||link.includes("view=benefits"))return "products";
+  if(link.includes("view=zone"))return "zone";
+  if(link.includes("view=solutions"))return "solutions";
+  if(link.endsWith("/web/")||link==="/web/"||link==="/")return "home";
+}
 
 export default function WebShopPage() {
   const { records } = useBrowserRecords("商品管理");
   const { records: agreements } = useBrowserRecords("协议管理");
   const { records: categoryRecords } = useBrowserRecords("商品分类");
+  const { records: navigationRecords } = useBrowserRecords("导航管理");
   const [view, setView] = useState<ShopView>("home");
   const [cart, setCart] = useState(6);
   const [checkoutData,setCheckoutData]=useState({count:6,total:13420.8});
@@ -35,12 +50,18 @@ export default function WebShopPage() {
   const catalogProducts = useMemo(() => [...records.map((record,index)=>({name:record.name,model:record.description||"后台新建自营商品",icon:"新",price:record.price||0,market:Math.round((record.price||0)*1.15),color:["ice","mint","sand","lilac"][index%4],tag:"新建"})),...products], [records]);
   const clientCategories=[...categoryRecords.map(record=>record.name),...categories].filter((item,index,array)=>array.indexOf(item)===index);
   const filtered = useMemo(() => catalogProducts.filter((item) => `${item.name}${item.model}`.includes(query)), [query,catalogProducts]);
+  const webNavigation=useMemo(()=>{
+    const overrides=new Map(navigationRecords.filter(record=>record.id.startsWith("seed:")).map(record=>[Number(record.data?.seed),record]));
+    const seeded=defaultNavigation.map((item,index)=>{const record=overrides.get(index);return record?.deleted?null:record?{name:record.name,terminal:String(record.data?.terminal||record.rowData?.[1]||item.terminal),link:String(record.data?.link||record.rowData?.[2]||item.link),sort:Number(record.data?.sort||record.rowData?.[3]||item.sort),target:String(record.data?.target||record.rowData?.[4]||item.target),status:record.status||record.rowData?.[5]||item.status}:item;}).filter(Boolean) as typeof defaultNavigation;
+    const created=navigationRecords.filter(record=>!record.id.startsWith("seed:")&&!record.deleted).map(record=>({name:record.name,terminal:String(record.data?.terminal||"Web / H5"),link:String(record.data?.link||"/web/"),sort:Number(record.data?.sort||0),target:String(record.data?.target||"当前窗口"),status:record.status||"启用"}));
+    return [...created,...seeded].filter(item=>item.status==="启用"&&item.terminal.includes("Web")).sort((a,b)=>a.sort-b.sort);
+  },[navigationRecords]);
   const notify = (text:string) => { setNotice(text); window.setTimeout(() => setNotice(""), 1800); };
   const add = () => { setCart((value) => value + 1); notify("已按企业协议价加入购物车"); };
 
   return <main className="shopWeb">
     <div className="shopUtility"><div className="shopContainer"><span>您好，欢迎来到政企采购供应链平台</span><div><strong>山东高速数字科技</strong><i />{agreements[0]?`当前协议：${agreements[0].name}`:"协议有效至2027年6月30日"}<a href="../admin/">管理后台</a></div></div></div>
-    <header className="shopHeader"><div className="shopContainer shopHeaderRow"><button className="shopLogo" onClick={() => setView("home")}><span>政</span><div><strong>政企采购供应链</strong><small>GOVERNMENT & ENTERPRISE PROCUREMENT</small></div></button><label className="shopSearch"><input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="搜索商品、品牌、型号..." /><button onClick={()=>setView("products")}>搜索</button><span>热门：复印纸　打印机　会议平板　办公椅</span></label><div className="shopHeaderActions"><button onClick={()=>setView("mine")}><i>◎</i><span>我的采购</span></button><button onClick={()=>setView("cart")}><i>▱</i><span>购物车</span><b>{cart}</b></button></div></div><nav className="shopNav"><div className="shopContainer"><button className="allCats" onClick={()=>setView("products")}><i>☰</i>全部商品分类</button>{[["home","首页"],["products","办公集采"],["zone","政采专区"],["solutions","场景方案"],["products","企业福利"]].map(([id,label])=><button key={label} className={view===id?"active":""} onClick={()=>setView(id as ShopView)}>{label}</button>)}</div></nav></header>
+    <header className="shopHeader"><div className="shopContainer shopHeaderRow"><button className="shopLogo" onClick={() => setView("home")}><span>政</span><div><strong>政企采购供应链</strong><small>GOVERNMENT & ENTERPRISE PROCUREMENT</small></div></button><label className="shopSearch"><input value={query} onChange={(event)=>setQuery(event.target.value)} placeholder="搜索商品、品牌、型号..." /><button onClick={()=>setView("products")}>搜索</button><span>热门：复印纸　打印机　会议平板　办公椅</span></label><div className="shopHeaderActions"><button onClick={()=>setView("mine")}><i>◎</i><span>我的采购</span></button><button onClick={()=>setView("cart")}><i>▱</i><span>购物车</span><b>{cart}</b></button></div></div><nav className="shopNav"><div className="shopContainer"><button className="allCats" onClick={()=>setView("products")}><i>☰</i>全部商品分类</button>{webNavigation.map(item=>{const targetView=navigationView(item.link);return <button key={`${item.name}-${item.sort}`} className={targetView===view?"active":""} onClick={()=>{if(item.target==="新窗口")window.open(item.link,"_blank","noopener,noreferrer");else if(targetView)setView(targetView);else window.location.href=item.link;}}>{item.name}</button>;})}</div></nav></header>
 
     {view === "home" && <ShopHome add={add} setView={setView} items={catalogProducts} categories={clientCategories} openProduct={product=>{setSelectedProduct(product);setView("productDetail");}} />}
     {view === "products" && <ProductListing items={filtered} categories={clientCategories} add={add} openProduct={product=>{setSelectedProduct(product);setView("productDetail");}} />}
