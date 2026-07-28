@@ -1,0 +1,43 @@
+spring:
+  application:
+    name: supply-chain-api
+  datasource:
+    url: ${DB_URL:jdbc:mysql://localhost:3306/supply_chain?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai}
+    username: ${DB_USERNAME:supply_chain}
+    password: ${DB_PASSWORD:supply_chain}
+    hikari:
+      maximum-pool-size: 20
+      minimum-idle: 2
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate.jdbc.time_zone: Asia/Shanghai
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+server:
+  port: 8080
+  forward-headers-strategy: framework
+  shutdown: graceful
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: always
+springdoc:
+  swagger-ui:
+    path: /api/docs
+  api-docs:
+    path: /api/openapi

@@ -1,0 +1,13 @@
+{
+  "name": "@supply-chain/frontend",
+  "private": true,
+  "packageManager": "pnpm@10.20.0",
+  "scripts": {
+    "build": "pnpm --filter @supply-chain/admin --filter @supply-chain/web --filter @supply-chain/h5 build"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "5.0.4",
+    "typescript": "5.9.3",
+    "vite": "7.2.2"
+  }
+}
