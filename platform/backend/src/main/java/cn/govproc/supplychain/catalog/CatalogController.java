@@ -30,8 +30,10 @@ public class CatalogController {
     @GetMapping("/products")
     List<ProductSummary> products(@RequestParam(required = false) Long enterpriseId) {
         return jdbc.sql("""
-            SELECT s.id AS sku_id, p.spu_code, s.sku_code, p.title, p.main_image,
-                   p.summary, s.market_price, s.member_price, s.stock - s.reserved_stock AS available_stock,
+            SELECT s.id AS sku_id, p.spu_code, s.sku_code, p.title, p.main_image,p.category_id,
+                   JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')) AS gallery,
+                   JSON_UNQUOTE(JSON_EXTRACT(p.attributes_json,'$.content')) AS attributes,
+                   p.summary,p.detail_html, s.market_price, s.member_price, s.stock - s.reserved_stock AS available_stock,
                    ai.agreement_price
             FROM product_sku s
             JOIN product_spu p ON p.id = s.spu_id AND p.deleted_at IS NULL
@@ -43,14 +45,16 @@ public class CatalogController {
             ORDER BY p.id DESC
             """).param("enterpriseId", enterpriseId).query((rs, n) -> new ProductSummary(
                 rs.getLong("sku_id"), rs.getString("spu_code"), rs.getString("sku_code"),
-                rs.getString("title"), rs.getString("main_image"), rs.getString("summary"),
+                rs.getString("title"), rs.getString("main_image"),rs.getString("gallery"),
+                rs.getString("attributes"),rs.getString("summary"),rs.getString("detail_html"),rs.getLong("category_id"),
                 rs.getBigDecimal("market_price"), rs.getBigDecimal("member_price"),
                 rs.getBigDecimal("agreement_price"), rs.getInt("available_stock")
             )).list();
     }
 
     public record ProductSummary(
-        long skuId, String spuCode, String skuCode, String title, String mainImage, String summary,
+        long skuId, String spuCode, String skuCode, String title, String mainImage,String gallery,
+        String attributes,String summary,String detailHtml,long categoryId,
         BigDecimal marketPrice, BigDecimal memberPrice, BigDecimal agreementPrice, int availableStock
     ) {}
 }

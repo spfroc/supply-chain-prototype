@@ -174,12 +174,34 @@ Case "SYS-CONFIG-001" "基本配置可修改、读取并恢复" {
   } $adminHeaders) @(200,204)
 }
 
+# ---------- 商品分类 ----------
+$categoryLevel1=$null
+$categoryLevel2=$null
+$categoryLevel3=$null
+Case "BIZ-CAT-001" "新增三级分类并保持正确父子关系" {
+  Expect-Status (Invoke-Api POST "/api/admin/business/categories" @{name="QA-L1-$stamp";parentId=$null;level=1;sortOrder=90;icon="测";status=1} $adminHeaders) @(201)
+  $script:categoryLevel1=[long]((Invoke-Api GET "/api/admin/business/categories" $null $adminHeaders).Data|Where-Object name -eq "QA-L1-$stamp"|Select-Object -First 1).id
+  Expect-Status (Invoke-Api POST "/api/admin/business/categories" @{name="QA-L2-$stamp";parentId=$script:categoryLevel1;level=2;sortOrder=91;icon="";status=1} $adminHeaders) @(201)
+  $script:categoryLevel2=[long]((Invoke-Api GET "/api/admin/business/categories" $null $adminHeaders).Data|Where-Object name -eq "QA-L2-$stamp"|Select-Object -First 1).id
+  Expect-Status (Invoke-Api POST "/api/admin/business/categories" @{name="QA-L3-$stamp";parentId=$script:categoryLevel2;level=3;sortOrder=92;icon="";status=1} $adminHeaders) @(201)
+  $script:categoryLevel3=[long]((Invoke-Api GET "/api/admin/business/categories" $null $adminHeaders).Data|Where-Object name -eq "QA-L3-$stamp"|Select-Object -First 1).id
+  if(!$script:categoryLevel3){throw "三级分类未保存"}
+}
+Case "BIZ-CAT-002" "分类父级级别不匹配时拒绝保存" {
+  Expect-Status (Invoke-Api POST "/api/admin/business/categories" @{name="INVALID-$stamp";parentId=$script:categoryLevel1;level=3;sortOrder=0;icon="";status=1} $adminHeaders) @(400)
+}
+Case "BIZ-CAT-003" "存在子分类时禁止删除父分类" {
+  Expect-Status (Invoke-Api DELETE "/api/admin/business/categories/$($script:categoryLevel1)" $null $adminHeaders) @(400)
+}
+
 # ---------- 商品 ----------
 $productTitle = "QA-PRODUCT-$stamp"
 $productId = $null
 $skuId = $null
 $validProduct = @{
-  title=$productTitle; categoryId=3; brandId=1; summary="QA-SUMMARY"; spec="QA-SPEC";
+  title=$productTitle; categoryId=$script:categoryLevel3; brandId=1; summary="QA-SUMMARY"; spec="QA-SPEC";
+  mainImage="https://example.com/main.jpg"; gallery="https://example.com/1.jpg`nhttps://example.com/2.jpg";
+  attributes="颜色：黑色；保修：三年"; detailHtml="<p>QA 商品详情</p>";
   marketPrice=999.00; memberPrice=899.00; stock=20; status=1
 }
 Case "BIZ-PROD-001" "新增商品并保存标题、价格、规格和库存" {
@@ -189,7 +211,7 @@ Case "BIZ-PROD-001" "新增商品并保存标题、价格、规格和库存" {
   $saved = (Invoke-Api GET "/api/admin/business/products" $null $adminHeaders).Data |
     Where-Object id -eq $script:productId | Select-Object -First 1
   $script:skuId = [long]$saved.skuId
-  if (!$saved -or $saved.title -ne $productTitle -or [decimal]$saved.memberPrice -ne 899 -or $saved.stock -ne 20) {
+  if (!$saved -or $saved.title -ne $productTitle -or [decimal]$saved.memberPrice -ne 899 -or $saved.stock -ne 20 -or $saved.mainImage -ne "https://example.com/main.jpg" -or $saved.detailHtml -notmatch "QA") {
     throw "商品字段保存不完整"
   }
 }
@@ -426,6 +448,9 @@ Case "CLEAN-001" "清理协议、企业和商品测试数据" {
   if ($script:agreement2) { Expect-Status (Invoke-Api DELETE "/api/admin/business/agreements/$($script:agreement2)" $null $adminHeaders) @(200,204) }
   if ($script:enterpriseId) { Expect-Status (Invoke-Api DELETE "/api/admin/business/enterprises/$($script:enterpriseId)" $null $adminHeaders) @(200,204) }
   if ($script:productId) { Expect-Status (Invoke-Api DELETE "/api/admin/business/products/$($script:productId)" $null $adminHeaders) @(200,204) }
+  if ($script:categoryLevel3) { Expect-Status (Invoke-Api DELETE "/api/admin/business/categories/$($script:categoryLevel3)" $null $adminHeaders) @(200,204) }
+  if ($script:categoryLevel2) { Expect-Status (Invoke-Api DELETE "/api/admin/business/categories/$($script:categoryLevel2)" $null $adminHeaders) @(200,204) }
+  if ($script:categoryLevel1) { Expect-Status (Invoke-Api DELETE "/api/admin/business/categories/$($script:categoryLevel1)" $null $adminHeaders) @(200,204) }
 }
 
 Write-Host "`n详细回归测试完成：通过 $script:Passed，失败 $script:Failed"

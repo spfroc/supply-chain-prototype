@@ -30,7 +30,10 @@ public class AdminBusinessController {
     @GetMapping("/products")
     List<Map<String,Object>> products() {
         return jdbc.sql("""
-          SELECT p.id,p.spu_code AS spuCode,p.title,p.summary,p.category_id AS categoryId,p.brand_id AS brandId,
+          SELECT p.id,p.spu_code AS spuCode,p.title,p.summary,p.main_image AS mainImage,
+            JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')) AS gallery,
+            JSON_UNQUOTE(JSON_EXTRACT(p.attributes_json,'$.content')) AS attributes,
+            p.detail_html AS detailHtml,p.category_id AS categoryId,p.brand_id AS brandId,
             p.status,s.id AS skuId,s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
             s.stock,s.reserved_stock AS reservedStock,DATE_FORMAT(p.updated_at,'%Y-%m-%d %H:%i:%s') AS updatedAt
           FROM product_spu p JOIN product_sku s ON s.spu_id=p.id AND s.deleted_at IS NULL
@@ -44,11 +47,14 @@ public class AdminBusinessController {
           +"-"+UUID.randomUUID().toString().substring(0,8);
         String spuCode="SPU-"+suffix, skuCode="SKU-"+suffix;
         jdbc.sql("""
-          INSERT INTO product_spu(spu_code,title,category_id,brand_id,summary,status)
-          VALUES(:code,:title,:categoryId,:brandId,:summary,:status)
+          INSERT INTO product_spu(spu_code,title,category_id,brand_id,main_image,gallery_json,attributes_json,
+            summary,detail_html,status)
+          VALUES(:code,:title,:categoryId,:brandId,:mainImage,JSON_OBJECT('content',:gallery),
+            JSON_OBJECT('content',:attributes),:summary,:detailHtml,:status)
           """)
           .params(Map.of("code",spuCode,"title",r.title(),"categoryId",r.categoryId(),"brandId",r.brandId(),
-            "summary",value(r.summary()),"status",r.status())).update();
+            "mainImage",value(r.mainImage()),"gallery",value(r.gallery()),"attributes",value(r.attributes()),
+            "summary",value(r.summary()),"detailHtml",value(r.detailHtml()),"status",r.status())).update();
         long id=jdbc.sql("SELECT id FROM product_spu WHERE spu_code=:code").param("code",spuCode).query(Long.class).single();
         jdbc.sql("""
           INSERT INTO product_sku(spu_id,sku_code,spec_json,market_price,member_price,stock,status)
@@ -63,10 +69,14 @@ public class AdminBusinessController {
     void updateProduct(@PathVariable long id,@Valid @RequestBody ProductRequest r) {
         require(jdbc.sql("""
           UPDATE product_spu SET title=:title,category_id=:categoryId,brand_id=:brandId,
-          summary=:summary,status=:status WHERE id=:id AND deleted_at IS NULL
+          main_image=:mainImage,gallery_json=JSON_OBJECT('content',:gallery),
+          attributes_json=JSON_OBJECT('content',:attributes),summary=:summary,detail_html=:detailHtml,
+          status=:status WHERE id=:id AND deleted_at IS NULL
           """)
-          .params(Map.of("id",id,"title",r.title(),"categoryId",r.categoryId(),"brandId",r.brandId(),
-            "summary",value(r.summary()),"status",r.status())).update(),"商品不存在");
+          .param("id",id).param("title",r.title()).param("categoryId",r.categoryId()).param("brandId",r.brandId())
+          .param("mainImage",value(r.mainImage())).param("gallery",value(r.gallery()))
+          .param("attributes",value(r.attributes())).param("summary",value(r.summary()))
+          .param("detailHtml",value(r.detailHtml())).param("status",r.status()).update(),"商品不存在");
         jdbc.sql("""
           UPDATE product_sku SET spec_json=JSON_OBJECT('规格',:spec),market_price=:marketPrice,
           member_price=:memberPrice,stock=:stock,status=:status WHERE spu_id=:id AND deleted_at IS NULL
@@ -97,6 +107,51 @@ public class AdminBusinessController {
         require(jdbc.sql("UPDATE product_spu SET deleted_at=NOW(),status=2 WHERE id=:id AND deleted_at IS NULL")
           .param("id",id).update(),"商品不存在");
         jdbc.sql("UPDATE product_sku SET deleted_at=NOW(),status=0 WHERE spu_id=:id AND deleted_at IS NULL").param("id",id).update();
+    }
+
+    @GetMapping("/categories")
+    List<Map<String,Object>> categories() {
+        return jdbc.sql("""
+          SELECT c.id,c.name,c.parent_id AS parentId,p.name AS parentName,c.level,c.sort_order AS sortOrder,
+            c.icon,c.status,COUNT(DISTINCT child.id) AS childCount,COUNT(DISTINCT product.id) AS productCount
+          FROM category c LEFT JOIN category p ON p.id=c.parent_id
+          LEFT JOIN category child ON child.parent_id=c.id AND child.deleted_at IS NULL
+          LEFT JOIN product_spu product ON product.category_id=c.id AND product.deleted_at IS NULL
+          WHERE c.deleted_at IS NULL GROUP BY c.id ORDER BY c.level,c.sort_order,c.id
+          """).query().listOfRows();
+    }
+
+    @PostMapping("/categories") @ResponseStatus(HttpStatus.CREATED)
+    void createCategory(@Valid @RequestBody CategoryRequest r) {
+        validateCategoryParent(null,r.parentId(),r.level());
+        jdbc.sql("""
+          INSERT INTO category(name,parent_id,level,sort_order,icon,status)
+          VALUES(:name,:parentId,:level,:sortOrder,:icon,:status)
+          """).param("name",r.name()).param("parentId",r.parentId()).param("level",r.level())
+          .param("sortOrder",r.sortOrder()).param("icon",value(r.icon())).param("status",r.status()).update();
+    }
+
+    @PutMapping("/categories/{id}")
+    void updateCategory(@PathVariable long id,@Valid @RequestBody CategoryRequest r) {
+        validateCategoryParent(id,r.parentId(),r.level());
+        require(jdbc.sql("""
+          UPDATE category SET name=:name,parent_id=:parentId,level=:level,sort_order=:sortOrder,
+            icon=:icon,status=:status WHERE id=:id AND deleted_at IS NULL
+          """).param("id",id).param("name",r.name()).param("parentId",r.parentId()).param("level",r.level())
+          .param("sortOrder",r.sortOrder()).param("icon",value(r.icon())).param("status",r.status()).update(),
+          "分类不存在");
+    }
+
+    @DeleteMapping("/categories/{id}") @ResponseStatus(HttpStatus.NO_CONTENT)
+    void deleteCategory(@PathVariable long id) {
+        long children=jdbc.sql("SELECT COUNT(*) FROM category WHERE parent_id=:id AND deleted_at IS NULL")
+          .param("id",id).query(Long.class).single();
+        long products=jdbc.sql("SELECT COUNT(*) FROM product_spu WHERE category_id=:id AND deleted_at IS NULL")
+          .param("id",id).query(Long.class).single();
+        if(children>0) throw new IllegalArgumentException("分类下存在子分类，不能删除");
+        if(products>0) throw new IllegalArgumentException("分类已关联商品，不能删除");
+        require(jdbc.sql("UPDATE category SET deleted_at=NOW(),status=0 WHERE id=:id AND deleted_at IS NULL")
+          .param("id",id).update(),"分类不存在");
     }
 
     @GetMapping("/enterprises")
@@ -282,14 +337,29 @@ public class AdminBusinessController {
 
     private static String value(String s){return s==null?"":s;}
     private static void require(int n,String message){if(n==0)throw new IllegalArgumentException(message);}
+    private void validateCategoryParent(Long id,Long parentId,int level) {
+        if(level<1||level>3) throw new IllegalArgumentException("分类级别必须为1至3级");
+        if(level==1&&parentId!=null) throw new IllegalArgumentException("一级分类不能设置上级分类");
+        if(level>1&&parentId==null) throw new IllegalArgumentException("二级或三级分类必须选择上级分类");
+        if(id!=null&&id.equals(parentId)) throw new IllegalArgumentException("分类不能选择自身为上级");
+        if(parentId!=null) {
+            int parentLevel=jdbc.sql("SELECT level FROM category WHERE id=:id AND deleted_at IS NULL")
+              .param("id",parentId).query(Integer.class).optional()
+              .orElseThrow(()->new IllegalArgumentException("上级分类不存在"));
+            if(parentLevel!=level-1) throw new IllegalArgumentException("上级分类级别不正确");
+        }
+    }
     private static void validatePassword(String password,boolean required) {
         if(required&&(password==null||password.isBlank()))
             throw new IllegalArgumentException("初始密码不能为空");
         if(password!=null&&!password.isBlank()&&(password.length()<8||password.length()>72))
             throw new IllegalArgumentException("密码长度必须为8至72位");
     }
-    public record ProductRequest(@NotBlank String title,@NotNull Long categoryId,@NotNull Long brandId,String summary,String spec,
+    public record ProductRequest(@NotBlank String title,@NotNull Long categoryId,@NotNull Long brandId,
+      String mainImage,String gallery,String attributes,String summary,String detailHtml,String spec,
       @NotNull @DecimalMin("0") BigDecimal marketPrice,@NotNull @DecimalMin("0") BigDecimal memberPrice,@Min(0) int stock,int status){}
+    public record CategoryRequest(@NotBlank String name,Long parentId,@Min(1) int level,
+      @Min(0) int sortOrder,String icon,int status){}
     public record EnterpriseRequest(@NotBlank String name,@NotBlank String creditCode,@NotBlank String contactName,
       @NotBlank String contactPhone,String address,int status){}
     public record EnterpriseMemberRequest(@NotBlank String username,@NotBlank String realName,

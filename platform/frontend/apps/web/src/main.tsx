@@ -70,7 +70,7 @@ function Products({products,open,add}:{products:Row[];open:(r:Row)=>void;add:(r:
 }
 
 function ProductCard({product,index,open,add}:{product:Row;index:number;open:(r:Row)=>void;add:(r:Row)=>void}){
-  return <article className="product-card" onClick={()=>open(product)}><div className={`product-image p${index%5}`}><span>自营</span><i>{["💻","📄","🖨️","🖥️","📦"][index%5]}</i><em>协议专享</em></div><div className="product-info"><small>企业协议商品</small><h3>{product.title}</h3><p>{product.summary||"政企采购自营商品，全国配送"}</p><div className="price"><strong>{money(product.agreementPrice||product.memberPrice)}</strong><del>{money(product.marketPrice)}</del></div><div className="stock"><span>库存 {product.availableStock}</span><button onClick={event=>{event.stopPropagation();void add(product)}}>加入采购车</button></div></div></article>;
+  return <article className="product-card" onClick={()=>open(product)}><div className={`product-image p${index%5}`}><span>自营</span>{product.mainImage?<img src={product.mainImage} alt={product.title}/>:<i>{["💻","📄","🖨️","🖥️","📦"][index%5]}</i>}<em>协议专享</em></div><div className="product-info"><small>企业协议商品</small><h3>{product.title}</h3><p>{product.summary||"政企采购自营商品，全国配送"}</p><div className="price"><strong>{money(product.agreementPrice||product.memberPrice)}</strong><del>{money(product.marketPrice)}</del></div><div className="stock"><span>库存 {product.availableStock}</span><button onClick={event=>{event.stopPropagation();void add(product)}}>加入采购车</button></div></div></article>;
 }
 
 function Detail({product,back,add}:{product:Row;back:()=>void;add:(r:Row,n:number)=>void}){
