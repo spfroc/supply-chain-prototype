@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.NotBlank;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -57,6 +58,97 @@ public class ClientController {
               district, detail, is_default AS isDefault
             FROM address WHERE user_id=:userId AND deleted_at IS NULL ORDER BY is_default DESC,id
             """).param("userId", DEMO_USER_ID).query().listOfRows();
+    }
+
+    @PostMapping("/addresses")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Transactional
+    void createAddress(@Valid @RequestBody AddressRequest request) {
+        if (request.isDefault() == 1) {
+            jdbc.sql("UPDATE address SET is_default=0 WHERE user_id=:userId AND deleted_at IS NULL")
+                .param("userId", DEMO_USER_ID).update();
+        }
+        jdbc.sql("""
+            INSERT INTO address(enterprise_id,user_id,contact_name,contact_phone,province,city,district,detail,is_default)
+            VALUES(:enterpriseId,:userId,:contactName,:contactPhone,:province,:city,:district,:detail,:isDefault)
+            """).params(Map.of("enterpriseId", DEMO_ENTERPRISE_ID, "userId", DEMO_USER_ID,
+                "contactName", request.contactName(), "contactPhone", request.contactPhone(),
+                "province", request.province(), "city", request.city(), "district", request.district(),
+                "detail", request.detail(), "isDefault", request.isDefault())).update();
+    }
+
+    @PutMapping("/addresses/{id}")
+    @Transactional
+    void updateAddress(@PathVariable long id, @Valid @RequestBody AddressRequest request) {
+        if (request.isDefault() == 1) {
+            jdbc.sql("UPDATE address SET is_default=0 WHERE user_id=:userId AND id<>:id AND deleted_at IS NULL")
+                .params(Map.of("userId", DEMO_USER_ID, "id", id)).update();
+        }
+        int changed = jdbc.sql("""
+            UPDATE address SET contact_name=:contactName,contact_phone=:contactPhone,province=:province,
+              city=:city,district=:district,detail=:detail,is_default=:isDefault
+            WHERE id=:id AND user_id=:userId AND deleted_at IS NULL
+            """).params(Map.of("id", id, "userId", DEMO_USER_ID, "contactName", request.contactName(),
+                "contactPhone", request.contactPhone(), "province", request.province(), "city", request.city(),
+                "district", request.district(), "detail", request.detail(), "isDefault", request.isDefault())).update();
+        if (changed == 0) throw new IllegalArgumentException("地址不存在");
+    }
+
+    @DeleteMapping("/addresses/{id}")
+    void deleteAddress(@PathVariable long id) {
+        int changed = jdbc.sql("UPDATE address SET deleted_at=NOW(),is_default=0 WHERE id=:id AND user_id=:userId AND deleted_at IS NULL")
+            .params(Map.of("id", id, "userId", DEMO_USER_ID)).update();
+        if (changed == 0) throw new IllegalArgumentException("地址不存在");
+    }
+
+    @GetMapping("/members")
+    List<Map<String,Object>> members() {
+        return jdbc.sql("""
+            SELECT id,username,real_name AS realName,phone,role_code AS roleCode,status,
+              DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
+            FROM enterprise_user WHERE enterprise_id=:enterpriseId AND deleted_at IS NULL ORDER BY id
+            """).param("enterpriseId", DEMO_ENTERPRISE_ID).query().listOfRows();
+    }
+
+    @PostMapping("/members")
+    @ResponseStatus(HttpStatus.CREATED)
+    void createMember(@Valid @RequestBody MemberRequest request) {
+        jdbc.sql("""
+            INSERT INTO enterprise_user(enterprise_id,username,password_hash,real_name,phone,role_code,status)
+            VALUES(:enterpriseId,:username,'{noop}demo-password',:realName,:phone,:roleCode,:status)
+            """).params(Map.of("enterpriseId", DEMO_ENTERPRISE_ID, "username", request.username(),
+                "realName", request.realName(), "phone", request.phone(), "roleCode", request.roleCode(),
+                "status", request.status())).update();
+    }
+
+    @PutMapping("/members/{id}")
+    void updateMember(@PathVariable long id,@Valid @RequestBody MemberRequest request) {
+        int changed=jdbc.sql("""
+            UPDATE enterprise_user SET username=:username,real_name=:realName,phone=:phone,role_code=:roleCode,status=:status
+            WHERE id=:id AND enterprise_id=:enterpriseId AND deleted_at IS NULL
+            """).params(Map.of("id",id,"enterpriseId",DEMO_ENTERPRISE_ID,"username",request.username(),
+                "realName",request.realName(),"phone",request.phone(),"roleCode",request.roleCode(),"status",request.status())).update();
+        if(changed==0)throw new IllegalArgumentException("企业成员不存在");
+    }
+
+    @DeleteMapping("/members/{id}")
+    void deleteMember(@PathVariable long id) {
+        if(id==DEMO_USER_ID)throw new IllegalArgumentException("当前企业主账号不能删除");
+        int changed=jdbc.sql("UPDATE enterprise_user SET deleted_at=NOW(),status=0 WHERE id=:id AND enterprise_id=:enterpriseId AND deleted_at IS NULL")
+            .params(Map.of("id",id,"enterpriseId",DEMO_ENTERPRISE_ID)).update();
+        if(changed==0)throw new IllegalArgumentException("企业成员不存在");
+    }
+
+    @GetMapping("/invoices")
+    List<Map<String,Object>> invoices() {
+        return jdbc.sql("""
+            SELECT i.id,i.invoice_no AS invoiceNo,o.order_no AS orderNo,i.title,i.tax_no AS taxNo,
+              i.invoice_type AS invoiceType,i.amount,i.status,
+              DATE_FORMAT(i.issued_at,'%Y-%m-%d %H:%i:%s') AS issuedAt,
+              DATE_FORMAT(i.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,i.remark
+            FROM invoice_record i JOIN order_main o ON o.id=i.order_main_id
+            WHERE i.enterprise_id=:enterpriseId ORDER BY i.id DESC
+            """).param("enterpriseId",DEMO_ENTERPRISE_ID).query().listOfRows();
     }
 
     @GetMapping("/cart")
@@ -130,6 +222,28 @@ public class ClientController {
             FROM order_main o LEFT JOIN order_item oi ON oi.order_main_id=o.id
             WHERE o.user_id=:userId GROUP BY o.id ORDER BY o.id DESC
             """).param("userId", DEMO_USER_ID).query().listOfRows();
+    }
+
+    @GetMapping("/orders/{id}")
+    Map<String,Object> order(@PathVariable long id) {
+        var orders=jdbc.sql("""
+            SELECT o.id,o.order_no AS orderNo,o.item_amount AS itemAmount,o.freight_amount AS freightAmount,
+              o.payable_amount AS payableAmount,o.payment_status AS paymentStatus,o.order_status AS orderStatus,
+              DATE_FORMAT(o.payment_due_at,'%Y-%m-%d %H:%i:%s') AS paymentDueAt,
+              DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
+            FROM order_main o WHERE o.id=:id AND o.user_id=:userId
+            """).params(Map.of("id",id,"userId",DEMO_USER_ID)).query().listOfRows();
+        if(orders.isEmpty())throw new IllegalArgumentException("订单不存在");
+        var items=jdbc.sql("""
+            SELECT p.title,s.sku_code AS skuCode,oi.quantity,oi.unit_price AS unitPrice,oi.total_price AS totalPrice
+            FROM order_item oi JOIN product_sku s ON s.id=oi.sku_id JOIN product_spu p ON p.id=s.spu_id
+            WHERE oi.order_main_id=:id
+            """).param("id",id).query().listOfRows();
+        var deliveries=jdbc.sql("""
+            SELECT sub_order_no AS subOrderNo,address_snapshot AS addressSnapshot,logistics_company AS logisticsCompany,
+              logistics_no AS logisticsNo,logistics_status AS logisticsStatus,status FROM order_sub WHERE order_main_id=:id
+            """).param("id",id).query().listOfRows();
+        return Map.of("order",orders.getFirst(),"items",items,"deliveries",deliveries);
     }
 
     @PostMapping("/orders")
@@ -209,4 +323,8 @@ public class ClientController {
     public record CartRequest(@NotNull Long skuId, @Min(1) @Max(9999) int quantity) {}
     public record CartUpdateRequest(@Min(1) @Max(9999) int quantity, int selected) {}
     public record CheckoutRequest(String idempotencyKey) {}
+    public record AddressRequest(@NotBlank String contactName,@NotBlank String contactPhone,
+        @NotBlank String province,@NotBlank String city,@NotBlank String district,@NotBlank String detail,int isDefault) {}
+    public record MemberRequest(@NotBlank String username,@NotBlank String realName,@NotBlank String phone,
+        @NotBlank String roleCode,int status) {}
 }

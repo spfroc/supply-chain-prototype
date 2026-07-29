@@ -1,0 +1,6 @@
+.h5-manage>header>button{font-size:14px}.h5-manage>h3{padding:0 14px}
+.h5-manage-row{background:white;margin:9px 12px;padding:14px;border-radius:9px;display:flex;align-items:center}
+.h5-manage-row>div{flex:1;min-width:0}.h5-manage-row strong,.h5-manage-row span{display:block}.h5-manage-row span{font-size:11px;color:#768498;margin-top:5px;line-height:1.5}
+.h5-manage-row p{margin:0}.h5-manage-row p button{border:0;background:none;color:#1767d2;padding:6px}.h5-manage-row p button:last-child{color:#d9423c}
+.h5-order-summary{margin:12px;background:white;border-radius:10px;padding:18px}.h5-order-summary>span,.h5-order-summary>strong{display:block}.h5-order-summary>strong{margin:6px 0 14px}.h5-order-summary p{display:flex;justify-content:space-between}.h5-order-summary b{color:#d93e37}.h5-order-summary em{font-style:normal;color:#1767d2}
+.h5-form{position:fixed;z-index:30;inset:0;background:#f5f7fa;overflow:auto;padding-bottom:30px}.h5-form header{height:55px;background:white;display:flex;justify-content:space-between;align-items:center;padding:0 14px}.h5-form header button{border:0;background:none;color:#1767d2}.h5-form label{background:white;border-bottom:1px solid #edf0f4;padding:13px 15px;display:grid;grid-template-columns:95px 1fr;align-items:center}.h5-form input{border:0;outline:0;padding:8px}

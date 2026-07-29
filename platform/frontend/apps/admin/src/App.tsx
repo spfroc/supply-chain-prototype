@@ -95,44 +95,58 @@ function AdminApp() {
 }
 
 function BusinessModule({module}:{module:Module}) {
-  const products = useLoad<Row[]>(()=>rootApi("/api/public/catalog/products?enterpriseId=1"));
-  const profile = useLoad<Row>(()=>rootApi("/api/client/profile"));
-  const agreements = useLoad<Row[]>(()=>rootApi("/api/admin/agreements/1/items"));
-  const orders = useLoad<Row[]>(()=>rootApi("/api/client/orders"));
-  if(module==="products") return <Card className="data-card" title="自营商品列表" extra={<Space><Tag color="blue">共 {products.data?.length||0} 款</Tag><Button type="primary">＋ 新增商品</Button></Space>}><Table rowKey="skuId" loading={products.loading} dataSource={products.data} columns={[
+  const {message,modal}=AntApp.useApp();
+  const endpoint=module==="products"?"/products":module==="enterprises"?"/enterprises":module==="agreements"?"/agreements":"/orders";
+  const rows=useLoad<Row[]>(()=>rootApi(`/api/admin/business${endpoint}`),[module]);
+  const enterprises=useLoad<Row[]>(()=>rootApi("/api/admin/business/enterprises"));
+  const products=useLoad<Row[]>(()=>rootApi("/api/admin/business/products"));
+  const [form]=Form.useForm();const [open,setOpen]=useState(false);const [editing,setEditing]=useState<Row>();const [mode,setMode]=useState<"entity"|"stock"|"item">("entity");
+  const [agreement,setAgreement]=useState<Row>();const [items,setItems]=useState<Row[]>([]);const [itemOpen,setItemOpen]=useState(false);const [detail,setDetail]=useState<Row>();
+  const business=async(path:string,init?:RequestInit)=>{const r=await fetch(`/api/admin/business${path}`,{...init,headers:{...apiHeaders,...init?.headers}});if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||"操作失败")}const text=await r.text();return text?JSON.parse(text):undefined};
+  const show=(row?:Row,nextMode:"entity"|"stock"="entity")=>{setEditing(row);setMode(nextMode);form.resetFields();
+    if(nextMode==="stock")form.setFieldsValue({stock:row?.stock});
+    else if(module==="products")form.setFieldsValue(row?{...row,status:Number(row.status),spec:"标准规格"}:{categoryId:3,brandId:1,status:1,stock:0});
+    else if(module==="enterprises")form.setFieldsValue(row||{status:1});
+    else if(module==="agreements")form.setFieldsValue(row||{enterpriseId:1,status:1,effectiveDate:"2026-07-29",expiryDate:"2027-07-28",amount:0});
+    setOpen(true);
+  };
+  const save=async()=>{try{const values=await form.validateFields();if(mode==="stock")await business(`/products/${editing!.id}/stock`,{method:"PUT",body:JSON.stringify(values)});
+    else await business(`${endpoint}${editing?`/${editing.id}`:""}`,{method:editing?"PUT":"POST",body:JSON.stringify(values)});
+    message.success("保存成功");setOpen(false);void rows.refresh();void products.refresh();void enterprises.refresh();}catch(e){if(e instanceof Error)message.error(e.message)}};
+  const remove=(row:Row)=>modal.confirm({title:`确认删除“${row.title||row.name}”？`,content:"有关联订单的数据会提示改为停用。",okButtonProps:{danger:true},onOk:async()=>{try{await business(`${endpoint}/${row.id}`,{method:"DELETE"});message.success("删除成功");void rows.refresh()}catch(e){message.error((e as Error).message)}}});
+  const toggle=async(row:Row)=>{try{await business(`/products/${row.id}/status`,{method:"PUT",body:JSON.stringify({status:Number(row.status)===1?2:1})});message.success(Number(row.status)===1?"商品已下架":"商品已上架");void rows.refresh()}catch(e){message.error((e as Error).message)}};
+  const openItems=async(row:Row)=>{setAgreement(row);setItems(await rootApi(`/api/admin/agreements/${row.id}/items`));setItemOpen(true)};
+  const saveItem=async()=>{try{const v=await form.validateFields();const url=editing?`/api/admin/agreements/${agreement!.id}/items/${editing.id}`:`/api/admin/agreements/${agreement!.id}/items`;const r=await fetch(url,{method:editing?"PUT":"POST",headers:apiHeaders,body:JSON.stringify(v)});if(!r.ok)throw new Error("协议商品保存失败");setItems(await rootApi(`/api/admin/agreements/${agreement!.id}/items`));setMode("entity");setEditing(undefined);form.resetFields();message.success("协议商品已保存")}catch(e){message.error((e as Error).message)}};
+  const removeItem=(row:Row)=>modal.confirm({title:"移除协议商品？",onOk:async()=>{await fetch(`/api/admin/agreements/${agreement!.id}/items/${row.id}`,{method:"DELETE",headers:apiHeaders});setItems(await rootApi(`/api/admin/agreements/${agreement!.id}/items`));message.success("已移除")}});
+  const orderDetail=async(row:Row)=>setDetail(await business(`/orders/${row.id}`));
+  const advanceOrder=async(row:Row)=>{const payment=Number(row.paymentStatus)===2?2:2;const status=Number(row.orderStatus)===0?1:Math.min(3,Number(row.orderStatus)+1);await business(`/orders/${row.id}/status`,{method:"PUT",body:JSON.stringify({paymentStatus:payment,orderStatus:status})});message.success("订单状态已更新");void rows.refresh()};
+  let columns:ColumnsType<Row>=[];
+  if(module==="products")columns=[
     {title:"商品信息",render:(_,r)=><div className="user-cell"><i>商</i><span><strong>{r.title}</strong><small>{r.skuCode}</small></span></div>},
-    {title:"市场价",dataIndex:"marketPrice",render:v=>`¥${Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2})}`},
-    {title:"会员价",dataIndex:"memberPrice",render:v=>`¥${Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2})}`},
-    {title:"协议价",dataIndex:"agreementPrice",render:v=><strong className="price-text">¥{Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2})}</strong>},
-    {title:"可售库存",dataIndex:"availableStock",render:v=><Tag color={v>10?"green":"orange"}>{v} 件</Tag>},
-    {title:"状态",render:()=> <Tag color="green">在售</Tag>},
-    {title:"操作",render:()=> <Space><Button type="link">编辑</Button><Button type="link">库存</Button><Button type="link" danger>下架</Button></Space>}
-  ]}/></Card>;
-  if(module==="enterprises") {
-    const row=profile.data?[{id:profile.data.enterpriseId,name:profile.data.enterpriseName,contact:profile.data.realName,phone:profile.data.phone,agreement:profile.data.agreementName,expiry:profile.data.agreementExpiry}]:[];
-    return <Card className="data-card" title="企业客户列表" extra={<Button type="primary">＋ 新增企业</Button>}><Table rowKey="id" loading={profile.loading} dataSource={row} columns={[
-      {title:"企业名称",dataIndex:"name",render:v=><div className="user-cell"><i>企</i><span><strong>{v}</strong><small>已完成企业认证</small></span></div>},
-      {title:"联系人",render:(_,r)=><>{r.contact}<small className="subline">{r.phone}</small></>},
-      {title:"有效协议",dataIndex:"agreement"},{title:"协议到期日",dataIndex:"expiry"},
-      {title:"状态",render:()=> <Tag color="green">正常</Tag>},
-      {title:"操作",render:()=> <Space><Button type="link">查看成员</Button><Button type="link">编辑</Button><Button type="link">协议</Button></Space>}
-    ]}/></Card>;
-  }
-  if(module==="agreements") return <Card className="data-card" title="2026年度办公设备采购框架协议" extra={<Button type="primary">＋ 添加协议商品</Button>}><Table rowKey="id" loading={agreements.loading} dataSource={agreements.data} columns={[
-    {title:"商品名称",dataIndex:"title",render:(v,r)=><><strong>{v}</strong><small className="subline">{r.skuCode}</small></>},
-    {title:"市场价",dataIndex:"marketPrice",render:v=>`¥${Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2})}`},
-    {title:"协议价",dataIndex:"agreementPrice",render:v=><strong className="price-text">¥{Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2})}</strong>},
-    {title:"状态",dataIndex:"status",render:v=><Tag color={v?"green":"default"}>{v?"生效中":"停用"}</Tag>},
-    {title:"更新时间",dataIndex:"updatedAt",render:dateTime},
-    {title:"操作",render:()=> <Space><Button type="link">修改价格</Button><Button type="link" danger>移除</Button></Space>}
-  ]}/></Card>;
-  return <Card className="data-card" title="采购订单列表" extra={<Space><Tag color="orange">银行转账</Tag><Button>导出订单</Button></Space>}><Table rowKey="id" loading={orders.loading} dataSource={orders.data} columns={[
-    {title:"订单号",dataIndex:"orderNo",render:v=><strong>{v}</strong>},{title:"商品",render:(_,r)=>`${r.itemKinds} 种 / ${r.itemCount} 件`},
-    {title:"订单金额",dataIndex:"payableAmount",render:v=><strong>¥{Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2})}</strong>},
-    {title:"付款状态",dataIndex:"paymentStatus",render:v=><Tag color={v===2?"green":"orange"}>{["待付款","待确认","已确认"][v]||"待处理"}</Tag>},
-    {title:"订单状态",dataIndex:"orderStatus",render:v=><Tag color="blue">{["待付款","待发货","运输中","已完成","已取消"][v]||"处理中"}</Tag>},
-    {title:"下单时间",dataIndex:"createdAt",render:dateTime},{title:"操作",render:()=> <Button type="link">查看详情</Button>}
-  ]}/></Card>;
+    {title:"市场价",dataIndex:"marketPrice",render:v=>`¥${Number(v).toFixed(2)}`},{title:"会员价",dataIndex:"memberPrice",render:v=>`¥${Number(v).toFixed(2)}`},
+    {title:"库存",render:(_,r)=><Tag color={r.stock-r.reservedStock>10?"green":"orange"}>{r.stock-r.reservedStock} / {r.stock}</Tag>},
+    {title:"状态",dataIndex:"status",render:v=><Tag color={Number(v)===1?"green":"default"}>{Number(v)===1?"在售":Number(v)===0?"草稿":"已下架"}</Tag>},
+    {title:"操作",render:(_,r)=><Space><Button type="link" onClick={()=>show(r)}>编辑</Button><Button type="link" onClick={()=>show(r,"stock")}>库存</Button><Button type="link" onClick={()=>void toggle(r)}>{Number(r.status)===1?"下架":"上架"}</Button><Button type="link" danger onClick={()=>remove(r)}>删除</Button></Space>}];
+  if(module==="enterprises")columns=[
+    {title:"企业",render:(_,r)=><div className="user-cell"><i>企</i><span><strong>{r.name}</strong><small>{r.creditCode}</small></span></div>},
+    {title:"联系人",render:(_,r)=><>{r.contactName}<small className="subline">{r.contactPhone}</small></>},{title:"成员",dataIndex:"memberCount",render:v=>`${v} 人`},
+    {title:"有效协议",dataIndex:"agreementName",render:v=>v||"—"},{title:"状态",dataIndex:"status",render:v=><Tag color={v?"green":"default"}>{v?"正常":"停用"}</Tag>},
+    {title:"操作",render:(_,r)=><Space><Button type="link" onClick={()=>message.info(r.id===1?"请在客户端企业成员中管理":"该企业暂无成员")}>查看成员</Button><Button type="link" onClick={()=>show(r)}>编辑</Button><Button type="link" danger onClick={()=>remove(r)}>删除</Button></Space>}];
+  if(module==="agreements")columns=[
+    {title:"协议",render:(_,r)=><><strong>{r.name}</strong><small className="subline">{r.agreementNo}</small></>},{title:"签约企业",dataIndex:"enterpriseName"},
+    {title:"商品数",dataIndex:"itemCount",render:v=>`${v} 款`},{title:"协议金额",dataIndex:"amount",render:v=>`¥${Number(v).toLocaleString("zh-CN")}`},
+    {title:"有效期",render:(_,r)=>`${r.effectiveDate} 至 ${r.expiryDate}`},{title:"状态",dataIndex:"status",render:v=><Tag color={Number(v)===1?"green":"default"}>{Number(v)===1?"生效中":"已停用"}</Tag>},
+    {title:"操作",render:(_,r)=><Space><Button type="link" onClick={()=>void openItems(r)}>商品管理</Button><Button type="link" onClick={()=>show(r)}>编辑</Button><Button type="link" danger onClick={()=>remove(r)}>删除</Button></Space>}];
+  if(module==="orders")columns=[
+    {title:"订单号",dataIndex:"orderNo",render:v=><strong>{v}</strong>},{title:"企业",dataIndex:"enterpriseName"},{title:"商品",render:(_,r)=>`${r.itemKinds} 种 / ${r.itemCount} 件`},
+    {title:"金额",dataIndex:"payableAmount",render:v=>`¥${Number(v).toFixed(2)}`},{title:"付款",dataIndex:"paymentStatus",render:v=><Tag color={v===2?"green":"orange"}>{["待付款","待确认","已确认"][v]}</Tag>},
+    {title:"状态",dataIndex:"orderStatus",render:v=><Tag color="blue">{["待付款","待发货","运输中","已完成","已取消"][v]}</Tag>},{title:"下单时间",dataIndex:"createdAt",render:dateTime},
+    {title:"操作",render:(_,r)=><Space><Button type="link" onClick={()=>void orderDetail(r)}>详情</Button>{Number(r.orderStatus)<3&&<Button type="link" onClick={()=>void advanceOrder(r)}>{Number(r.orderStatus)===0?"确认到账":"推进状态"}</Button>}</Space>}];
+  const title=module==="products"?"自营商品列表":module==="enterprises"?"企业客户列表":module==="agreements"?"采购协议列表":"采购订单列表";
+  return <><Card className="data-card" title={title} extra={module!=="orders"&&<Button type="primary" onClick={()=>show()}>＋ 新增{module==="products"?"商品":module==="enterprises"?"企业":"协议"}</Button>}><Table rowKey="id" loading={rows.loading} dataSource={rows.data} columns={columns} scroll={{x:1000}}/></Card>
+    <Modal open={open} title={mode==="stock"?"调整库存":`${editing?"编辑":"新增"}${module==="products"?"商品":module==="enterprises"?"企业":"协议"}`} onCancel={()=>setOpen(false)} onOk={save} width={720}><Form form={form} layout="vertical" className="two-column-form">{mode==="stock"?<Form.Item name="stock" label="总库存" rules={[{required:true}]}><InputNumber min={0} style={{width:"100%"}}/></Form.Item>:module==="products"?<><Form.Item name="title" label="商品标题" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="spec" label="规格"><Input/></Form.Item><Form.Item name="categoryId" label="分类"><Select options={[{value:3,label:"办公设备 / 电脑整机"},{value:6,label:"办公耗材 / 复印纸"}]}/></Form.Item><Form.Item name="brandId" label="品牌"><Select options={[{value:1,label:"联想"},{value:2,label:"得力"}]}/></Form.Item><Form.Item name="marketPrice" label="市场价" rules={[{required:true}]}><InputNumber min={0} style={{width:"100%"}}/></Form.Item><Form.Item name="memberPrice" label="会员价" rules={[{required:true}]}><InputNumber min={0} style={{width:"100%"}}/></Form.Item><Form.Item name="stock" label="库存" rules={[{required:true}]}><InputNumber min={0} style={{width:"100%"}}/></Form.Item><Form.Item name="status" label="状态"><Select options={[{value:1,label:"在售"},{value:0,label:"草稿"},{value:2,label:"下架"}]}/></Form.Item><Form.Item name="summary" label="商品摘要" className="full"><Input.TextArea rows={3}/></Form.Item></>:module==="enterprises"?<><Form.Item name="name" label="企业名称" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="creditCode" label="统一社会信用代码" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="contactName" label="联系人" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="contactPhone" label="联系电话" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="address" label="企业地址" className="full"><Input/></Form.Item><Form.Item name="status" label="状态"><Select options={[{value:1,label:"正常"},{value:0,label:"停用"}]}/></Form.Item></>:<><Form.Item name="enterpriseId" label="签约企业" rules={[{required:true}]}><Select options={(enterprises.data||[]).map(x=>({value:x.id,label:x.name}))}/></Form.Item><Form.Item name="name" label="协议名称" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="amount" label="协议金额" rules={[{required:true}]}><InputNumber min={0} style={{width:"100%"}}/></Form.Item><Form.Item name="status" label="状态"><Select options={[{value:1,label:"生效中"},{value:0,label:"待生效"},{value:2,label:"停用"}]}/></Form.Item><Form.Item name="effectiveDate" label="生效日期" rules={[{required:true}]}><Input type="date"/></Form.Item><Form.Item name="expiryDate" label="到期日期" rules={[{required:true}]}><Input type="date"/></Form.Item></>}</Form></Modal>
+    <Modal open={itemOpen} title={`${agreement?.name||""} · 协议商品`} width={850} onCancel={()=>setItemOpen(false)} footer={null}><Space style={{marginBottom:16}}><Button type="primary" onClick={()=>{setEditing(undefined);setMode("item");form.setFieldsValue({skuId:products.data?.[0]?.skuId});}}>＋ 添加现有商品</Button></Space>{mode==="item"&&<Form form={form} layout="inline" style={{marginBottom:16}}><Form.Item name="skuId" rules={[{required:true}]}><Select style={{width:280}} disabled={!!editing} options={(products.data||[]).map(x=>({value:x.skuId,label:x.title}))}/></Form.Item><Form.Item name="agreementPrice" rules={[{required:true}]}><InputNumber min={0} placeholder="协议价"/></Form.Item><Button onClick={()=>void saveItem()} type="primary">保存</Button><Button onClick={()=>setMode("entity")}>取消</Button></Form>}<Table rowKey="id" dataSource={items} pagination={false} columns={[{title:"商品",dataIndex:"title"},{title:"SKU",dataIndex:"skuCode"},{title:"协议价",dataIndex:"agreementPrice",render:v=>`¥${Number(v).toFixed(2)}`},{title:"操作",render:(_,r)=><Space><Button type="link" onClick={()=>{setEditing(r);setMode("item");form.setFieldsValue({skuId:r.skuId,agreementPrice:r.agreementPrice})}}>改价</Button><Button type="link" danger onClick={()=>removeItem(r)}>移除</Button></Space>} ]}/></Modal>
+    <Modal open={!!detail} title="订单详情" width={760} footer={null} onCancel={()=>setDetail(undefined)}>{detail&&<><Descriptions bordered column={2} items={[{key:"no",label:"订单号",children:detail.order.orderNo},{key:"ent",label:"企业",children:detail.order.enterpriseName},{key:"buyer",label:"采购人",children:detail.order.buyerName},{key:"amount",label:"应付金额",children:`¥${Number(detail.order.payableAmount).toFixed(2)}`}]}/><Table rowKey="id" pagination={false} dataSource={detail.items} columns={[{title:"商品",dataIndex:"title"},{title:"SKU",dataIndex:"skuCode"},{title:"数量",dataIndex:"quantity"},{title:"单价",dataIndex:"unitPrice",render:v=>`¥${Number(v).toFixed(2)}`},{title:"小计",dataIndex:"totalPrice",render:v=>`¥${Number(v).toFixed(2)}`}]}/></>}</Modal></>;
 }
 
 function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []) {

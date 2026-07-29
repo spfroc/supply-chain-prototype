@@ -1,0 +1,223 @@
+package cn.govproc.supplychain.business;
+
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Map;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.*;
+
+@RestController
+@RequestMapping("/api/admin/business")
+public class AdminBusinessController {
+    private final JdbcClient jdbc;
+    public AdminBusinessController(JdbcClient jdbc) { this.jdbc = jdbc; }
+
+    @GetMapping("/products")
+    List<Map<String,Object>> products() {
+        return jdbc.sql("""
+          SELECT p.id,p.spu_code AS spuCode,p.title,p.summary,p.category_id AS categoryId,p.brand_id AS brandId,
+            p.status,s.id AS skuId,s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
+            s.stock,s.reserved_stock AS reservedStock,DATE_FORMAT(p.updated_at,'%Y-%m-%d %H:%i:%s') AS updatedAt
+          FROM product_spu p JOIN product_sku s ON s.spu_id=p.id AND s.deleted_at IS NULL
+          WHERE p.deleted_at IS NULL ORDER BY p.id DESC
+          """).query().listOfRows();
+    }
+
+    @PostMapping("/products") @ResponseStatus(HttpStatus.CREATED) @Transactional
+    Map<String,Object> createProduct(@Valid @RequestBody ProductRequest r) {
+        String suffix=LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String spuCode="SPU-"+suffix, skuCode="SKU-"+suffix;
+        jdbc.sql("""
+          INSERT INTO product_spu(spu_code,title,category_id,brand_id,summary,status)
+          VALUES(:code,:title,:categoryId,:brandId,:summary,:status)
+          """)
+          .params(Map.of("code",spuCode,"title",r.title(),"categoryId",r.categoryId(),"brandId",r.brandId(),
+            "summary",value(r.summary()),"status",r.status())).update();
+        long id=jdbc.sql("SELECT id FROM product_spu WHERE spu_code=:code").param("code",spuCode).query(Long.class).single();
+        jdbc.sql("""
+          INSERT INTO product_sku(spu_id,sku_code,spec_json,market_price,member_price,stock,status)
+          VALUES(:spuId,:skuCode,JSON_OBJECT('规格',:spec),:marketPrice,:memberPrice,:stock,:status)
+          """)
+          .params(Map.of("spuId",id,"skuCode",skuCode,"spec",value(r.spec()),"marketPrice",r.marketPrice(),
+            "memberPrice",r.memberPrice(),"stock",r.stock(),"status",r.status()==1?1:0)).update();
+        return Map.of("id",id,"spuCode",spuCode);
+    }
+
+    @PutMapping("/products/{id}") @Transactional
+    void updateProduct(@PathVariable long id,@Valid @RequestBody ProductRequest r) {
+        require(jdbc.sql("""
+          UPDATE product_spu SET title=:title,category_id=:categoryId,brand_id=:brandId,
+          summary=:summary,status=:status WHERE id=:id AND deleted_at IS NULL
+          """)
+          .params(Map.of("id",id,"title",r.title(),"categoryId",r.categoryId(),"brandId",r.brandId(),
+            "summary",value(r.summary()),"status",r.status())).update(),"商品不存在");
+        jdbc.sql("""
+          UPDATE product_sku SET spec_json=JSON_OBJECT('规格',:spec),market_price=:marketPrice,
+          member_price=:memberPrice,stock=:stock,status=:status WHERE spu_id=:id AND deleted_at IS NULL
+          """)
+          .params(Map.of("id",id,"spec",value(r.spec()),"marketPrice",r.marketPrice(),"memberPrice",r.memberPrice(),
+            "stock",r.stock(),"status",r.status()==1?1:0)).update();
+    }
+
+    @PutMapping("/products/{id}/status") @Transactional
+    void productStatus(@PathVariable long id,@RequestBody StatusRequest r) {
+        require(jdbc.sql("UPDATE product_spu SET status=:status WHERE id=:id AND deleted_at IS NULL")
+          .params(Map.of("id",id,"status",r.status())).update(),"商品不存在");
+        jdbc.sql("UPDATE product_sku SET status=:status WHERE spu_id=:id AND deleted_at IS NULL")
+          .params(Map.of("id",id,"status",r.status()==1?1:0)).update();
+    }
+
+    @PutMapping("/products/{id}/stock") @Transactional
+    void productStock(@PathVariable long id,@RequestBody StockRequest r) {
+        int reserved=jdbc.sql("SELECT reserved_stock FROM product_sku WHERE spu_id=:id AND deleted_at IS NULL")
+          .param("id",id).query(Integer.class).optional().orElseThrow(()->new IllegalArgumentException("商品不存在"));
+        if(r.stock()<reserved) throw new IllegalArgumentException("库存不能小于已占用库存 "+reserved);
+        jdbc.sql("UPDATE product_sku SET stock=:stock WHERE spu_id=:id AND deleted_at IS NULL")
+          .params(Map.of("id",id,"stock",r.stock())).update();
+    }
+
+    @DeleteMapping("/products/{id}") @Transactional @ResponseStatus(HttpStatus.NO_CONTENT)
+    void deleteProduct(@PathVariable long id) {
+        require(jdbc.sql("UPDATE product_spu SET deleted_at=NOW(),status=2 WHERE id=:id AND deleted_at IS NULL")
+          .param("id",id).update(),"商品不存在");
+        jdbc.sql("UPDATE product_sku SET deleted_at=NOW(),status=0 WHERE spu_id=:id AND deleted_at IS NULL").param("id",id).update();
+    }
+
+    @GetMapping("/enterprises")
+    List<Map<String,Object>> enterprises() {
+        return jdbc.sql("""
+          SELECT e.id,e.name,e.credit_code AS creditCode,e.contact_name AS contactName,e.contact_phone AS contactPhone,
+            e.address,e.status,COUNT(DISTINCT u.id) AS memberCount,MAX(a.name) AS agreementName,
+            DATE_FORMAT(e.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
+          FROM enterprise e LEFT JOIN enterprise_user u ON u.enterprise_id=e.id AND u.deleted_at IS NULL
+          LEFT JOIN agreement a ON a.enterprise_id=e.id AND a.status=1 AND a.deleted_at IS NULL
+          WHERE e.deleted_at IS NULL GROUP BY e.id ORDER BY e.id DESC
+          """).query().listOfRows();
+    }
+
+    @PostMapping("/enterprises") @ResponseStatus(HttpStatus.CREATED)
+    void createEnterprise(@Valid @RequestBody EnterpriseRequest r) {
+        jdbc.sql("""
+          INSERT INTO enterprise(name,credit_code,contact_name,contact_phone,address,audit_status,status)
+          VALUES(:name,:creditCode,:contactName,:contactPhone,:address,2,:status)
+          """)
+          .params(Map.of("name",r.name(),"creditCode",r.creditCode(),"contactName",r.contactName(),
+            "contactPhone",r.contactPhone(),"address",value(r.address()),"status",r.status())).update();
+    }
+
+    @PutMapping("/enterprises/{id}")
+    void updateEnterprise(@PathVariable long id,@Valid @RequestBody EnterpriseRequest r) {
+        require(jdbc.sql("""
+          UPDATE enterprise SET name=:name,credit_code=:creditCode,contact_name=:contactName,
+          contact_phone=:contactPhone,address=:address,status=:status WHERE id=:id AND deleted_at IS NULL
+          """)
+          .params(Map.of("id",id,"name",r.name(),"creditCode",r.creditCode(),"contactName",r.contactName(),
+            "contactPhone",r.contactPhone(),"address",value(r.address()),"status",r.status())).update(),"企业不存在");
+    }
+
+    @DeleteMapping("/enterprises/{id}") @ResponseStatus(HttpStatus.NO_CONTENT)
+    void deleteEnterprise(@PathVariable long id) {
+        long orders=jdbc.sql("SELECT COUNT(*) FROM order_main WHERE enterprise_id=:id").param("id",id).query(Long.class).single();
+        if(orders>0) throw new IllegalArgumentException("企业已有订单，只能停用，不能删除");
+        require(jdbc.sql("UPDATE enterprise SET deleted_at=NOW(),status=0 WHERE id=:id AND deleted_at IS NULL")
+          .param("id",id).update(),"企业不存在");
+    }
+
+    @GetMapping("/agreements")
+    List<Map<String,Object>> agreements() {
+        return jdbc.sql("""
+          SELECT a.id,a.agreement_no AS agreementNo,a.name,a.enterprise_id AS enterpriseId,e.name AS enterpriseName,
+            a.amount,DATE_FORMAT(a.effective_date,'%Y-%m-%d') AS effectiveDate,
+            DATE_FORMAT(a.expiry_date,'%Y-%m-%d') AS expiryDate,a.status,COUNT(ai.id) AS itemCount
+          FROM agreement a JOIN enterprise e ON e.id=a.enterprise_id
+          LEFT JOIN agreement_item ai ON ai.agreement_id=a.id AND ai.deleted_at IS NULL
+          WHERE a.deleted_at IS NULL GROUP BY a.id ORDER BY a.id DESC
+          """).query().listOfRows();
+    }
+
+    @PostMapping("/agreements") @ResponseStatus(HttpStatus.CREATED) @Transactional
+    void createAgreement(@Valid @RequestBody AgreementRequest r) {
+        if(r.status()==1) jdbc.sql("UPDATE agreement SET status=2 WHERE enterprise_id=:id AND status=1 AND deleted_at IS NULL")
+          .param("id",r.enterpriseId()).update();
+        String no="AGR-"+LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        jdbc.sql("""
+          INSERT INTO agreement(agreement_no,enterprise_id,name,amount,effective_date,expiry_date,status)
+          VALUES(:no,:enterpriseId,:name,:amount,:effectiveDate,:expiryDate,:status)
+          """)
+          .params(Map.of("no",no,"enterpriseId",r.enterpriseId(),"name",r.name(),"amount",r.amount(),
+            "effectiveDate",r.effectiveDate(),"expiryDate",r.expiryDate(),"status",r.status())).update();
+    }
+
+    @PutMapping("/agreements/{id}") @Transactional
+    void updateAgreement(@PathVariable long id,@Valid @RequestBody AgreementRequest r) {
+        if(r.status()==1) jdbc.sql("UPDATE agreement SET status=2 WHERE enterprise_id=:enterpriseId AND status=1 AND id<>:id AND deleted_at IS NULL")
+          .params(Map.of("enterpriseId",r.enterpriseId(),"id",id)).update();
+        require(jdbc.sql("""
+          UPDATE agreement SET enterprise_id=:enterpriseId,name=:name,amount=:amount,
+          effective_date=:effectiveDate,expiry_date=:expiryDate,status=:status WHERE id=:id AND deleted_at IS NULL
+          """)
+          .params(Map.of("id",id,"enterpriseId",r.enterpriseId(),"name",r.name(),"amount",r.amount(),
+            "effectiveDate",r.effectiveDate(),"expiryDate",r.expiryDate(),"status",r.status())).update(),"协议不存在");
+    }
+
+    @DeleteMapping("/agreements/{id}") @ResponseStatus(HttpStatus.NO_CONTENT)
+    void deleteAgreement(@PathVariable long id) {
+        long orders=jdbc.sql("SELECT COUNT(*) FROM order_main WHERE agreement_id=:id").param("id",id).query(Long.class).single();
+        if(orders>0) throw new IllegalArgumentException("协议已有订单引用，只能停用，不能删除");
+        require(jdbc.sql("UPDATE agreement SET deleted_at=NOW(),status=2 WHERE id=:id AND deleted_at IS NULL")
+          .param("id",id).update(),"协议不存在");
+    }
+
+    @GetMapping("/orders")
+    List<Map<String,Object>> orders() {
+        return jdbc.sql("""
+          SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,o.payable_amount AS payableAmount,
+            o.payment_status AS paymentStatus,o.order_status AS orderStatus,
+            DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,COUNT(oi.id) AS itemKinds,SUM(oi.quantity) AS itemCount
+          FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id LEFT JOIN order_item oi ON oi.order_main_id=o.id
+          GROUP BY o.id ORDER BY o.id DESC
+          """).query().listOfRows();
+    }
+
+    @GetMapping("/orders/{id}")
+    Map<String,Object> order(@PathVariable long id) {
+        var order=jdbc.sql("""
+          SELECT o.*,e.name AS enterpriseName,u.real_name AS buyerName
+          FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id JOIN enterprise_user u ON u.id=o.user_id WHERE o.id=:id
+          """)
+          .param("id",id).query().singleRow();
+        var items=jdbc.sql("""
+          SELECT oi.id,p.title,s.sku_code AS skuCode,oi.quantity,oi.unit_price AS unitPrice,
+          oi.total_price AS totalPrice FROM order_item oi JOIN product_sku s ON s.id=oi.sku_id
+          JOIN product_spu p ON p.id=s.spu_id WHERE oi.order_main_id=:id
+          """).param("id",id).query().listOfRows();
+        return Map.of("order",order,"items",items);
+    }
+
+    @PutMapping("/orders/{id}/status")
+    void orderStatus(@PathVariable long id,@RequestBody OrderStatusRequest r) {
+        require(jdbc.sql("UPDATE order_main SET payment_status=:paymentStatus,order_status=:orderStatus WHERE id=:id")
+          .params(Map.of("id",id,"paymentStatus",r.paymentStatus(),"orderStatus",r.orderStatus())).update(),"订单不存在");
+    }
+
+    private static String value(String s){return s==null?"":s;}
+    private static void require(int n,String message){if(n==0)throw new IllegalArgumentException(message);}
+    public record ProductRequest(@NotBlank String title,@NotNull Long categoryId,@NotNull Long brandId,String summary,String spec,
+      @NotNull @DecimalMin("0") BigDecimal marketPrice,@NotNull @DecimalMin("0") BigDecimal memberPrice,@Min(0) int stock,int status){}
+    public record EnterpriseRequest(@NotBlank String name,@NotBlank String creditCode,@NotBlank String contactName,
+      @NotBlank String contactPhone,String address,int status){}
+    public record AgreementRequest(@NotNull Long enterpriseId,@NotBlank String name,@NotNull @DecimalMin("0") BigDecimal amount,
+      @NotBlank String effectiveDate,@NotBlank String expiryDate,int status){}
+    public record StatusRequest(int status){}
+    public record StockRequest(@Min(0) int stock){}
+    public record OrderStatusRequest(int paymentStatus,int orderStatus){}
+}
