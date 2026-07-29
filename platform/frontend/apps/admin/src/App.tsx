@@ -7,7 +7,7 @@ import type { ColumnsType } from "antd/es/table";
 import zhCN from "antd/locale/zh_CN";
 
 type Row = Record<string, any>;
-type Module = "overview" | "users" | "roles" | "permissions" | "logs" | "configs";
+type Module = "overview" | "products" | "enterprises" | "agreements" | "orders" | "users" | "roles" | "permissions" | "logs" | "configs";
 const apiHeaders = { "Content-Type": "application/json", Authorization: `Basic ${btoa("admin:change-me-before-production")}` };
 const dateTime = (value?: string) => value ? new Intl.DateTimeFormat("zh-CN", {
   year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
@@ -23,13 +23,19 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json();
 }
 
+async function rootApi<T>(path: string): Promise<T> {
+  const response = await fetch(path, { headers: apiHeaders });
+  if (!response.ok) throw new Error(`请求失败（${response.status}）`);
+  return response.json();
+}
+
 const navItems = [
   { key: "overview", label: "经营概览", icon: <span>概</span> },
   { type: "group" as const, label: "业务管理", children: [
-    { key: "products", label: "商品管理", icon: <span>商</span>, disabled: true },
-    { key: "enterprises", label: "企业管理", icon: <span>企</span>, disabled: true },
-    { key: "agreements", label: "协议管理", icon: <span>协</span>, disabled: true },
-    { key: "orders", label: "订单管理", icon: <span>单</span>, disabled: true }
+    { key: "products", label: "商品管理", icon: <span>商</span> },
+    { key: "enterprises", label: "企业管理", icon: <span>企</span> },
+    { key: "agreements", label: "协议管理", icon: <span>协</span> },
+    { key: "orders", label: "订单管理", icon: <span>单</span> }
   ]},
   { type: "group" as const, label: "系统管理", children: [
     { key: "users", label: "用户管理", icon: <span>用</span> },
@@ -50,6 +56,10 @@ function AdminApp() {
   const [module, setModule] = useState<Module>("overview");
   const titles: Record<Module, [string,string]> = {
     overview:["经营概览","掌握平台账户、权限与关键业务运行状态"],
+    products:["商品管理","维护自营商品、SKU、协议价格与可售库存"],
+    enterprises:["企业管理","查看企业客户、成员账户和有效采购协议"],
+    agreements:["协议管理","维护协议商品关联及企业专属成交价格"],
+    orders:["订单管理","查询采购订单、付款状态与履约进度"],
     users:["用户管理","维护后台登录用户、角色归属与启停状态"],
     roles:["角色管理","按岗位配置角色与操作权限"],
     permissions:["权限管理","查看系统权限点及所属业务模块"],
@@ -73,6 +83,7 @@ function AdminApp() {
         <div className="page-heading"><div><span>2026年7月29日 · 数据实时更新</span><Typography.Title level={2}>{titles[module][0]}</Typography.Title><p>{titles[module][1]}</p></div>
           <Space><Button href="/web/">查看客户端</Button><Button onClick={() => location.reload()}>刷新数据</Button></Space></div>
         {module === "overview" && <Overview go={setModule}/>}
+        {(["products","enterprises","agreements","orders"] as Module[]).includes(module) && <BusinessModule module={module}/>}
         {module === "users" && <Users />}
         {module === "roles" && <Roles />}
         {module === "permissions" && <Permissions />}
@@ -81,6 +92,47 @@ function AdminApp() {
       </Layout.Content>
     </Layout>
   </Layout>;
+}
+
+function BusinessModule({module}:{module:Module}) {
+  const products = useLoad<Row[]>(()=>rootApi("/api/public/catalog/products?enterpriseId=1"));
+  const profile = useLoad<Row>(()=>rootApi("/api/client/profile"));
+  const agreements = useLoad<Row[]>(()=>rootApi("/api/admin/agreements/1/items"));
+  const orders = useLoad<Row[]>(()=>rootApi("/api/client/orders"));
+  if(module==="products") return <Card className="data-card" title="自营商品列表" extra={<Space><Tag color="blue">共 {products.data?.length||0} 款</Tag><Button type="primary">＋ 新增商品</Button></Space>}><Table rowKey="skuId" loading={products.loading} dataSource={products.data} columns={[
+    {title:"商品信息",render:(_,r)=><div className="user-cell"><i>商</i><span><strong>{r.title}</strong><small>{r.skuCode}</small></span></div>},
+    {title:"市场价",dataIndex:"marketPrice",render:v=>`¥${Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2})}`},
+    {title:"会员价",dataIndex:"memberPrice",render:v=>`¥${Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2})}`},
+    {title:"协议价",dataIndex:"agreementPrice",render:v=><strong className="price-text">¥{Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2})}</strong>},
+    {title:"可售库存",dataIndex:"availableStock",render:v=><Tag color={v>10?"green":"orange"}>{v} 件</Tag>},
+    {title:"状态",render:()=> <Tag color="green">在售</Tag>},
+    {title:"操作",render:()=> <Space><Button type="link">编辑</Button><Button type="link">库存</Button><Button type="link" danger>下架</Button></Space>}
+  ]}/></Card>;
+  if(module==="enterprises") {
+    const row=profile.data?[{id:profile.data.enterpriseId,name:profile.data.enterpriseName,contact:profile.data.realName,phone:profile.data.phone,agreement:profile.data.agreementName,expiry:profile.data.agreementExpiry}]:[];
+    return <Card className="data-card" title="企业客户列表" extra={<Button type="primary">＋ 新增企业</Button>}><Table rowKey="id" loading={profile.loading} dataSource={row} columns={[
+      {title:"企业名称",dataIndex:"name",render:v=><div className="user-cell"><i>企</i><span><strong>{v}</strong><small>已完成企业认证</small></span></div>},
+      {title:"联系人",render:(_,r)=><>{r.contact}<small className="subline">{r.phone}</small></>},
+      {title:"有效协议",dataIndex:"agreement"},{title:"协议到期日",dataIndex:"expiry"},
+      {title:"状态",render:()=> <Tag color="green">正常</Tag>},
+      {title:"操作",render:()=> <Space><Button type="link">查看成员</Button><Button type="link">编辑</Button><Button type="link">协议</Button></Space>}
+    ]}/></Card>;
+  }
+  if(module==="agreements") return <Card className="data-card" title="2026年度办公设备采购框架协议" extra={<Button type="primary">＋ 添加协议商品</Button>}><Table rowKey="id" loading={agreements.loading} dataSource={agreements.data} columns={[
+    {title:"商品名称",dataIndex:"title",render:(v,r)=><><strong>{v}</strong><small className="subline">{r.skuCode}</small></>},
+    {title:"市场价",dataIndex:"marketPrice",render:v=>`¥${Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2})}`},
+    {title:"协议价",dataIndex:"agreementPrice",render:v=><strong className="price-text">¥{Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2})}</strong>},
+    {title:"状态",dataIndex:"status",render:v=><Tag color={v?"green":"default"}>{v?"生效中":"停用"}</Tag>},
+    {title:"更新时间",dataIndex:"updatedAt",render:dateTime},
+    {title:"操作",render:()=> <Space><Button type="link">修改价格</Button><Button type="link" danger>移除</Button></Space>}
+  ]}/></Card>;
+  return <Card className="data-card" title="采购订单列表" extra={<Space><Tag color="orange">银行转账</Tag><Button>导出订单</Button></Space>}><Table rowKey="id" loading={orders.loading} dataSource={orders.data} columns={[
+    {title:"订单号",dataIndex:"orderNo",render:v=><strong>{v}</strong>},{title:"商品",render:(_,r)=>`${r.itemKinds} 种 / ${r.itemCount} 件`},
+    {title:"订单金额",dataIndex:"payableAmount",render:v=><strong>¥{Number(v).toLocaleString("zh-CN",{minimumFractionDigits:2})}</strong>},
+    {title:"付款状态",dataIndex:"paymentStatus",render:v=><Tag color={v===2?"green":"orange"}>{["待付款","待确认","已确认"][v]||"待处理"}</Tag>},
+    {title:"订单状态",dataIndex:"orderStatus",render:v=><Tag color="blue">{["待付款","待发货","运输中","已完成","已取消"][v]||"处理中"}</Tag>},
+    {title:"下单时间",dataIndex:"createdAt",render:dateTime},{title:"操作",render:()=> <Button type="link">查看详情</Button>}
+  ]}/></Card>;
 }
 
 function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []) {
