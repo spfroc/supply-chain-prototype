@@ -1,4 +1,85 @@
-import React from "react";import ReactDOM from "react-dom/client";import "./style.css";
-const goods=[["联想 ThinkBook 16+ 商务本","Ultra 7 · 32G · 1TB","¥6,480"],["得力 A4 多功能复印纸","70g · 500张×8包","¥186"]];
-function App(){return <><header><b>政企采购供应链</b><nav>首页　办公集采　政采专区　场景方案</nav><button>我的采购</button></header><main><section className="hero"><span>企业协议已生效</span><h1>办公采购，一站配齐</h1><p>企业协议专属价格 · 自营正品保障 · 全国配送</p></section><h2>协议精选</h2><div className="grid">{goods.map(item=><article key={item[0]}><div>自营商品</div><h3>{item[0]}</h3><p>{item[1]}</p><strong>{item[2]}</strong><button>加入购物车</button></article>)}</div></main></>}
+import React, { useEffect, useMemo, useState } from "react";
+import ReactDOM from "react-dom/client";
+import "./style.css";
+
+type View="home"|"products"|"detail"|"cart"|"orders"|"profile";
+type Row=Record<string,any>;
+const money=(value:any)=>`¥${Number(value||0).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
+const dateTime=(value:string)=>value?new Intl.DateTimeFormat("zh-CN",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(value.replace(" ","T"))):"—";
+const orderStatus=["待付款","待发货","运输中","已完成","已取消"];
+
+async function api<T>(path:string,init?:RequestInit):Promise<T>{
+  const response=await fetch(path,{...init,headers:{"Content-Type":"application/json",...init?.headers}});
+  if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.message||data.detail||`操作失败（${response.status}）`);}
+  if(response.status===204||response.headers.get("content-length")==="0")return undefined as T;
+  return response.json();
+}
+
+function App(){
+  const [view,setView]=useState<View>("home");const [products,setProducts]=useState<Row[]>([]);const [profile,setProfile]=useState<Row>({});
+  const [cart,setCart]=useState<Row[]>([]);const [selected,setSelected]=useState<Row>();const [toast,setToast]=useState("");
+  const notify=(text:string)=>{setToast(text);setTimeout(()=>setToast(""),2200);};
+  const loadCart=()=>api<Row[]>("/api/client/cart").then(setCart).catch(e=>notify(e.message));
+  useEffect(()=>{void api<Row[]>("/api/public/catalog/products?enterpriseId=1").then(setProducts);void api<Row>("/api/client/profile").then(setProfile);void loadCart();},[]);
+  const add=async(product:Row,quantity=1)=>{try{await api("/api/client/cart",{method:"POST",body:JSON.stringify({skuId:product.skuId,quantity})});await loadCart();notify("已加入采购车");}catch(e){notify((e as Error).message);}};
+  const goProduct=(product:Row)=>{setSelected(product);setView("detail");scrollTo(0,0);};
+  return <div className="shop">
+    <div className="topbar"><span>政企采购供应链 · 自营正品 · 协议价格</span><div><button onClick={()=>setView("orders")}>我的订单</button><button onClick={()=>setView("profile")}>企业中心</button><a href="/admin/">管理后台</a></div></div>
+    <header className="header"><button className="logo" onClick={()=>setView("home")}><i>政</i><span><strong>政企采购</strong><small>SUPPLY CHAIN</small></span></button>
+      <label className="search">⌕<input placeholder="搜索商品、品牌、型号或方案"/><button onClick={()=>setView("products")}>搜索</button></label>
+      <button className="cart-button" onClick={()=>setView("cart")}>采购车 <b>{cart.reduce((n,r)=>n+Number(r.quantity),0)}</b></button>
+    </header>
+    <nav className="nav"><button className={view==="home"?"active":""} onClick={()=>setView("home")}>首页</button><button onClick={()=>setView("products")}>办公集采</button><button>政采专区</button><button>场景方案</button><button>平台比价</button><span>企业协议已生效</span></nav>
+    {view==="home"&&<Home products={products} open={goProduct} add={add} all={()=>setView("products")}/>}
+    {view==="products"&&<Products products={products} open={goProduct} add={add}/>}
+    {view==="detail"&&selected&&<Detail product={selected} back={()=>setView("products")} add={add}/>}
+    {view==="cart"&&<Cart rows={cart} reload={loadCart} orders={()=>setView("orders")} notify={notify}/>}
+    {view==="orders"&&<Orders/>}
+    {view==="profile"&&<Profile profile={profile} orders={()=>setView("orders")}/>}
+    <footer className="footer"><div><strong>政企采购供应链</strong><span>企业协议价 · 自营库存 · 银行转账 · 全国配送</span></div><p>服务电话 400-800-2026　工作日 09:00–18:00</p></footer>
+    {toast&&<div className="toast">✓ {toast}</div>}
+  </div>;
+}
+
+function Home({products,open,add,all}:{products:Row[];open:(r:Row)=>void;add:(r:Row)=>void;all:()=>void}){
+  const categories=[["办","办公设备"],["耗","办公耗材"],["数","数码设备"],["会","会议设备"],["网","网络设备"],["家","家用电器"],["劳","劳保防护"],["全","全部分类"]];
+  return <main><section className="hero"><div><span>2026 政企集采季</span><h1>办公采购<br/><b>一站配齐</b></h1><p>企业协议专属价格 · 自营库存 · 多地址配送</p><button onClick={all}>立即选购　›</button></div><div className="hero-art"><i>💻</i><i>🖨️</i><i>📄</i></div><aside><strong>{products.length||2}<small>款</small></strong><span>协议精选商品</span><em>低于会员价，协议期内可随时调整</em></aside></section>
+    <section className="category-strip">{categories.map((item,index)=><button key={item[1]} onClick={all}><i className={`tone${index}`}>{item[0]}</i><span>{item[1]}</span><small>企业采购 ›</small></button>)}</section>
+    <section className="section"><div className="section-head"><div><span>AGREEMENT PICKS</span><h2>协议精选</h2><p>已自动匹配当前企业有效协议价格</p></div><button onClick={all}>查看全部商品 →</button></div><div className="product-grid">{products.slice(0,4).map((p,i)=><ProductCard key={p.skuId} product={p} index={i} open={open} add={add}/>)}</div></section>
+    <section className="solutions"><div><span>SCENE SOLUTION</span><h2>采购不只是选商品<br/>更是解决实际场景</h2><p>从设备选型、协议采购到配送验收，一站式完成。</p><button>查看全部方案</button></div>{[["智慧办公","12件商品","¥48,600","办"],["智能会议","8件商品","¥36,800","会"],["园区安防","16件商品","¥126,000","安"]].map(x=><article key={x[0]}><i>{x[3]}</i><span>整体解决方案</span><strong>{x[0]}</strong><small>{x[1]} · 含安装服务</small><b>{x[2]}</b><button>查看方案 ›</button></article>)}</section>
+  </main>;
+}
+
+function Products({products,open,add}:{products:Row[];open:(r:Row)=>void;add:(r:Row)=>void}){
+  const [keyword,setKeyword]=useState("");const filtered=products.filter(p=>p.title.includes(keyword)||p.summary?.includes(keyword));
+  return <main className="page"><div className="breadcrumb">首页　/　办公集采</div><div className="listing-layout"><aside className="filters"><h3>商品分类</h3>{["全部商品","办公设备","电脑整机","办公耗材","打印耗材"].map((x,i)=><button className={i===0?"active":""} key={x}>{x}<span>›</span></button>)}<h3>价格区间</h3><label><input placeholder="最低价"/>—<input placeholder="最高价"/></label><h3>商品状态</h3><p>☑ 仅看有货</p><p>☑ 企业协议商品</p></aside><section className="listing"><div className="listing-head"><div><h1>办公集采</h1><p>共 {filtered.length} 款自营商品</p></div><label>⌕ <input value={keyword} onChange={e=>setKeyword(e.target.value)} placeholder="在结果中搜索"/></label></div><div className="sort"><button className="active">综合排序</button><button>销量</button><button>价格 ↕</button><span>协议价优先展示</span></div><div className="product-grid">{filtered.map((p,i)=><ProductCard key={p.skuId} product={p} index={i} open={open} add={add}/>)}</div></section></div></main>;
+}
+
+function ProductCard({product,index,open,add}:{product:Row;index:number;open:(r:Row)=>void;add:(r:Row)=>void}){
+  return <article className="product-card" onClick={()=>open(product)}><div className={`product-image p${index%5}`}><span>自营</span><i>{["💻","📄","🖨️","🖥️","📦"][index%5]}</i><em>协议专享</em></div><div className="product-info"><small>企业协议商品</small><h3>{product.title}</h3><p>{product.summary||"政企采购自营商品，全国配送"}</p><div className="price"><strong>{money(product.agreementPrice||product.memberPrice)}</strong><del>{money(product.marketPrice)}</del></div><div className="stock"><span>库存 {product.availableStock}</span><button onClick={event=>{event.stopPropagation();void add(product)}}>加入采购车</button></div></div></article>;
+}
+
+function Detail({product,back,add}:{product:Row;back:()=>void;add:(r:Row,n:number)=>void}){
+  const [qty,setQty]=useState(1);return <main className="page"><div className="breadcrumb">首页　/　办公集采　/　<button onClick={back}>返回列表</button></div><section className="detail"><div className="detail-gallery"><div><i>💻</i><span>协议价商品</span></div><nav>{[1,2,3,4].map(x=><button key={x}>商品图 {x}</button>)}</nav></div><div className="detail-main"><span className="self">自营商品</span><h1>{product.title}</h1><p>{product.summary}</p><div className="agreement-price"><label>企业协议价</label><strong>{money(product.agreementPrice||product.memberPrice)}</strong><del>市场价 {money(product.marketPrice)}</del><em>已为山东高速数字科技匹配有效协议</em></div><dl><dt>商品编码</dt><dd>{product.skuCode}</dd><dt>配送</dt><dd>山东省济南市　现货，预计次日送达</dd><dt>服务</dt><dd><span>自营正品</span><span>全国配送</span><span>统一对账</span></dd><dt>数量</dt><dd className="counter"><button onClick={()=>setQty(Math.max(1,qty-1))}>−</button><b>{qty}</b><button onClick={()=>setQty(Math.min(product.availableStock,qty+1))}>＋</button><small>库存 {product.availableStock} 件</small></dd></dl><div className="buy"><button onClick={()=>void add(product,qty)}>加入采购车</button><button onClick={()=>void add(product,qty)}>立即采购</button></div></div></section><section className="detail-body"><nav><button className="active">商品详情</button><button>规格参数</button><button>配送与售后</button></nav><div><h2>政企采购自营商品</h2><p>商品由平台统一采购、统一库存和统一配送，支持企业协议专属价格、多地址分配和线下银行转账。</p><div className="feature-grid">{[["正","自营正品","严格供应链审核"],["价","协议专价","按企业有效协议计价"],["配","多地配送","同一 SKU 可拆分到多个地址"],["票","发票记录","第三方开具，平台留档"]].map(x=><article key={x[1]}><i>{x[0]}</i><strong>{x[1]}</strong><small>{x[2]}</small></article>)}</div></div></section></main>;
+}
+
+function Cart({rows,reload,orders,notify}:{rows:Row[];reload:()=>Promise<void>;orders:()=>void;notify:(s:string)=>void}){
+  const [submitting,setSubmitting]=useState(false);const selected=rows.filter(x=>Number(x.selected)===1);
+  const total=selected.reduce((n,r)=>n+Number(r.salePrice)*Number(r.quantity),0);
+  const update=async(row:Row,changes:Row)=>{try{await api(`/api/client/cart/${row.id}`,{method:"PUT",body:JSON.stringify({quantity:changes.quantity??row.quantity,selected:changes.selected??row.selected})});await reload();}catch(e){notify((e as Error).message);}};
+  const remove=async(row:Row)=>{try{await api(`/api/client/cart/${row.id}`,{method:"DELETE"});await reload();notify("商品已移出采购车");}catch(e){notify((e as Error).message);}};
+  const checkout=async()=>{setSubmitting(true);try{const result=await api<Row>("/api/client/orders",{method:"POST",body:JSON.stringify({idempotencyKey:crypto.randomUUID()})});await reload();notify(`订单 ${result.orderNo} 提交成功`);setTimeout(orders,900);}catch(e){notify((e as Error).message);}finally{setSubmitting(false);}};
+  return <main className="page cart-page"><div className="step"><b>1</b><strong>确认采购车</strong><i/><b>2</b><span>填写订单</span><i/><b>3</b><span>银行转账</span></div><div className="cart-title"><h1>采购车</h1><p>所选商品已匹配企业协议最优价格</p></div>{!rows.length?<div className="empty"><i>🛒</i><h2>采购车还是空的</h2><p>去选择需要采购的商品吧</p><button onClick={()=>location.href="/web/"}>继续采购</button></div>:<><div className="cart-table"><header><span>选择</span><span>商品信息</span><span>协议单价</span><span>数量</span><span>小计</span><span>操作</span></header>{rows.map(row=><article key={row.id}><input type="checkbox" checked={!!Number(row.selected)} onChange={e=>void update(row,{selected:e.target.checked?1:0})}/><div className="cart-product"><i>📦</i><span><strong>{row.title}</strong><small>{row.skuCode}</small><em>企业协议商品</em></span></div><strong>{money(row.salePrice)}<del>{money(row.marketPrice)}</del></strong><div className="counter"><button onClick={()=>void update(row,{quantity:Math.max(1,row.quantity-1)})}>−</button><b>{row.quantity}</b><button onClick={()=>void update(row,{quantity:row.quantity+1})}>＋</button></div><b>{money(Number(row.salePrice)*row.quantity)}</b><button className="delete" onClick={()=>void remove(row)}>删除</button></article>)}</div><div className="settlement"><div><span>已选择 <b>{selected.length}</b> 种商品</span><small>协议价格不可与优惠券叠加</small></div><div><span>合计（不含运费）</span><strong>{money(total)}</strong><small>已节省 {money(selected.reduce((n,r)=>n+(Number(r.marketPrice)-Number(r.salePrice))*r.quantity,0))}</small></div><button disabled={!selected.length||submitting} onClick={()=>void checkout()}>{submitting?"正在提交…":"提交订单"}</button></div></>}</main>;
+}
+
+function Orders(){
+  const [rows,setRows]=useState<Row[]>([]);const [tab,setTab]=useState(-1);useEffect(()=>{void api<Row[]>("/api/client/orders").then(setRows)},[]);
+  const filtered=tab<0?rows:rows.filter(r=>Number(r.orderStatus)===tab);
+  return <main className="page account-page"><aside><div className="account-brand"><i>鲁</i><strong>企业采购中心</strong></div>{[["profile","账户概览"],["orders","我的订单"],["address","地址管理"],["invoice","发票管理"],["member","企业成员"]].map((x,i)=><button className={i===1?"active":""} key={x[0]}>{x[1]}<span>›</span></button>)}</aside><section><div className="account-heading"><h1>我的订单</h1><p>查看企业采购订单和履约进度</p></div><div className="order-tabs"><button className={tab===-1?"active":""} onClick={()=>setTab(-1)}>全部订单</button>{orderStatus.slice(0,4).map((x,i)=><button key={x} className={tab===i?"active":""} onClick={()=>setTab(i)}>{x}</button>)}</div>{filtered.map(row=><article className="order-card" key={row.id}><header><strong>{dateTime(row.createdAt)}</strong><span>订单号：{row.orderNo}</span><em>{orderStatus[row.orderStatus]||"处理中"}</em></header><div><i>📦</i><span><strong>{row.itemKinds} 种商品，共 {row.itemCount} 件</strong><small>企业协议采购 · 银行转账</small></span><p><small>订单金额</small><b>{money(row.payableAmount)}</b></p><p><small>订单状态</small><strong>{orderStatus[row.orderStatus]}</strong></p><button>查看详情</button></div></article>)}{!filtered.length&&<div className="empty small"><i>▱</i><h2>暂无相关订单</h2></div>}</section></main>;
+}
+
+function Profile({profile,orders}:{profile:Row;orders:()=>void}){
+  return <main className="page account-page"><aside><div className="account-brand"><i>鲁</i><strong>企业采购中心</strong></div>{["账户概览","我的订单","地址管理","发票管理","企业成员"].map((x,i)=><button className={i===0?"active":""} key={x} onClick={i===1?orders:undefined}>{x}<span>›</span></button>)}</aside><section><div className="profile-hero"><i>鲁</i><div><span>企业已认证</span><h1>{profile.enterpriseName||"山东高速数字科技有限公司"}</h1><p>{profile.realName} · {profile.roleCode==="ENTERPRISE_ADMIN"?"企业管理员":"采购员"}　{profile.phone}</p></div><button>编辑企业资料</button><article><span><strong>¥186,420</strong><small>本月采购</small></span><span><strong>¥28,640</strong><small>协议节省</small></span><span><strong>2</strong><small>进行中订单</small></span></article></div><div className="profile-grid"><section><header><h2>当前采购协议</h2><span>生效中</span></header><strong>{profile.agreementName}</strong><p>协议有效期至 {profile.agreementExpiry}</p><div><span>协议商品 <b>128</b> 款</span><span>企业成员 <b>16</b> 人</span></div></section><section><header><h2>待办事项</h2></header><button onClick={orders}><i>付</i><span><strong>1 笔订单待付款</strong><small>请在付款时限内完成银行转账</small></span><em>›</em></button><button onClick={orders}><i>运</i><span><strong>1 笔订单待发货</strong><small>到账确认后平台将安排配送</small></span><em>›</em></button></section></div><div className="profile-actions">{[["址","地址管理","维护多地址配送信息"],["票","发票管理","查看第三方开票记录"],["员","企业成员","管理采购成员与状态"],["密","安全设置","修改密码和登录信息"]].map(x=><button key={x[1]}><i>{x[0]}</i><span><strong>{x[1]}</strong><small>{x[2]}</small></span><em>›</em></button>)}</div></section></main>;
+}
+
 ReactDOM.createRoot(document.getElementById("root")!).render(<React.StrictMode><App/></React.StrictMode>);

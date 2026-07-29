@@ -7,6 +7,8 @@
 - MySQL 核心模型与 Flyway 迁移：分类、品牌、SPU、SKU、企业、企业用户、协议、协议商品、地址、购物车、主/子订单、订单商品、银行转账、库存流水和操作日志。
 - 商品公开查询 API，可按企业返回协议价格。
 - 协议商品管理 API：查询、添加现有 SKU、调整协议价格、软移除。
+- 后台系统管理：用户、角色、权限、操作日志和基础配置。
+- Web/H5 客户端：企业资料、协议商品、购物车、订单查询与幂等下单。
 - Admin、Web、H5 三端独立 Vite 构建入口。
 - MySQL、Redis、API、三端静态站点的一键 Compose 编排。
 - 可加入 `comp` 服务器现有 `global_network`，由现有 Nginx 反向代理。
@@ -44,13 +46,25 @@ docker exec nginx nginx -s reload
 - 数据库存储在具名卷 `supply-chain_mysql_data`，Redis AOF 存储在 `supply-chain_redis_data`。
 - `.env`、OSS、高德、快递100和短信凭证不得提交 Git。
 - `V2__seed_development_data.sql` 仅为开发样例，正式生产初始化前应拆成独立 profile。
+- `V3__system_management_and_demo_orders.sql` 增加系统权限模型和跨端联调数据。
 - 删除协议商品使用软删除；不会删除商品基础库。
 - 生效协议调价、增删商品后续必须同时写 `operation_log` 并清理 Redis 价格缓存。
 
+## 自动化回归
+
+完整用例清单位于 `tests/TEST_CASES.md`。部署后在 Windows PowerShell 中执行：
+
+```powershell
+$content = Get-Content -Raw -Encoding UTF8 .\tests\api-smoke.ps1
+& ([scriptblock]::Create($content))
+```
+
+脚本覆盖入口健康、管理接口认证、用户增删改、权限与配置查询、操作日志、协议商品、购物车边界、下单和幂等保护。
+
 ## 下一阶段
 
-1. 数据库管理员、企业用户登录、JWT/Refresh Cookie 与 RBAC。
+1. 将临时开发认证替换为数据库账号登录、JWT/Refresh Cookie 与 RBAC 拦截。
 2. SPU/SKU、分类、品牌、企业、协议完整 CRUD。
-3. 价格引擎、购物车、多地址拆单、库存事务与幂等下单。
+3. 价格引擎、多地址拆单与库存释放补偿。
 4. 银行到账确认、发货物流、发票记录。
-5. 将已确认样板的三端页面逐模块迁移至正式 API。
+5. 导航、轮播图、方案与平台关联逐模块迁移至正式 API。

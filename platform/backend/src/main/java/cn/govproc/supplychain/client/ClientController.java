@@ -1,0 +1,212 @@
+package cn.govproc.supplychain.client;
+
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.NotNull;
+import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.web.bind.annotation.RestController;
+
+@RestController
+@RequestMapping("/api/client")
+public class ClientController {
+    private static final long DEMO_USER_ID = 1;
+    private static final long DEMO_ENTERPRISE_ID = 1;
+    private final JdbcClient jdbc;
+
+    public ClientController(JdbcClient jdbc) {
+        this.jdbc = jdbc;
+    }
+
+    @GetMapping("/profile")
+    Map<String, Object> profile() {
+        return jdbc.sql("""
+            SELECT u.id, u.username, u.real_name AS realName, u.phone, u.role_code AS roleCode,
+              e.id AS enterpriseId, e.name AS enterpriseName,
+              a.id AS agreementId, a.name AS agreementName,
+              DATE_FORMAT(a.expiry_date, '%Y-%m-%d') AS agreementExpiry
+            FROM enterprise_user u
+            JOIN enterprise e ON e.id=u.enterprise_id
+            LEFT JOIN agreement a ON a.enterprise_id=e.id AND a.status=1
+              AND CURRENT_DATE BETWEEN a.effective_date AND a.expiry_date AND a.deleted_at IS NULL
+            WHERE u.id=:id
+            ORDER BY a.id DESC LIMIT 1
+            """).param("id", DEMO_USER_ID).query().singleRow();
+    }
+
+    @GetMapping("/addresses")
+    List<Map<String, Object>> addresses() {
+        return jdbc.sql("""
+            SELECT id, contact_name AS contactName, contact_phone AS contactPhone, province, city,
+              district, detail, is_default AS isDefault
+            FROM address WHERE user_id=:userId AND deleted_at IS NULL ORDER BY is_default DESC,id
+            """).param("userId", DEMO_USER_ID).query().listOfRows();
+    }
+
+    @GetMapping("/cart")
+    List<Map<String, Object>> cart() {
+        return jdbc.sql("""
+            SELECT c.id, c.sku_id AS skuId, c.quantity, c.selected, p.title, p.main_image AS mainImage,
+              s.sku_code AS skuCode, s.spec_json AS specJson, s.stock-s.reserved_stock AS availableStock,
+              s.market_price AS marketPrice, s.member_price AS memberPrice,
+              COALESCE(ai.agreement_price,s.member_price) AS salePrice
+            FROM cart_item c
+            JOIN product_sku s ON s.id=c.sku_id
+            JOIN product_spu p ON p.id=s.spu_id
+            LEFT JOIN agreement a ON a.enterprise_id=:enterpriseId AND a.status=1
+              AND CURRENT_DATE BETWEEN a.effective_date AND a.expiry_date AND a.deleted_at IS NULL
+            LEFT JOIN agreement_item ai ON ai.agreement_id=a.id AND ai.sku_id=s.id
+              AND ai.status=1 AND ai.deleted_at IS NULL
+            WHERE c.user_id=:userId ORDER BY c.id
+            """).params(Map.of("enterpriseId", DEMO_ENTERPRISE_ID, "userId", DEMO_USER_ID))
+            .query().listOfRows();
+    }
+
+    @PostMapping("/cart")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Transactional
+    void addCart(@Valid @RequestBody CartRequest request) {
+        int stock = jdbc.sql("SELECT stock-reserved_stock FROM product_sku WHERE id=:id AND status=1 AND deleted_at IS NULL")
+            .param("id", request.skuId()).query(Integer.class)
+            .optional().orElseThrow(() -> new IllegalArgumentException("商品不存在或已下架"));
+        if (request.quantity() > stock) throw new IllegalArgumentException("加入数量不能超过可售库存");
+        var existingId = jdbc.sql("""
+            SELECT id FROM cart_item WHERE user_id=:userId AND sku_id=:skuId AND solution_id IS NULL LIMIT 1
+            """).params(Map.of("userId", DEMO_USER_ID, "skuId", request.skuId()))
+            .query(Long.class).optional();
+        if (existingId.isPresent()) {
+            jdbc.sql("UPDATE cart_item SET quantity=LEAST(quantity+:quantity,:stock),selected=1 WHERE id=:id")
+                .params(Map.of("quantity", request.quantity(), "stock", stock, "id", existingId.get())).update();
+        } else {
+            jdbc.sql("INSERT INTO cart_item(user_id,sku_id,quantity,selected) VALUES(:userId,:skuId,:quantity,1)")
+                .params(Map.of("userId", DEMO_USER_ID, "skuId", request.skuId(), "quantity", request.quantity())).update();
+        }
+    }
+
+    @PutMapping("/cart/{id}")
+    void updateCart(@PathVariable long id, @Valid @RequestBody CartUpdateRequest request) {
+        int stock = jdbc.sql("""
+            SELECT s.stock-s.reserved_stock FROM cart_item c JOIN product_sku s ON s.id=c.sku_id
+            WHERE c.id=:id AND c.user_id=:userId
+            """).params(Map.of("id", id, "userId", DEMO_USER_ID)).query(Integer.class)
+            .optional().orElseThrow(() -> new IllegalArgumentException("购物车商品不存在"));
+        if (request.quantity() > stock) throw new IllegalArgumentException("购买数量不能超过可售库存");
+        jdbc.sql("UPDATE cart_item SET quantity=:quantity,selected=:selected WHERE id=:id AND user_id=:userId")
+            .params(Map.of("quantity", request.quantity(), "selected", request.selected(),
+                "id", id, "userId", DEMO_USER_ID)).update();
+    }
+
+    @DeleteMapping("/cart/{id}")
+    void deleteCart(@PathVariable long id) {
+        int changed = jdbc.sql("DELETE FROM cart_item WHERE id=:id AND user_id=:userId")
+            .params(Map.of("id", id, "userId", DEMO_USER_ID)).update();
+        if (changed == 0) throw new IllegalArgumentException("购物车商品不存在");
+    }
+
+    @GetMapping("/orders")
+    List<Map<String, Object>> orders() {
+        return jdbc.sql("""
+            SELECT o.id, o.order_no AS orderNo, o.item_amount AS itemAmount, o.freight_amount AS freightAmount,
+              o.payable_amount AS payableAmount, o.payment_status AS paymentStatus, o.order_status AS orderStatus,
+              DATE_FORMAT(o.payment_due_at, '%Y-%m-%d %H:%i:%s') AS paymentDueAt,
+              DATE_FORMAT(o.created_at, '%Y-%m-%d %H:%i:%s') AS createdAt,
+              COUNT(DISTINCT oi.id) AS itemKinds, COALESCE(SUM(oi.quantity),0) AS itemCount
+            FROM order_main o LEFT JOIN order_item oi ON oi.order_main_id=o.id
+            WHERE o.user_id=:userId GROUP BY o.id ORDER BY o.id DESC
+            """).param("userId", DEMO_USER_ID).query().listOfRows();
+    }
+
+    @PostMapping("/orders")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Transactional
+    Map<String, Object> checkout(@RequestBody(required = false) CheckoutRequest request) {
+        String idempotencyKey = request != null && request.idempotencyKey() != null
+            ? request.idempotencyKey() : UUID.randomUUID().toString();
+        var existing = jdbc.sql("SELECT id,order_no AS orderNo FROM order_main WHERE enterprise_id=:enterpriseId AND idempotency_key=:key")
+            .params(Map.of("enterpriseId", DEMO_ENTERPRISE_ID, "key", idempotencyKey)).query().listOfRows();
+        if (!existing.isEmpty()) return existing.getFirst();
+
+        long agreementId = jdbc.sql("""
+            SELECT id FROM agreement WHERE enterprise_id=:enterpriseId AND status=1 AND deleted_at IS NULL
+              AND CURRENT_DATE BETWEEN effective_date AND expiry_date ORDER BY id DESC LIMIT 1
+            """).param("enterpriseId", DEMO_ENTERPRISE_ID).query(Long.class)
+            .optional().orElseThrow(() -> new IllegalArgumentException("企业当前没有生效协议，无法下单"));
+        List<Map<String, Object>> lines = jdbc.sql("""
+            SELECT c.id AS cartId,c.sku_id AS skuId,c.quantity,p.title,s.sku_code AS skuCode,
+              s.stock-s.reserved_stock AS availableStock,COALESCE(ai.agreement_price,s.member_price) AS unitPrice
+            FROM cart_item c JOIN product_sku s ON s.id=c.sku_id JOIN product_spu p ON p.id=s.spu_id
+            LEFT JOIN agreement_item ai ON ai.agreement_id=:agreementId AND ai.sku_id=s.id
+              AND ai.status=1 AND ai.deleted_at IS NULL
+            WHERE c.user_id=:userId AND c.selected=1
+            """).params(Map.of("agreementId", agreementId, "userId", DEMO_USER_ID)).query().listOfRows();
+        if (lines.isEmpty()) throw new IllegalArgumentException("请先选择需要结算的商品");
+        for (var line : lines) {
+            if (((Number) line.get("quantity")).intValue() > ((Number) line.get("availableStock")).intValue()) {
+                throw new IllegalArgumentException(line.get("title") + "库存不足");
+            }
+        }
+        BigDecimal amount = lines.stream().map(line ->
+            ((BigDecimal) line.get("unitPrice")).multiply(BigDecimal.valueOf(((Number) line.get("quantity")).longValue()))
+        ).reduce(BigDecimal.ZERO, BigDecimal::add);
+        var addresses = jdbc.sql("""
+            SELECT id,contact_name AS contactName,contact_phone AS contactPhone,
+              CONCAT(province,city,district,detail) AS fullAddress
+            FROM address WHERE user_id=:userId AND deleted_at IS NULL ORDER BY is_default DESC,id LIMIT 1
+            """).param("userId", DEMO_USER_ID).query().listOfRows();
+        if (addresses.isEmpty()) throw new IllegalArgumentException("请先维护收货地址");
+        Map<String, Object> address = addresses.getFirst();
+        String orderNo = "PO" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        jdbc.sql("""
+            INSERT INTO order_main(order_no,enterprise_id,user_id,agreement_id,item_amount,freight_amount,
+              payable_amount,payment_status,order_status,price_version,idempotency_key,payment_due_at)
+            VALUES(:orderNo,:enterpriseId,:userId,:agreementId,:amount,0,:amount,0,0,:priceVersion,:key,DATE_ADD(NOW(),INTERVAL 48 HOUR))
+            """).params(Map.of("orderNo", orderNo, "enterpriseId", DEMO_ENTERPRISE_ID, "userId", DEMO_USER_ID,
+                "agreementId", agreementId, "amount", amount, "priceVersion", UUID.randomUUID().toString(), "key", idempotencyKey)).update();
+        long orderId = jdbc.sql("SELECT id FROM order_main WHERE order_no=:orderNo").param("orderNo", orderNo).query(Long.class).single();
+        String subOrderNo = orderNo + "-01";
+        jdbc.sql("""
+            INSERT INTO order_sub(order_main_id,sub_order_no,address_snapshot,status)
+            VALUES(:orderId,:subOrderNo,JSON_OBJECT('contactName',:contactName,'phone',:phone,'address',:address),0)
+            """).params(Map.of("orderId", orderId, "subOrderNo", subOrderNo,
+                "contactName", address.get("contactName"), "phone", address.get("contactPhone"),
+                "address", address.get("fullAddress"))).update();
+        long subOrderId = jdbc.sql("SELECT id FROM order_sub WHERE sub_order_no=:subOrderNo")
+            .param("subOrderNo", subOrderNo).query(Long.class).single();
+        for (var line : lines) {
+            long skuId = ((Number) line.get("skuId")).longValue();
+            int quantity = ((Number) line.get("quantity")).intValue();
+            BigDecimal unitPrice = (BigDecimal) line.get("unitPrice");
+            jdbc.sql("""
+                INSERT INTO order_item(order_main_id,order_sub_id,sku_id,quantity,unit_price,total_price,snapshot_json)
+                VALUES(:orderId,:subOrderId,:skuId,:quantity,:unitPrice,:total,
+                  JSON_OBJECT('title',:title,'skuCode',:skuCode))
+                """).params(Map.of("orderId", orderId, "subOrderId", subOrderId, "skuId", skuId,
+                    "quantity", quantity, "unitPrice", unitPrice, "total", unitPrice.multiply(BigDecimal.valueOf(quantity)),
+                    "title", line.get("title"), "skuCode", line.get("skuCode"))).update();
+            jdbc.sql("UPDATE product_sku SET reserved_stock=reserved_stock+:quantity WHERE id=:skuId")
+                .params(Map.of("quantity", quantity, "skuId", skuId)).update();
+        }
+        jdbc.sql("DELETE FROM cart_item WHERE user_id=:userId AND selected=1").param("userId", DEMO_USER_ID).update();
+        return Map.of("id", orderId, "orderNo", orderNo, "payableAmount", amount, "paymentMethod", "银行转账");
+    }
+
+    public record CartRequest(@NotNull Long skuId, @Min(1) @Max(9999) int quantity) {}
+    public record CartUpdateRequest(@Min(1) @Max(9999) int quantity, int selected) {}
+    public record CheckoutRequest(String idempotencyKey) {}
+}

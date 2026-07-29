@@ -23,4 +23,11 @@ public class ApiExceptionHandler {
         detail.setTitle("无法完成操作");
         return detail;
     }
+
+    @ExceptionHandler(IllegalArgumentException.class)
+    ProblemDetail businessRule(IllegalArgumentException exception) {
+        var detail = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, exception.getMessage());
+        detail.setTitle("业务操作无法完成");
+        return detail;
+    }
 }
