@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
@@ -34,7 +35,8 @@ public class AdminBusinessController {
 
     @PostMapping("/products") @ResponseStatus(HttpStatus.CREATED) @Transactional
     Map<String,Object> createProduct(@Valid @RequestBody ProductRequest r) {
-        String suffix=LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String suffix=LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"))
+          +"-"+UUID.randomUUID().toString().substring(0,8);
         String spuCode="SPU-"+suffix, skuCode="SKU-"+suffix;
         jdbc.sql("""
           INSERT INTO product_spu(spu_code,title,category_id,brand_id,summary,status)
@@ -148,7 +150,8 @@ public class AdminBusinessController {
     void createAgreement(@Valid @RequestBody AgreementRequest r) {
         if(r.status()==1) jdbc.sql("UPDATE agreement SET status=2 WHERE enterprise_id=:id AND status=1 AND deleted_at IS NULL")
           .param("id",r.enterpriseId()).update();
-        String no="AGR-"+LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String no="AGR-"+LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"))
+          +"-"+UUID.randomUUID().toString().substring(0,8);
         jdbc.sql("""
           INSERT INTO agreement(agreement_no,enterprise_id,name,amount,effective_date,expiry_date,status)
           VALUES(:no,:enterpriseId,:name,:amount,:effectiveDate,:expiryDate,:status)
