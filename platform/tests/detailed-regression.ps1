@@ -261,32 +261,51 @@ Case "BIZ-ENT-003" "企业名称、信用代码和联系人必填" {
 }
 Case "BIZ-ENT-004" "后台为指定企业添加、编辑和删除成员" {
   $memberUsername = "admin_member_$stamp"
+  $initialPassword = "Initial-$stamp!"
+  $changedPassword = "Changed-$stamp!"
   Expect-Status (Invoke-Api POST "/api/admin/business/enterprises/$($script:enterpriseId)/members" @{
-    username=$memberUsername; realName="ADMIN-MEMBER"; phone="13800138211"; roleCode="BUYER"; status=1
+    username=$memberUsername; password=$initialPassword; realName="ADMIN-MEMBER"; phone="13800138211"; roleCode="BUYER"; status=1
   } $adminHeaders) @(201)
   $saved = (Invoke-Api GET "/api/admin/business/enterprises/$($script:enterpriseId)/members" $null $adminHeaders).Data |
     Where-Object username -eq $memberUsername | Select-Object -First 1
   if (!$saved) { throw "后台新增企业成员后未查询到" }
+  Expect-Status (Invoke-Api POST "/api/auth/login" @{
+    enterpriseId=$script:enterpriseId; username=$memberUsername; password=$initialPassword
+  }) @(200)
   Expect-Status (Invoke-Api PUT "/api/admin/business/enterprises/$($script:enterpriseId)/members/$($saved.id)" @{
-    username=$memberUsername; realName="ADMIN-MEMBER-UPDATED"; phone="13800138212"; roleCode="BUYER"; status=0
+    username=$memberUsername; password=$changedPassword; realName="ADMIN-MEMBER-UPDATED"; phone="13800138212"; roleCode="BUYER"; status=1
   } $adminHeaders) @(200,204)
   $updated = (Invoke-Api GET "/api/admin/business/enterprises/$($script:enterpriseId)/members" $null $adminHeaders).Data |
     Where-Object id -eq $saved.id | Select-Object -First 1
-  if ($updated.status -ne 0 -or $updated.phone -ne "13800138212") { throw "后台企业成员编辑未生效" }
+  if ($updated.status -ne 1 -or $updated.phone -ne "13800138212") { throw "后台企业成员编辑未生效" }
+  Expect-Status (Invoke-Api POST "/api/auth/login" @{
+    enterpriseId=$script:enterpriseId; username=$memberUsername; password=$initialPassword
+  }) @(400)
+  Expect-Status (Invoke-Api POST "/api/auth/login" @{
+    enterpriseId=$script:enterpriseId; username=$memberUsername; password=$changedPassword
+  }) @(200)
   Expect-Status (Invoke-Api DELETE "/api/admin/business/enterprises/$($script:enterpriseId)/members/$($saved.id)" $null $adminHeaders) @(200,204)
+  $null = Invoke-WebRequest -Method POST -Uri "$BaseUrl/api/auth/login" -ContentType "application/json" `
+    -Body (@{ enterpriseId=1; username="demo"; password="demo-password" } | ConvertTo-Json) `
+    -WebSession $clientSession -UseBasicParsing
 }
 Case "BIZ-ENT-005" "企业至少保留一名管理员" {
   $memberUsername = "only_admin_$stamp"
   Expect-Status (Invoke-Api POST "/api/admin/business/enterprises/$($script:enterpriseId)/members" @{
-    username=$memberUsername; realName="ONLY-ADMIN"; phone="13800138213"; roleCode="ENTERPRISE_ADMIN"; status=1
+    username=$memberUsername; password="Initial-$stamp!"; realName="ONLY-ADMIN"; phone="13800138213"; roleCode="ENTERPRISE_ADMIN"; status=1
   } $adminHeaders) @(201)
   $saved = (Invoke-Api GET "/api/admin/business/enterprises/$($script:enterpriseId)/members" $null $adminHeaders).Data |
     Where-Object username -eq $memberUsername | Select-Object -First 1
   Expect-Status (Invoke-Api DELETE "/api/admin/business/enterprises/$($script:enterpriseId)/members/$($saved.id)" $null $adminHeaders) @(400)
   Expect-Status (Invoke-Api PUT "/api/admin/business/enterprises/$($script:enterpriseId)/members/$($saved.id)" @{
-    username=$memberUsername; realName="ONLY-ADMIN"; phone="13800138213"; roleCode="BUYER"; status=1
+    username=$memberUsername; password=""; realName="ONLY-ADMIN"; phone="13800138213"; roleCode="BUYER"; status=1
   } $adminHeaders) @(200,204)
   Expect-Status (Invoke-Api DELETE "/api/admin/business/enterprises/$($script:enterpriseId)/members/$($saved.id)" $null $adminHeaders) @(200,204)
+}
+Case "BIZ-ENT-006" "新增企业成员必须设置合规的初始密码" {
+  Expect-Status (Invoke-Api POST "/api/admin/business/enterprises/$($script:enterpriseId)/members" @{
+    username="short_password_$stamp"; password="1234567"; realName="SHORT-PASSWORD"; phone="13800138214"; roleCode="BUYER"; status=1
+  } $adminHeaders) @(400)
 }
 Case "BIZ-AGR-001" "新增生效协议" {
   Expect-Status (Invoke-Api POST "/api/admin/business/agreements" @{

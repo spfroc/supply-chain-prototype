@@ -13,6 +13,7 @@ import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 
@@ -20,7 +21,11 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/admin/business")
 public class AdminBusinessController {
     private final JdbcClient jdbc;
-    public AdminBusinessController(JdbcClient jdbc) { this.jdbc = jdbc; }
+    private final PasswordEncoder encoder;
+    public AdminBusinessController(JdbcClient jdbc,PasswordEncoder encoder) {
+        this.jdbc = jdbc;
+        this.encoder = encoder;
+    }
 
     @GetMapping("/products")
     List<Map<String,Object>> products() {
@@ -146,18 +151,20 @@ public class AdminBusinessController {
 
     @PostMapping("/enterprises/{enterpriseId}/members") @ResponseStatus(HttpStatus.CREATED)
     void createEnterpriseMember(@PathVariable long enterpriseId,@Valid @RequestBody EnterpriseMemberRequest r) {
+        validatePassword(r.password(),true);
         require(jdbc.sql("SELECT COUNT(*) FROM enterprise WHERE id=:id AND deleted_at IS NULL")
           .param("id",enterpriseId).query(Integer.class).single(),"企业不存在");
         jdbc.sql("""
           INSERT INTO enterprise_user(enterprise_id,username,password_hash,real_name,phone,role_code,status)
-          VALUES(:enterpriseId,:username,'{noop}demo-password',:realName,:phone,:roleCode,:status)
+          VALUES(:enterpriseId,:username,:password,:realName,:phone,:roleCode,:status)
           """).params(Map.of("enterpriseId",enterpriseId,"username",r.username(),"realName",r.realName(),
-          "phone",r.phone(),"roleCode",r.roleCode(),"status",r.status())).update();
+          "password",encoder.encode(r.password()),"phone",r.phone(),"roleCode",r.roleCode(),"status",r.status())).update();
     }
 
-    @PutMapping("/enterprises/{enterpriseId}/members/{memberId}")
+    @PutMapping("/enterprises/{enterpriseId}/members/{memberId}") @Transactional
     void updateEnterpriseMember(@PathVariable long enterpriseId,@PathVariable long memberId,
                                 @Valid @RequestBody EnterpriseMemberRequest r) {
+        validatePassword(r.password(),false);
         require(jdbc.sql("""
           UPDATE enterprise_user SET username=:username,real_name=:realName,phone=:phone,
             role_code=:roleCode,status=:status
@@ -165,6 +172,13 @@ public class AdminBusinessController {
           """).params(Map.of("enterpriseId",enterpriseId,"memberId",memberId,"username",r.username(),
           "realName",r.realName(),"phone",r.phone(),"roleCode",r.roleCode(),"status",r.status())).update(),
           "企业成员不存在");
+        if(r.password()!=null&&!r.password().isBlank()) {
+            jdbc.sql("""
+              UPDATE enterprise_user SET password_hash=:password
+              WHERE id=:memberId AND enterprise_id=:enterpriseId AND deleted_at IS NULL
+              """).params(Map.of("enterpriseId",enterpriseId,"memberId",memberId,
+              "password",encoder.encode(r.password()))).update();
+        }
     }
 
     @DeleteMapping("/enterprises/{enterpriseId}/members/{memberId}") @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -268,12 +282,18 @@ public class AdminBusinessController {
 
     private static String value(String s){return s==null?"":s;}
     private static void require(int n,String message){if(n==0)throw new IllegalArgumentException(message);}
+    private static void validatePassword(String password,boolean required) {
+        if(required&&(password==null||password.isBlank()))
+            throw new IllegalArgumentException("初始密码不能为空");
+        if(password!=null&&!password.isBlank()&&(password.length()<8||password.length()>72))
+            throw new IllegalArgumentException("密码长度必须为8至72位");
+    }
     public record ProductRequest(@NotBlank String title,@NotNull Long categoryId,@NotNull Long brandId,String summary,String spec,
       @NotNull @DecimalMin("0") BigDecimal marketPrice,@NotNull @DecimalMin("0") BigDecimal memberPrice,@Min(0) int stock,int status){}
     public record EnterpriseRequest(@NotBlank String name,@NotBlank String creditCode,@NotBlank String contactName,
       @NotBlank String contactPhone,String address,int status){}
     public record EnterpriseMemberRequest(@NotBlank String username,@NotBlank String realName,
-      @NotBlank String phone,@NotBlank String roleCode,int status){}
+      @NotBlank String phone,@NotBlank String roleCode,int status,String password){}
     public record AgreementRequest(@NotNull Long enterpriseId,@NotBlank String name,@NotNull @DecimalMin("0") BigDecimal amount,
       @NotBlank String effectiveDate,@NotBlank String expiryDate,int status){}
     public record StatusRequest(int status){}
