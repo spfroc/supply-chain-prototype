@@ -62,13 +62,13 @@ public class ClientAuthController {
         var users=jdbc.sql("""
           SELECT u.id,u.password_hash AS passwordHash FROM enterprise_user u
           JOIN enterprise e ON e.id=u.enterprise_id
-          WHERE u.username=:username AND u.status=1
+          WHERE (u.username=:identifier OR u.phone=:identifier) AND u.status=1
             AND u.deleted_at IS NULL AND e.status=1 AND e.deleted_at IS NULL
-          """).param("username",r.username()).query().listOfRows();
+          """).param("identifier",r.username().trim()).query().listOfRows();
         var matched=users.stream()
           .filter(user->encoder.matches(r.password(),String.valueOf(user.get("passwordHash")))).toList();
-        if(matched.isEmpty()) throw new IllegalArgumentException("账号或密码错误");
-        if(matched.size()>1) throw new IllegalArgumentException("账号关联多个企业，请联系平台管理员处理");
+        if(matched.isEmpty()) throw new IllegalArgumentException("账号、手机号或密码错误");
+        if(matched.size()>1) throw new IllegalArgumentException("登录信息关联多个企业，请联系平台管理员处理");
         long userId=((Number)matched.getFirst().get("id")).longValue();
         issueSession(userId,response);
         return Map.of("userId",userId);

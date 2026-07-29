@@ -55,9 +55,13 @@ $loginSession=New-Object Microsoft.PowerShell.Commands.WebRequestSession
 $login=Request POST "/api/auth/login" @{username=$username;password=$password} @{} $loginSession
 if($login.Status -ne 200){throw "注册用户重新登录失败"};Pass "AUTH-008 重新登录"
 
+$phoneLoginSession=New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$phoneLogin=Request POST "/api/auth/login" @{username="13800138901";password=$password} @{} $phoneLoginSession
+if($phoneLogin.Status -ne 200){throw "手机号登录失败"};Pass "AUTH-009 手机号登录"
+
 $members=Request GET "/api/admin/business/enterprises/1/members" $null $adminHeaders
 $member=$members.Data|Where-Object username -eq $username|Select-Object -First 1
 if($member){$delete=Request DELETE "/api/admin/business/enterprises/1/members/$($member.id)" $null $adminHeaders;if($delete.Status -notin @(200,204)){throw "测试用户清理失败"}}
-Pass "AUTH-009 清理注册测试用户"
+Pass "AUTH-010 清理注册测试用户"
 
 Write-Host "`n认证回归测试完成：通过 $script:Passed，失败 0"
