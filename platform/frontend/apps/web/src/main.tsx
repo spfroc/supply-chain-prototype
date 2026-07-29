@@ -4,7 +4,7 @@ import "./style.css";
 import "./manage.css";
 import "./auth.css";
 
-type View="home"|"products"|"detail"|"cart"|"orders"|"profile"|"addresses"|"invoices"|"members";
+type View="home"|"products"|"solutions"|"platforms"|"content"|"detail"|"cart"|"orders"|"profile"|"addresses"|"invoices"|"members";
 type Row=Record<string,any>;
 const money=(value:any)=>`¥${Number(value||0).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const dateTime=(value:string)=>value?new Intl.DateTimeFormat("zh-CN",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(value.replace(" ","T"))):"—";
@@ -18,14 +18,14 @@ async function api<T>(path:string,init?:RequestInit):Promise<T>{
 }
 
 function App(){
-  const [view,setView]=useState<View>("home");const [products,setProducts]=useState<Row[]>([]);const [profile,setProfile]=useState<Row>({});const [summary,setSummary]=useState<Row>({});
+  const [view,setView]=useState<View>("home");const [products,setProducts]=useState<Row[]>([]);const [categories,setCategories]=useState<Row[]>([]);const [portal,setPortal]=useState<Row>({});const [categoryId,setCategoryId]=useState<number>();const [profile,setProfile]=useState<Row>({});const [summary,setSummary]=useState<Row>({});
   const [cart,setCart]=useState<Row[]>([]);const [selected,setSelected]=useState<Row>();const [toast,setToast]=useState("");
   const [current,setCurrent]=useState<Row>();const [authReady,setAuthReady]=useState(false);const [siteConfig,setSiteConfig]=useState<Row>({});
   const siteName=siteConfig["platform.name"]||"政企采购供应链";const servicePhone=siteConfig["platform.servicePhone"]||"400-800-2026";
   const notify=(text:string)=>{setToast(text);setTimeout(()=>setToast(""),2200);};
   const loadCart=()=>api<Row[]>("/api/client/cart").then(setCart).catch(e=>notify(e.message));
   const loadAccount=async()=>{const session=await api<Row>("/api/auth/session");if(!session.authenticated)throw new Error("请先登录");setCurrent(session.user);const [p,s]=await Promise.all([api<Row>("/api/client/profile"),api<Row>("/api/client/summary")]);setProfile(p);setSummary(s);await loadCart()};
-  useEffect(()=>{void api<Row>("/api/public/config").then(setSiteConfig).catch(()=>{});void api<Row[]>("/api/public/catalog/products?enterpriseId=1").then(setProducts);void loadAccount().catch(()=>{}).finally(()=>setAuthReady(true));},[]);
+  useEffect(()=>{void api<Row>("/api/public/config").then(setSiteConfig).catch(()=>{});void api<Row>("/api/public/portal").then(setPortal).catch(()=>{});void api<Row[]>("/api/public/catalog/categories").then(setCategories);void api<Row[]>("/api/public/catalog/products?enterpriseId=1").then(setProducts);void loadAccount().catch(()=>{}).finally(()=>setAuthReady(true));},[]);
   const add=async(product:Row,quantity=1)=>{try{await api("/api/client/cart",{method:"POST",body:JSON.stringify({skuId:product.skuId,quantity})});await loadCart();notify("已加入采购车");}catch(e){notify((e as Error).message);}};
   const goProduct=(product:Row)=>{setSelected(product);setView("detail");scrollTo(0,0);};
   const logout=async()=>{await api("/api/auth/logout",{method:"POST"});setCurrent(undefined);setProfile({});setCart([]);setView("home")};
@@ -37,9 +37,10 @@ function App(){
       <label className="search">⌕<input placeholder="搜索商品、品牌、型号或方案"/><button onClick={()=>setView("products")}>搜索</button></label>
       <button className="cart-button" onClick={()=>setView("cart")}>采购车 <b>{cart.reduce((n,r)=>n+Number(r.quantity),0)}</b></button>
     </header>
-    <nav className="nav"><button className={view==="home"?"active":""} onClick={()=>setView("home")}>首页</button><button onClick={()=>setView("products")}>办公集采</button><button>政采专区</button><button>场景方案</button><button>平台比价</button><span>企业协议已生效</span></nav>
-    {view==="home"&&<Home products={products} open={goProduct} add={add} all={()=>setView("products")}/>}
-    {view==="products"&&<Products products={products} open={goProduct} add={add}/>}
+    <nav className="nav">{(portal.navigation||[{title:"首页"},{title:"办公集采"},{title:"场景方案"},{title:"平台比价"}]).map((item:Row,index:number)=>{const target:View=index===0?"home":item.title.includes("方案")?"solutions":item.title.includes("平台")?"platforms":"products";return <button key={item.id||item.title} className={view===target?"active":""} onClick={()=>{setCategoryId(undefined);setView(target)}}>{item.title}</button>})}<span>企业协议已生效</span></nav>
+    {view==="home"&&<Home products={products} categories={categories} portal={portal} open={goProduct} add={add} all={(id?:number)=>{setCategoryId(id);setView("products")}}/>}
+    {view==="products"&&<Products products={products} categories={categories} initialCategory={categoryId} open={goProduct} add={add}/>}
+    {(["solutions","platforms","content"] as View[]).includes(view)&&<PortalList type={view as "solutions"|"platforms"|"content"} rows={portal[view==="solutions"?"solution":view==="platforms"?"platform":"content"]||[]} back={()=>setView("home")}/>}
     {view==="detail"&&selected&&<Detail product={selected} back={()=>setView("products")} add={add}/>}
     {view==="cart"&&<Cart rows={cart} reload={loadCart} orders={()=>setView("orders")} notify={notify}/>}
     {view==="orders"&&<Orders go={setView}/>}
@@ -56,18 +57,26 @@ function AuthPage({siteName,onSuccess}:{siteName:string;onSuccess:()=>void}){
   return <main className="auth-page"><section className="auth-brand"><i>政</i><span>政企采购供应链</span><h1>企业采购，从登录开始</h1><p>协议专价、自营库存、多地址配送和统一订单管理。</p><div><b>✓</b> 企业协议自动匹配</div><div><b>✓</b> 线下银行转账</div><div><b>✓</b> Web 与 H5 数据同步</div></section><section className="auth-card"><header><button className={mode==="login"?"active":""} onClick={()=>{setMode("login");setError("")}}>登录</button><button className={mode==="register"?"active":""} onClick={()=>{setMode("register");setError("")}}>注册</button></header><h2>{mode==="login"?"欢迎登录":"创建采购员账号"}</h2><p>{mode==="login"?"登录后进入企业采购中心":"请输入企业全称，注册后默认角色为采购员"}</p>{mode==="register"&&<label>所属企业<input value={form.enterpriseName||""} onChange={e=>setForm({...form,enterpriseName:e.target.value})} placeholder="请输入所属企业全称"/></label>}<label>{mode==="login"?"账号或手机号":"登录账号"}<input autoComplete="username" value={form.username||""} onChange={e=>setForm({...form,username:e.target.value})} placeholder={mode==="login"?"请输入账号或手机号":"请输入登录账号"}/></label>{mode==="register"&&<><label>姓名<input value={form.realName||""} onChange={e=>setForm({...form,realName:e.target.value})} placeholder="请输入姓名"/></label><label>手机号码<input value={form.phone||""} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="请输入11位手机号码"/></label></>}<label>登录密码<input type="password" autoComplete={mode==="login"?"current-password":"new-password"} value={form.password||""} onChange={e=>setForm({...form,password:e.target.value})} placeholder={mode==="register"?"至少8位":"请输入登录密码"} onKeyDown={e=>{if(e.key==="Enter")void submit()}}/></label>{error&&<div className="auth-error">{error}</div>}<button className="auth-submit" disabled={submitting} onClick={()=>void submit()}>{submitting?"正在提交…":mode==="login"?"登录企业采购平台":"注册并登录"}</button>{mode==="login"&&<small>演示账号：demo　密码：demo-password</small>}</section></main>
 }
 
-function Home({products,open,add,all}:{products:Row[];open:(r:Row)=>void;add:(r:Row)=>void;all:()=>void}){
-  const categories=[["办","办公设备"],["耗","办公耗材"],["数","数码设备"],["会","会议设备"],["网","网络设备"],["家","家用电器"],["劳","劳保防护"],["全","全部分类"]];
-  return <main><section className="hero"><div><span>2026 政企集采季</span><h1>办公采购<br/><b>一站配齐</b></h1><p>企业协议专属价格 · 自营库存 · 多地址配送</p><button onClick={all}>立即选购　›</button></div><div className="hero-art"><i>💻</i><i>🖨️</i><i>📄</i></div><aside><strong>{products.length||2}<small>款</small></strong><span>协议精选商品</span><em>低于会员价，协议期内可随时调整</em></aside></section>
-    <section className="category-strip">{categories.map((item,index)=><button key={item[1]} onClick={all}><i className={`tone${index}`}>{item[0]}</i><span>{item[1]}</span><small>企业采购 ›</small></button>)}</section>
-    <section className="section"><div className="section-head"><div><span>AGREEMENT PICKS</span><h2>协议精选</h2><p>已自动匹配当前企业有效协议价格</p></div><button onClick={all}>查看全部商品 →</button></div><div className="product-grid">{products.slice(0,4).map((p,i)=><ProductCard key={p.skuId} product={p} index={i} open={open} add={add}/>)}</div></section>
-    <section className="solutions"><div><span>SCENE SOLUTION</span><h2>采购不只是选商品<br/>更是解决实际场景</h2><p>从设备选型、协议采购到配送验收，一站式完成。</p><button>查看全部方案</button></div>{[["智慧办公","12件商品","¥48,600","办"],["智能会议","8件商品","¥36,800","会"],["园区安防","16件商品","¥126,000","安"]].map(x=><article key={x[0]}><i>{x[3]}</i><span>整体解决方案</span><strong>{x[0]}</strong><small>{x[1]} · 含安装服务</small><b>{x[2]}</b><button>查看方案 ›</button></article>)}</section>
+function Home({products,categories,portal,open,add,all}:{products:Row[];categories:Row[];portal:Row;open:(r:Row)=>void;add:(r:Row)=>void;all:(id?:number)=>void}){
+  const roots=categories.filter(x=>Number(x.level)===1).slice(0,7);const banner=portal.banner?.[0];
+  return <main><section className="hero"><div><span>{banner?.title||"2026 政企集采季"}</span><h1>办公采购<br/><b>一站配齐</b></h1><p>{banner?.subtitle||"企业协议专属价格 · 自营库存 · 多地址配送"}</p><button onClick={()=>all()}>立即选购　›</button></div><div className="hero-art"><i>💻</i><i>🖨️</i><i>📄</i></div><aside><strong>{products.length||2}<small>款</small></strong><span>协议精选商品</span><em>低于会员价，协议期内可随时调整</em></aside></section>
+    <section className="category-strip">{[...roots,{id:undefined,name:"全部分类"}].map((item,index)=><button key={item.id||item.name} onClick={()=>all(item.id)}><i className={`tone${index}`}>{item.name.slice(0,1)}</i><span>{item.name}</span><small>查看商品 ›</small></button>)}</section>
+    <section className="section"><div className="section-head"><div><span>AGREEMENT PICKS</span><h2>协议精选</h2><p>已自动匹配当前企业有效协议价格</p></div><button onClick={()=>all()}>查看全部商品 →</button></div><div className="product-grid">{products.slice(0,4).map((p,i)=><ProductCard key={p.skuId} product={p} index={i} open={open} add={add}/>)}</div></section>
+    <section className="solutions"><div><span>SCENE SOLUTION</span><h2>采购不只是选商品<br/>更是解决实际场景</h2><p>从设备选型、协议采购到配送验收，一站式完成。</p></div>{(portal.solution||[]).slice(0,3).map((x:Row)=><article key={x.id}><i>{x.title.slice(0,1)}</i><span>整体解决方案</span><strong>{x.title}</strong><small>{x.subtitle}</small><button onClick={()=>location.href=x.linkUrl||"/web/?view=solutions"}>查看方案 ›</button></article>)}</section>
   </main>;
 }
 
-function Products({products,open,add}:{products:Row[];open:(r:Row)=>void;add:(r:Row)=>void}){
-  const [keyword,setKeyword]=useState("");const filtered=products.filter(p=>p.title.includes(keyword)||p.summary?.includes(keyword));
-  return <main className="page"><div className="breadcrumb">首页　/　办公集采</div><div className="listing-layout"><aside className="filters"><h3>商品分类</h3>{["全部商品","办公设备","电脑整机","办公耗材","打印耗材"].map((x,i)=><button className={i===0?"active":""} key={x}>{x}<span>›</span></button>)}<h3>价格区间</h3><label><input placeholder="最低价"/>—<input placeholder="最高价"/></label><h3>商品状态</h3><p>☑ 仅看有货</p><p>☑ 企业协议商品</p></aside><section className="listing"><div className="listing-head"><div><h1>办公集采</h1><p>共 {filtered.length} 款自营商品</p></div><label>⌕ <input value={keyword} onChange={e=>setKeyword(e.target.value)} placeholder="在结果中搜索"/></label></div><div className="sort"><button className="active">综合排序</button><button>销量</button><button>价格 ↕</button><span>协议价优先展示</span></div><div className="product-grid">{filtered.map((p,i)=><ProductCard key={p.skuId} product={p} index={i} open={open} add={add}/>)}</div></section></div></main>;
+function Products({products,categories,initialCategory,open,add}:{products:Row[];categories:Row[];initialCategory?:number;open:(r:Row)=>void;add:(r:Row)=>void}){
+  const [keyword,setKeyword]=useState("");const [active,setActive]=useState<number|undefined>(initialCategory);const [sort,setSort]=useState<"default"|"price">("default");
+  const ids=active?[active,...categories.filter(x=>Number(x.parentId)===active).flatMap(x=>[x.id,...categories.filter(y=>Number(y.parentId)===Number(x.id)).map(y=>y.id)])]:[];
+  const filtered=products.filter(p=>(!active||ids.includes(Number(p.categoryId)))&&(p.title.includes(keyword)||p.summary?.includes(keyword))).sort((a,b)=>sort==="price"?Number(a.agreementPrice||a.memberPrice)-Number(b.agreementPrice||b.memberPrice):0);
+  const roots=categories.filter(x=>Number(x.level)===1);
+  return <main className="page"><div className="breadcrumb">首页　/　办公集采</div><div className="listing-layout"><aside className="filters"><h3>商品分类</h3><button className={!active?"active":""} onClick={()=>setActive(undefined)}>全部商品<span>›</span></button>{roots.map(x=><button className={active===Number(x.id)?"active":""} onClick={()=>setActive(Number(x.id))} key={x.id}>{x.name}<span>›</span></button>)}<h3>商品状态</h3><p>☑ 仅看有货</p><p>☑ 企业协议商品</p></aside><section className="listing"><div className="listing-head"><div><h1>{categories.find(x=>Number(x.id)===active)?.name||"办公集采"}</h1><p>共 {filtered.length} 款自营商品</p></div><label>⌕ <input value={keyword} onChange={e=>setKeyword(e.target.value)} placeholder="在结果中搜索"/></label></div><div className="sort"><button className={sort==="default"?"active":""} onClick={()=>setSort("default")}>综合排序</button><button className={sort==="price"?"active":""} onClick={()=>setSort("price")}>价格 ↑</button><span>协议价优先展示</span></div><div className="product-grid">{filtered.map((p,i)=><ProductCard key={p.skuId} product={p} index={i} open={open} add={add}/>)}</div>{!filtered.length&&<div className="empty"><h2>该分类暂无在售商品</h2><p>请选择其他分类查看</p></div>}</section></div></main>;
+}
+
+function PortalList({type,rows,back}:{type:"solutions"|"platforms"|"content";rows:Row[];back:()=>void}){
+  const title=type==="solutions"?"场景方案":type==="platforms"?"平台比价":"内容中心";
+  return <main className="page"><div className="breadcrumb"><button onClick={back}>首页</button>　/　{title}</div><section className="section"><div className="section-head"><div><span>ENTERPRISE SERVICE</span><h2>{title}</h2><p>内容由管理后台统一维护并实时发布</p></div></div><div className="product-grid">{rows.map((row,index)=><article className="product-card" key={row.id}><div className={`product-image p${index%5}`}><i>{row.title.slice(0,1)}</i></div><div className="product-info"><small>{title}</small><h3>{row.title}</h3><p>{row.subtitle||"暂无说明"}</p>{row.linkUrl&&<a href={row.linkUrl}>查看详情 ›</a>}</div></article>)}</div></section></main>;
 }
 
 function ProductCard({product,index,open,add}:{product:Row;index:number;open:(r:Row)=>void;add:(r:Row)=>void}){

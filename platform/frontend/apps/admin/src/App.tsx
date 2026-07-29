@@ -7,7 +7,7 @@ import type { ColumnsType } from "antd/es/table";
 import zhCN from "antd/locale/zh_CN";
 
 type Row = Record<string, any>;
-type Module = "overview" | "products" | "categories" | "enterprises" | "agreements" | "orders" | "users" | "roles" | "permissions" | "logs" | "configs";
+type Module = "overview" | "products" | "categories" | "brands" | "platforms" | "navigations" | "banners" | "solutions" | "contents" | "enterprises" | "agreements" | "orders" | "users" | "roles" | "permissions" | "logs" | "configs";
 const apiHeaders = { "Content-Type": "application/json", Authorization: `Basic ${btoa("admin:change-me-before-production")}` };
 const dateTime = (value?: string) => value ? new Intl.DateTimeFormat("zh-CN", {
   year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
@@ -34,9 +34,17 @@ const navItems = [
   { type: "group" as const, label: "业务管理", children: [
     { key: "products", label: "商品管理", icon: <span>商</span> },
     { key: "categories", label: "分类管理", icon: <span>类</span> },
+    { key: "brands", label: "品牌管理", icon: <span>牌</span> },
+    { key: "platforms", label: "平台管理", icon: <span>台</span> },
+    { key: "solutions", label: "方案管理", icon: <span>案</span> },
     { key: "enterprises", label: "企业管理", icon: <span>企</span> },
     { key: "agreements", label: "协议管理", icon: <span>协</span> },
     { key: "orders", label: "订单管理", icon: <span>单</span> }
+  ]},
+  { type: "group" as const, label: "门户管理", children: [
+    { key: "navigations", label: "导航栏管理", icon: <span>导</span> },
+    { key: "banners", label: "首页轮播图", icon: <span>播</span> },
+    { key: "contents", label: "内容管理", icon: <span>文</span> }
   ]},
   { type: "group" as const, label: "系统管理", children: [
     { key: "users", label: "用户管理", icon: <span>用</span> },
@@ -59,6 +67,12 @@ function AdminApp() {
     overview:["经营概览","掌握平台账户、权限与关键业务运行状态"],
     products:["商品管理","维护自营商品、SKU、协议价格与可售库存"],
     categories:["分类管理","维护客户端使用的三级商品分类、排序与启停状态"],
+    brands:["品牌管理","维护商品品牌、品牌说明、排序与启停状态"],
+    platforms:["平台管理","维护第三方平台资料、商品参考入口与展示状态"],
+    navigations:["导航栏管理","配置 Web 客户端顶部导航名称、链接、排序与状态"],
+    banners:["首页轮播图管理","配置 Web 与 H5 首页活动内容、图片和跳转链接"],
+    solutions:["方案管理","维护企业采购场景方案及客户端展示内容"],
+    contents:["内容管理","维护采购指南、服务说明及其他门户内容"],
     enterprises:["企业管理","查看企业客户、成员账户和有效采购协议"],
     agreements:["协议管理","维护协议商品关联及企业专属成交价格"],
     orders:["订单管理","查询采购订单、付款状态与履约进度"],
@@ -87,6 +101,7 @@ function AdminApp() {
         {module === "overview" && <Overview go={setModule}/>}
         {(["products","enterprises","agreements","orders"] as Module[]).includes(module) && <BusinessModule module={module}/>}
         {module === "categories" && <Categories />}
+        {(["brands","platforms","navigations","banners","solutions","contents"] as Module[]).includes(module) && <PortalManager module={module}/>}
         {module === "users" && <Users />}
         {module === "roles" && <Roles />}
         {module === "permissions" && <Permissions />}
@@ -179,6 +194,43 @@ function Categories() {
   ];
   return <><Card className="data-card" title="三级商品分类" extra={<Button type="primary" onClick={()=>show()}>＋ 新增分类</Button>}><Table rowKey="id" loading={rows.loading} dataSource={rows.data} columns={columns}/></Card>
     <Modal open={open} title={`${editing?"编辑":"新增"}分类`} onCancel={()=>setOpen(false)} onOk={()=>void save()}><Form form={form} layout="vertical"><Form.Item name="name" label="分类名称" rules={[{required:true,message:"请输入分类名称"}]}><Input/></Form.Item><Form.Item name="level" label="分类级别" rules={[{required:true}]}><Select onChange={()=>form.setFieldValue("parentId",undefined)} options={[1,2,3].map(value=>({value,label:`${value}级分类`}))}/></Form.Item>{Number(level)>1&&<Form.Item name="parentId" label="上级分类" rules={[{required:true,message:"请选择上级分类"}]}><Select options={parentOptions}/></Form.Item>}<Form.Item name="icon" label="分类图标"><Input placeholder="图标文字或 OSS 图片地址"/></Form.Item><Form.Item name="sortOrder" label="排序"><InputNumber min={0} style={{width:"100%"}}/></Form.Item><Form.Item name="status" label="状态"><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]}/></Form.Item></Form></Modal></>;
+}
+
+function PortalManager({module}:{module:Module}) {
+  const {message,modal}=AntApp.useApp();
+  const meta:Record<string,{title:string;type:string;name:string}> = {
+    brands:{title:"品牌列表",type:"brands/list",name:"品牌"},
+    platforms:{title:"采购平台列表",type:"platform",name:"平台"},
+    navigations:{title:"客户端导航栏",type:"navigation",name:"导航"},
+    banners:{title:"首页轮播图",type:"banner",name:"轮播图"},
+    solutions:{title:"采购方案列表",type:"solution",name:"方案"},
+    contents:{title:"门户内容列表",type:"content",name:"内容"}
+  };
+  const current=meta[module];
+  const endpoint=`/api/admin/content/${current.type}`;
+  const rows=useLoad<Row[]>(()=>rootApi(endpoint),[module]);
+  const [form]=Form.useForm();const [open,setOpen]=useState(false);const [editing,setEditing]=useState<Row>();
+  const isBrand=module==="brands";
+  const show=(row?:Row)=>{setEditing(row);form.resetFields();form.setFieldsValue(row||{sortOrder:0,status:1});setOpen(true)};
+  const save=async()=>{try{const values=await form.validateFields();const response=await fetch(`${endpoint}${editing?`/${editing.id}`:""}`,{method:editing?"PUT":"POST",headers:apiHeaders,body:JSON.stringify(values)});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||data.message||"保存失败")}setOpen(false);message.success(`${current.name}已保存`);void rows.refresh()}catch(error){if(error instanceof Error)message.error(error.message)}};
+  const remove=(row:Row)=>modal.confirm({title:`确认删除“${row.title||row.name}”？`,okButtonProps:{danger:true},onOk:async()=>{const response=await fetch(`${endpoint}/${row.id}`,{method:"DELETE",headers:apiHeaders});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"删除失败")}message.success("删除成功");void rows.refresh()}});
+  const columns:ColumnsType<Row>=[
+    {title:current.name,render:(_,row)=><div className="user-cell"><i>{current.name.slice(0,1)}</i><span><strong>{row.title||row.name}</strong><small>{row.subtitle||row.description||"—"}</small></span></div>},
+    ...(isBrand?[]:[{title:"跳转链接",dataIndex:"linkUrl",render:(v:string)=>v||"—"}]),
+    {title:"排序",dataIndex:"sortOrder",width:90},
+    {title:"状态",dataIndex:"status",width:100,render:(v:number)=><Tag color={Number(v)===1?"green":"default"}>{Number(v)===1?"启用":"停用"}</Tag>},
+    {title:"更新时间",dataIndex:isBrand?"createdAt":"updatedAt",render:dateTime},
+    {title:"操作",width:150,render:(_,row)=><Space><Button type="link" onClick={()=>show(row)}>编辑</Button><Button type="link" danger onClick={()=>remove(row)}>删除</Button></Space>}
+  ];
+  return <><Card className="data-card" title={current.title} extra={<Button type="primary" onClick={()=>show()}>＋ 新增{current.name}</Button>}><Table rowKey="id" loading={rows.loading} dataSource={rows.data} columns={columns}/></Card>
+    <Modal open={open} title={`${editing?"编辑":"新增"}${current.name}`} width={680} onCancel={()=>setOpen(false)} onOk={()=>void save()}><Form form={form} layout="vertical" className="two-column-form">
+      <Form.Item name={isBrand?"name":"title"} label={`${current.name}名称`} rules={[{required:true,message:`请输入${current.name}名称`}]}><Input/></Form.Item>
+      <Form.Item name="sortOrder" label="排序"><InputNumber min={0} style={{width:"100%"}}/></Form.Item>
+      <Form.Item name={isBrand?"description":"subtitle"} label="说明" className="full"><Input.TextArea rows={3}/></Form.Item>
+      <Form.Item name={isBrand?"logo":"imageUrl"} label={isBrand?"品牌 Logo":"展示图片"} className="full"><Input placeholder="请输入 OSS 图片地址（可选）"/></Form.Item>
+      {!isBrand&&<Form.Item name="linkUrl" label="跳转链接" className="full"><Input placeholder="/web/?view=products 或 https://..."/></Form.Item>}
+      <Form.Item name="status" label="状态"><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]}/></Form.Item>
+    </Form></Modal></>;
 }
 
 function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []) {

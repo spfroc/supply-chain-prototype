@@ -180,6 +180,37 @@ Case "SYS-CONFIG-001" "基本配置修改后同步到 Web/H5 公开配置并可�
   } $adminHeaders) @(200,204)
 }
 
+# ---------- 门户内容 ----------
+Case "PORTAL-CONTENT-001" "导航、轮播、平台、方案和内容支持增删改并同步客户端" {
+  foreach ($type in @("navigation","banner","platform","solution","content")) {
+    $created = Invoke-Api POST "/api/admin/content/$type" @{
+      title="QA-$type-$stamp"; subtitle="创建测试"; imageUrl=""; linkUrl="/web/"; sortOrder=99; status=1
+    } $adminHeaders
+    Expect-Status $created @(201)
+    $id = [long]$created.Data.id
+    Expect-Status (Invoke-Api PUT "/api/admin/content/$type/$id" @{
+      title="QA-$type-$stamp-UPDATED"; subtitle="编辑测试"; imageUrl=""; linkUrl="/h5/"; sortOrder=98; status=1
+    } $adminHeaders) @(200,204)
+    $public = (Invoke-Api GET "/api/public/portal" $null @{}).Data
+    $group = if($type -eq "navigation"){$public.navigation}elseif($type -eq "banner"){$public.banner}elseif($type -eq "platform"){$public.platform}elseif($type -eq "solution"){$public.solution}else{$public.content}
+    if (!($group | Where-Object id -eq $id)) { throw "$type 未同步到客户端门户接口" }
+    Expect-Status (Invoke-Api DELETE "/api/admin/content/$type/$id" $null $adminHeaders) @(200,204)
+  }
+}
+Case "PORTAL-BRAND-001" "品牌支持新增、编辑和删除" {
+  $created = Invoke-Api POST "/api/admin/content/brands/list" @{
+    name="QA-BRAND-$stamp"; logo=""; description="测试品牌"; sortOrder=99; status=1
+  } $adminHeaders
+  Expect-Status $created @(201)
+  $id = [long]$created.Data.id
+  Expect-Status (Invoke-Api PUT "/api/admin/content/brands/list/$id" @{
+    name="QA-BRAND-$stamp-UPDATED"; logo=""; description="已更新"; sortOrder=98; status=1
+  } $adminHeaders) @(200,204)
+  $saved = (Invoke-Api GET "/api/admin/content/brands/list" $null $adminHeaders).Data | Where-Object id -eq $id
+  if (!$saved -or $saved.name -notmatch "UPDATED") { throw "品牌编辑未保存" }
+  Expect-Status (Invoke-Api DELETE "/api/admin/content/brands/list/$id" $null $adminHeaders) @(200,204)
+}
+
 # ---------- 商品分类 ----------
 $categoryLevel1=$null
 $categoryLevel2=$null
