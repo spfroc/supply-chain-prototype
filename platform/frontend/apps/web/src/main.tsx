@@ -20,19 +20,20 @@ async function api<T>(path:string,init?:RequestInit):Promise<T>{
 function App(){
   const [view,setView]=useState<View>("home");const [products,setProducts]=useState<Row[]>([]);const [profile,setProfile]=useState<Row>({});const [summary,setSummary]=useState<Row>({});
   const [cart,setCart]=useState<Row[]>([]);const [selected,setSelected]=useState<Row>();const [toast,setToast]=useState("");
-  const [current,setCurrent]=useState<Row>();const [authReady,setAuthReady]=useState(false);
+  const [current,setCurrent]=useState<Row>();const [authReady,setAuthReady]=useState(false);const [siteConfig,setSiteConfig]=useState<Row>({});
+  const siteName=siteConfig["platform.name"]||"政企采购供应链";const servicePhone=siteConfig["platform.servicePhone"]||"400-800-2026";
   const notify=(text:string)=>{setToast(text);setTimeout(()=>setToast(""),2200);};
   const loadCart=()=>api<Row[]>("/api/client/cart").then(setCart).catch(e=>notify(e.message));
   const loadAccount=async()=>{const session=await api<Row>("/api/auth/session");if(!session.authenticated)throw new Error("请先登录");setCurrent(session.user);const [p,s]=await Promise.all([api<Row>("/api/client/profile"),api<Row>("/api/client/summary")]);setProfile(p);setSummary(s);await loadCart()};
-  useEffect(()=>{void api<Row[]>("/api/public/catalog/products?enterpriseId=1").then(setProducts);void loadAccount().catch(()=>{}).finally(()=>setAuthReady(true));},[]);
+  useEffect(()=>{void api<Row>("/api/public/config").then(setSiteConfig).catch(()=>{});void api<Row[]>("/api/public/catalog/products?enterpriseId=1").then(setProducts);void loadAccount().catch(()=>{}).finally(()=>setAuthReady(true));},[]);
   const add=async(product:Row,quantity=1)=>{try{await api("/api/client/cart",{method:"POST",body:JSON.stringify({skuId:product.skuId,quantity})});await loadCart();notify("已加入采购车");}catch(e){notify((e as Error).message);}};
   const goProduct=(product:Row)=>{setSelected(product);setView("detail");scrollTo(0,0);};
   const logout=async()=>{await api("/api/auth/logout",{method:"POST"});setCurrent(undefined);setProfile({});setCart([]);setView("home")};
   if(!authReady)return <div className="auth-loading">正在加载企业采购平台…</div>;
-  if(!current)return <AuthPage onSuccess={()=>void loadAccount()}/>;
+  if(!current)return <AuthPage siteName={siteName} onSuccess={()=>void loadAccount()}/>;
   return <div className="shop">
-    <div className="topbar"><span>政企采购供应链 · 自营正品 · 协议价格</span><div><button onClick={()=>setView("orders")}>我的订单</button><button onClick={()=>setView("profile")}>{current.realName} · 企业中心</button><button onClick={()=>void logout()}>退出登录</button><a href="/admin/">管理后台</a></div></div>
-    <header className="header"><button className="logo" onClick={()=>setView("home")}><i>政</i><span><strong>政企采购</strong><small>SUPPLY CHAIN</small></span></button>
+    <div className="topbar"><span>{siteName} · 自营正品 · 协议价格</span><div><button onClick={()=>setView("orders")}>我的订单</button><button onClick={()=>setView("profile")}>{current.realName} · 企业中心</button><button onClick={()=>void logout()}>退出登录</button><a href="/admin/">管理后台</a></div></div>
+    <header className="header"><button className="logo" onClick={()=>setView("home")}><i>政</i><span><strong>{siteName}</strong><small>SUPPLY CHAIN</small></span></button>
       <label className="search">⌕<input placeholder="搜索商品、品牌、型号或方案"/><button onClick={()=>setView("products")}>搜索</button></label>
       <button className="cart-button" onClick={()=>setView("cart")}>采购车 <b>{cart.reduce((n,r)=>n+Number(r.quantity),0)}</b></button>
     </header>
@@ -44,12 +45,12 @@ function App(){
     {view==="orders"&&<Orders go={setView}/>}
     {view==="profile"&&<Profile profile={profile} summary={summary} go={setView}/>}
     {(["addresses","invoices","members"] as View[]).includes(view)&&<AccountData view={view as "addresses"|"invoices"|"members"} roleCode={profile.roleCode} go={setView}/>}
-    <footer className="footer"><div><strong>政企采购供应链</strong><span>企业协议价 · 自营库存 · 银行转账 · 全国配送</span></div><p>服务电话 400-800-2026　工作日 09:00–18:00</p></footer>
+    <footer className="footer"><div><strong>{siteName}</strong><span>企业协议价 · 自营库存 · 银行转账 · 全国配送</span></div><p>服务电话 {servicePhone}　工作日 09:00–18:00</p></footer>
     {toast&&<div className="toast">✓ {toast}</div>}
   </div>;
 }
 
-function AuthPage({onSuccess}:{onSuccess:()=>void}){
+function AuthPage({siteName,onSuccess}:{siteName:string;onSuccess:()=>void}){
   const [mode,setMode]=useState<"login"|"register">("login");const [form,setForm]=useState<Row>({enterpriseName:""});const [error,setError]=useState("");const [submitting,setSubmitting]=useState(false);
   const submit=async()=>{setError("");const required=mode==="login"?["username","password"]:["enterpriseName","username","password","realName","phone"];if(required.some(key=>!String(form[key]||"").trim())){setError("请完整填写必填信息");return}if(mode==="register"&&!/^1\d{10}$/.test(String(form.phone))){setError("请输入11位手机号码");return}setSubmitting(true);try{await api(`/api/auth/${mode}`,{method:"POST",body:JSON.stringify(form)});onSuccess()}catch(e){setError((e as Error).message)}finally{setSubmitting(false)}};
   return <main className="auth-page"><section className="auth-brand"><i>政</i><span>政企采购供应链</span><h1>企业采购，从登录开始</h1><p>协议专价、自营库存、多地址配送和统一订单管理。</p><div><b>✓</b> 企业协议自动匹配</div><div><b>✓</b> 线下银行转账</div><div><b>✓</b> Web 与 H5 数据同步</div></section><section className="auth-card"><header><button className={mode==="login"?"active":""} onClick={()=>{setMode("login");setError("")}}>登录</button><button className={mode==="register"?"active":""} onClick={()=>{setMode("register");setError("")}}>注册</button></header><h2>{mode==="login"?"欢迎登录":"创建采购员账号"}</h2><p>{mode==="login"?"登录后进入企业采购中心":"请输入企业全称，注册后默认角色为采购员"}</p>{mode==="register"&&<label>所属企业<input value={form.enterpriseName||""} onChange={e=>setForm({...form,enterpriseName:e.target.value})} placeholder="请输入所属企业全称"/></label>}<label>{mode==="login"?"账号或手机号":"登录账号"}<input autoComplete="username" value={form.username||""} onChange={e=>setForm({...form,username:e.target.value})} placeholder={mode==="login"?"请输入账号或手机号":"请输入登录账号"}/></label>{mode==="register"&&<><label>姓名<input value={form.realName||""} onChange={e=>setForm({...form,realName:e.target.value})} placeholder="请输入姓名"/></label><label>手机号码<input value={form.phone||""} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="请输入11位手机号码"/></label></>}<label>登录密码<input type="password" autoComplete={mode==="login"?"current-password":"new-password"} value={form.password||""} onChange={e=>setForm({...form,password:e.target.value})} placeholder={mode==="register"?"至少8位":"请输入登录密码"} onKeyDown={e=>{if(e.key==="Enter")void submit()}}/></label>{error&&<div className="auth-error">{error}</div>}<button className="auth-submit" disabled={submitting} onClick={()=>void submit()}>{submitting?"正在提交…":mode==="login"?"登录企业采购平台":"注册并登录"}</button>{mode==="login"&&<small>演示账号：demo　密码：demo-password</small>}</section></main>

@@ -5,16 +5,17 @@ const dateTime=(value:string)=>value?new Intl.DateTimeFormat("zh-CN",{year:"nume
 const statuses=["待付款","待发货","运输中","已完成","已取消"];
 async function api<T>(path:string,init?:RequestInit):Promise<T>{const r=await fetch(path,{...init,headers:{"Content-Type":"application/json",...init?.headers}});if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.message||d.detail||`操作失败（${r.status}）`)}if(r.status===204||r.headers.get("content-length")==="0")return undefined as T;return r.json();}
 
-function App(){const [tab,setTab]=useState<Tab>("home");const [products,setProducts]=useState<Row[]>([]);const [cart,setCart]=useState<Row[]>([]);const [profile,setProfile]=useState<Row>({});const [detail,setDetail]=useState<Row>();const [current,setCurrent]=useState<Row>();const [authReady,setAuthReady]=useState(false);
+function App(){const [tab,setTab]=useState<Tab>("home");const [products,setProducts]=useState<Row[]>([]);const [cart,setCart]=useState<Row[]>([]);const [profile,setProfile]=useState<Row>({});const [detail,setDetail]=useState<Row>();const [current,setCurrent]=useState<Row>();const [authReady,setAuthReady]=useState(false);const [siteConfig,setSiteConfig]=useState<Row>({});
+  const siteName=siteConfig["platform.name"]||"政企采购供应链";const servicePhone=siteConfig["platform.servicePhone"]||"400-800-2026";
   const loadCart=async()=>{try{setCart(await api<Row[]>("/api/client/cart"))}catch(e){Toast.show((e as Error).message)}};
   const loadAccount=async()=>{const session=await api<Row>("/api/auth/session");if(!session.authenticated)throw new Error("请先登录");setCurrent(session.user);setProfile(await api<Row>("/api/client/profile"));await loadCart()};
-  useEffect(()=>{void api<Row[]>("/api/public/catalog/products?enterpriseId=1").then(setProducts);void loadAccount().catch(()=>{}).finally(()=>setAuthReady(true))},[]);
+  useEffect(()=>{void api<Row>("/api/public/config").then(setSiteConfig).catch(()=>{});void api<Row[]>("/api/public/catalog/products?enterpriseId=1").then(setProducts);void loadAccount().catch(()=>{}).finally(()=>setAuthReady(true))},[]);
   const add=async(p:Row)=>{try{await api("/api/client/cart",{method:"POST",body:JSON.stringify({skuId:p.skuId,quantity:1})});await loadCart();Toast.show({icon:"success",content:"已加入采购车"})}catch(e){Toast.show((e as Error).message)}};
   const logout=async()=>{await api("/api/auth/logout",{method:"POST"});setCurrent(undefined);setProfile({});setCart([]);setTab("home")};
   if(!authReady)return <div className="m-auth-loading">正在加载…</div>;
   if(!current)return <MobileAuth onSuccess={()=>void loadAccount()}/>;
   if(detail)return <ProductDetail product={detail} back={()=>setDetail(undefined)} add={add}/>;
-  return <div className="mobile-app"><header className="mobile-header"><div><i>政</i><span><strong>政企采购</strong><small>{profile.enterpriseName||"山东高速数字科技"} · 协议生效中</small></span></div><button>消息<em/></button></header>
+  return <div className="mobile-app"><header className="mobile-header"><div><i>政</i><span><strong>{siteName}</strong><small>{profile.enterpriseName||"山东高速数字科技"} · 协议生效中</small></span></div><button>{servicePhone}</button></header>
     <section className="mobile-content">{tab==="home"&&<Home products={products} open={setDetail} add={add} category={()=>setTab("category")}/>}
       {tab==="category"&&<Category products={products} open={setDetail}/>}
       {tab==="cart"&&<Cart rows={cart} reload={loadCart} orders={()=>setTab("orders")}/>}

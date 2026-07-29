@@ -158,7 +158,7 @@ Case "SYS-LOG-001" "用户和角色变更写入操作日志" {
   $related = @($logs | Where-Object { $_.targetId -in @("$($script:userId)","$($script:roleId)") })
   if ($related.Count -lt 4) { throw "预期至少4条增删改日志，实际 $($related.Count)" }
 }
-Case "SYS-CONFIG-001" "基本配置可修改、读取并恢复" {
+Case "SYS-CONFIG-001" "基本配置修改后同步到 Web/H5 公开配置并可恢复" {
   $configs = (Invoke-Api GET "/api/admin/system/configs" $null $adminHeaders).Data
   $config = $configs | Select-Object -First 1
   $original = "$($config.configValue)"
@@ -169,6 +169,12 @@ Case "SYS-CONFIG-001" "基本配置可修改、读取并恢复" {
   $saved = (Invoke-Api GET "/api/admin/system/configs" $null $adminHeaders).Data |
     Where-Object id -eq $config.id | Select-Object -First 1
   if ($saved.configValue -ne $testValue) { throw "配置修改后未读到新值" }
+  if ([int]$config.isPublic -eq 1) {
+    $publicConfig = (Invoke-Api GET "/api/public/config" $null @{}).Data
+    if ($publicConfig.($config.configKey) -ne $testValue) {
+      throw "公开配置接口未同步后台修改值"
+    }
+  }
   Expect-Status (Invoke-Api PUT "/api/admin/system/configs/$($config.id)" @{
     configValue=$original; description=$config.description; isPublic=$config.isPublic
   } $adminHeaders) @(200,204)
@@ -203,6 +209,10 @@ $validProduct = @{
   mainImage="https://example.com/main.jpg"; gallery="https://example.com/1.jpg`nhttps://example.com/2.jpg";
   attributes="颜色：黑色；保修：三年"; detailHtml="<p>QA 商品详情</p>";
   marketPrice=999.00; memberPrice=899.00; stock=20; status=1
+}
+Case "BIZ-PROD-SEED-001" "Web/H5 商品目录至少包含十款在售商品" {
+  $catalog = (Invoke-Api GET "/api/public/catalog/products?enterpriseId=1" $null @{}).Data
+  if (@($catalog).Count -lt 10) { throw "公开商品不足10款，实际 $(@($catalog).Count) 款" }
 }
 Case "BIZ-PROD-001" "新增商品并保存标题、价格、规格和库存" {
   $r = Invoke-Api POST "/api/admin/business/products" $validProduct $adminHeaders
