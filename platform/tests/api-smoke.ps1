@@ -100,7 +100,8 @@ Test-Case "ADM-012 操作日志" {
 }
 Test-Case "CLI-001 协议商品" {
   $r = Invoke-Json GET "/api/public/catalog/products?enterpriseId=1" $null
-  if ($r.Status -ne 200 -or $r.Data.Count -lt 2 -or $null -eq $r.Data[0].agreementPrice) { throw "协议商品不完整" }
+  $agreementProducts = @($r.Data | Where-Object { $null -ne $_.agreementPrice })
+  if ($r.Status -ne 200 -or $agreementProducts.Count -lt 2) { throw "协议商品不完整" }
 }
 Test-Case "CLI-016 企业资料" {
   $r = Invoke-Json GET "/api/client/profile" $null

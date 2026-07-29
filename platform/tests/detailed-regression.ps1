@@ -252,6 +252,35 @@ Case "BIZ-ENT-003" "企业名称、信用代码和联系人必填" {
     name=""; creditCode=""; contactName=""; contactPhone=""; address=""; status=1
   } $adminHeaders) @(400)
 }
+Case "BIZ-ENT-004" "后台为指定企业添加、编辑和删除成员" {
+  $memberUsername = "admin_member_$stamp"
+  Expect-Status (Invoke-Api POST "/api/admin/business/enterprises/$($script:enterpriseId)/members" @{
+    username=$memberUsername; realName="ADMIN-MEMBER"; phone="13800138211"; roleCode="BUYER"; status=1
+  } $adminHeaders) @(201)
+  $saved = (Invoke-Api GET "/api/admin/business/enterprises/$($script:enterpriseId)/members" $null $adminHeaders).Data |
+    Where-Object username -eq $memberUsername | Select-Object -First 1
+  if (!$saved) { throw "后台新增企业成员后未查询到" }
+  Expect-Status (Invoke-Api PUT "/api/admin/business/enterprises/$($script:enterpriseId)/members/$($saved.id)" @{
+    username=$memberUsername; realName="ADMIN-MEMBER-UPDATED"; phone="13800138212"; roleCode="BUYER"; status=0
+  } $adminHeaders) @(200,204)
+  $updated = (Invoke-Api GET "/api/admin/business/enterprises/$($script:enterpriseId)/members" $null $adminHeaders).Data |
+    Where-Object id -eq $saved.id | Select-Object -First 1
+  if ($updated.status -ne 0 -or $updated.phone -ne "13800138212") { throw "后台企业成员编辑未生效" }
+  Expect-Status (Invoke-Api DELETE "/api/admin/business/enterprises/$($script:enterpriseId)/members/$($saved.id)" $null $adminHeaders) @(200,204)
+}
+Case "BIZ-ENT-005" "企业至少保留一名管理员" {
+  $memberUsername = "only_admin_$stamp"
+  Expect-Status (Invoke-Api POST "/api/admin/business/enterprises/$($script:enterpriseId)/members" @{
+    username=$memberUsername; realName="ONLY-ADMIN"; phone="13800138213"; roleCode="ENTERPRISE_ADMIN"; status=1
+  } $adminHeaders) @(201)
+  $saved = (Invoke-Api GET "/api/admin/business/enterprises/$($script:enterpriseId)/members" $null $adminHeaders).Data |
+    Where-Object username -eq $memberUsername | Select-Object -First 1
+  Expect-Status (Invoke-Api DELETE "/api/admin/business/enterprises/$($script:enterpriseId)/members/$($saved.id)" $null $adminHeaders) @(400)
+  Expect-Status (Invoke-Api PUT "/api/admin/business/enterprises/$($script:enterpriseId)/members/$($saved.id)" @{
+    username=$memberUsername; realName="ONLY-ADMIN"; phone="13800138213"; roleCode="BUYER"; status=1
+  } $adminHeaders) @(200,204)
+  Expect-Status (Invoke-Api DELETE "/api/admin/business/enterprises/$($script:enterpriseId)/members/$($saved.id)" $null $adminHeaders) @(200,204)
+}
 Case "BIZ-AGR-001" "新增生效协议" {
   Expect-Status (Invoke-Api POST "/api/admin/business/agreements" @{
     enterpriseId=$script:enterpriseId; name="QA-AGREEMENT-ONE-$stamp"; amount=10000;

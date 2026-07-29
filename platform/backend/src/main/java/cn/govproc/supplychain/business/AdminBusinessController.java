@@ -134,6 +134,60 @@ public class AdminBusinessController {
           .param("id",id).update(),"企业不存在");
     }
 
+    @GetMapping("/enterprises/{enterpriseId}/members")
+    List<Map<String,Object>> enterpriseMembers(@PathVariable long enterpriseId) {
+        return jdbc.sql("""
+          SELECT id,username,real_name AS realName,phone,role_code AS roleCode,status,
+            DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
+          FROM enterprise_user
+          WHERE enterprise_id=:enterpriseId AND deleted_at IS NULL ORDER BY id
+          """).param("enterpriseId",enterpriseId).query().listOfRows();
+    }
+
+    @PostMapping("/enterprises/{enterpriseId}/members") @ResponseStatus(HttpStatus.CREATED)
+    void createEnterpriseMember(@PathVariable long enterpriseId,@Valid @RequestBody EnterpriseMemberRequest r) {
+        require(jdbc.sql("SELECT COUNT(*) FROM enterprise WHERE id=:id AND deleted_at IS NULL")
+          .param("id",enterpriseId).query(Integer.class).single(),"企业不存在");
+        jdbc.sql("""
+          INSERT INTO enterprise_user(enterprise_id,username,password_hash,real_name,phone,role_code,status)
+          VALUES(:enterpriseId,:username,'{noop}demo-password',:realName,:phone,:roleCode,:status)
+          """).params(Map.of("enterpriseId",enterpriseId,"username",r.username(),"realName",r.realName(),
+          "phone",r.phone(),"roleCode",r.roleCode(),"status",r.status())).update();
+    }
+
+    @PutMapping("/enterprises/{enterpriseId}/members/{memberId}")
+    void updateEnterpriseMember(@PathVariable long enterpriseId,@PathVariable long memberId,
+                                @Valid @RequestBody EnterpriseMemberRequest r) {
+        require(jdbc.sql("""
+          UPDATE enterprise_user SET username=:username,real_name=:realName,phone=:phone,
+            role_code=:roleCode,status=:status
+          WHERE id=:memberId AND enterprise_id=:enterpriseId AND deleted_at IS NULL
+          """).params(Map.of("enterpriseId",enterpriseId,"memberId",memberId,"username",r.username(),
+          "realName",r.realName(),"phone",r.phone(),"roleCode",r.roleCode(),"status",r.status())).update(),
+          "企业成员不存在");
+    }
+
+    @DeleteMapping("/enterprises/{enterpriseId}/members/{memberId}") @ResponseStatus(HttpStatus.NO_CONTENT)
+    void deleteEnterpriseMember(@PathVariable long enterpriseId,@PathVariable long memberId) {
+        var found=jdbc.sql("""
+          SELECT role_code AS roleCode FROM enterprise_user
+          WHERE id=:memberId AND enterprise_id=:enterpriseId AND deleted_at IS NULL
+          """).params(Map.of("enterpriseId",enterpriseId,"memberId",memberId)).query().listOfRows();
+        if(found.isEmpty()) throw new IllegalArgumentException("企业成员不存在");
+        var member=found.getFirst();
+        if("ENTERPRISE_ADMIN".equals(member.get("roleCode"))) {
+            long admins=jdbc.sql("""
+              SELECT COUNT(*) FROM enterprise_user
+              WHERE enterprise_id=:enterpriseId AND role_code='ENTERPRISE_ADMIN' AND deleted_at IS NULL
+              """).param("enterpriseId",enterpriseId).query(Long.class).single();
+            if(admins<=1) throw new IllegalArgumentException("企业至少需要保留一名管理员");
+        }
+        require(jdbc.sql("""
+          UPDATE enterprise_user SET deleted_at=NOW(),status=0
+          WHERE id=:memberId AND enterprise_id=:enterpriseId AND deleted_at IS NULL
+          """).params(Map.of("enterpriseId",enterpriseId,"memberId",memberId)).update(),"企业成员不存在");
+    }
+
     @GetMapping("/agreements")
     List<Map<String,Object>> agreements() {
         return jdbc.sql("""
@@ -218,6 +272,8 @@ public class AdminBusinessController {
       @NotNull @DecimalMin("0") BigDecimal marketPrice,@NotNull @DecimalMin("0") BigDecimal memberPrice,@Min(0) int stock,int status){}
     public record EnterpriseRequest(@NotBlank String name,@NotBlank String creditCode,@NotBlank String contactName,
       @NotBlank String contactPhone,String address,int status){}
+    public record EnterpriseMemberRequest(@NotBlank String username,@NotBlank String realName,
+      @NotBlank String phone,@NotBlank String roleCode,int status){}
     public record AgreementRequest(@NotNull Long enterpriseId,@NotBlank String name,@NotNull @DecimalMin("0") BigDecimal amount,
       @NotBlank String effectiveDate,@NotBlank String expiryDate,int status){}
     public record StatusRequest(int status){}
