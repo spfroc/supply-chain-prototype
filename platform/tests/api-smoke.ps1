@@ -9,7 +9,10 @@ $script:Passed = 0
 $script:Failed = 0
 $credential = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("${AdminUser}:${AdminPassword}"))
 $adminHeaders = @{ Authorization = "Basic $credential"; "Content-Type" = "application/json" }
-$jsonHeaders = @{ "Content-Type" = "application/json" }
+$clientSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$loginResponse = Invoke-WebRequest -Method POST -Uri "$BaseUrl/api/auth/login" -ContentType "application/json" `
+  -Body (@{ enterpriseId=1; username="demo"; password="demo-password" } | ConvertTo-Json) -WebSession $clientSession -UseBasicParsing
+$jsonHeaders = @{ "Content-Type" = "application/json"; "X-Test-Client" = "1" }
 
 function Test-Case {
   param([string]$Name, [scriptblock]$Action)
@@ -25,7 +28,11 @@ function Test-Case {
 
 function Invoke-Json {
   param([string]$Method, [string]$Path, [object]$Body, [hashtable]$Headers = $jsonHeaders)
-  $arguments = @{ Method = $Method; Uri = "$BaseUrl$Path"; Headers = $Headers; UseBasicParsing = $true }
+  $wireHeaders=@{}+$Headers
+  $useClientSession=$wireHeaders.ContainsKey("X-Test-Client")
+  $wireHeaders.Remove("X-Test-Client")
+  $arguments = @{ Method = $Method; Uri = "$BaseUrl$Path"; Headers = $wireHeaders; UseBasicParsing = $true }
+  if($useClientSession){$arguments.WebSession=$clientSession}
   if ($null -ne $Body) { $arguments.Body = ($Body | ConvertTo-Json -Depth 8) }
   try {
     $response = Invoke-WebRequest @arguments
@@ -60,6 +67,10 @@ Test-Case "DEP-004 系统健康" {
 }
 Test-Case "ADM-016 未认证拒绝" {
   $r = Invoke-Json GET "/api/admin/system/users" $null @{}
+  if ($r.Status -ne 401) { throw "期望401，实际$($r.Status)" }
+}
+Test-Case "AUTH-001 未登录客户端接口被拒绝" {
+  $r = Invoke-Json GET "/api/client/profile" $null @{}
   if ($r.Status -ne 401) { throw "期望401，实际$($r.Status)" }
 }
 Test-Case "ADM-001 用户列表" {

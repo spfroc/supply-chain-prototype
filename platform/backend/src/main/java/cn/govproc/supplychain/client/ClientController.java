@@ -1,5 +1,6 @@
 package cn.govproc.supplychain.client;
 
+import cn.govproc.supplychain.auth.ClientAuthService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
@@ -27,12 +28,13 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/client")
 public class ClientController {
-    private static final long DEMO_USER_ID = 1;
-    private static final long DEMO_ENTERPRISE_ID = 1;
+    private final ClientAuthService auth;
+
     private final JdbcClient jdbc;
 
-    public ClientController(JdbcClient jdbc) {
+    public ClientController(JdbcClient jdbc, ClientAuthService auth) {
         this.jdbc = jdbc;
+        this.auth = auth;
     }
 
     @GetMapping("/profile")
@@ -48,7 +50,27 @@ public class ClientController {
               AND CURRENT_DATE BETWEEN a.effective_date AND a.expiry_date AND a.deleted_at IS NULL
             WHERE u.id=:id
             ORDER BY a.id DESC LIMIT 1
-            """).param("id", DEMO_USER_ID).query().singleRow();
+            """).param("id", userId()).query().singleRow();
+    }
+
+    @GetMapping("/summary")
+    Map<String,Object> summary() {
+        return jdbc.sql("""
+          SELECT
+            (SELECT COALESCE(SUM(payable_amount),0) FROM order_main
+              WHERE user_id=:userId AND created_at>=DATE_FORMAT(CURRENT_DATE,'%Y-%m-01')) AS monthlyPurchase,
+            (SELECT COALESCE(SUM((s.market_price-oi.unit_price)*oi.quantity),0)
+              FROM order_main o JOIN order_item oi ON oi.order_main_id=o.id JOIN product_sku s ON s.id=oi.sku_id
+              WHERE o.user_id=:userId) AS totalSavings,
+            (SELECT COUNT(*) FROM order_main WHERE user_id=:userId AND order_status<3) AS activeOrders,
+            (SELECT COUNT(*) FROM order_main WHERE user_id=:userId AND payment_status=0) AS pendingPayment,
+            (SELECT COUNT(*) FROM enterprise_user WHERE enterprise_id=:enterpriseId AND deleted_at IS NULL) AS memberCount,
+            (SELECT COUNT(*) FROM address WHERE user_id=:userId AND deleted_at IS NULL) AS addressCount,
+            (SELECT COUNT(*) FROM invoice_record WHERE enterprise_id=:enterpriseId) AS invoiceCount,
+            (SELECT COUNT(*) FROM agreement_item ai JOIN agreement a ON a.id=ai.agreement_id
+              WHERE a.enterprise_id=:enterpriseId AND a.status=1 AND a.deleted_at IS NULL
+                AND ai.status=1 AND ai.deleted_at IS NULL) AS agreementItemCount
+          """).params(Map.of("userId",userId(),"enterpriseId",enterpriseId())).query().singleRow();
     }
 
     @GetMapping("/addresses")
@@ -57,7 +79,7 @@ public class ClientController {
             SELECT id, contact_name AS contactName, contact_phone AS contactPhone, province, city,
               district, detail, is_default AS isDefault
             FROM address WHERE user_id=:userId AND deleted_at IS NULL ORDER BY is_default DESC,id
-            """).param("userId", DEMO_USER_ID).query().listOfRows();
+            """).param("userId", userId()).query().listOfRows();
     }
 
     @PostMapping("/addresses")
@@ -66,12 +88,12 @@ public class ClientController {
     void createAddress(@Valid @RequestBody AddressRequest request) {
         if (request.isDefault() == 1) {
             jdbc.sql("UPDATE address SET is_default=0 WHERE user_id=:userId AND deleted_at IS NULL")
-                .param("userId", DEMO_USER_ID).update();
+                .param("userId", userId()).update();
         }
         jdbc.sql("""
             INSERT INTO address(enterprise_id,user_id,contact_name,contact_phone,province,city,district,detail,is_default)
             VALUES(:enterpriseId,:userId,:contactName,:contactPhone,:province,:city,:district,:detail,:isDefault)
-            """).params(Map.of("enterpriseId", DEMO_ENTERPRISE_ID, "userId", DEMO_USER_ID,
+            """).params(Map.of("enterpriseId", enterpriseId(), "userId", userId(),
                 "contactName", request.contactName(), "contactPhone", request.contactPhone(),
                 "province", request.province(), "city", request.city(), "district", request.district(),
                 "detail", request.detail(), "isDefault", request.isDefault())).update();
@@ -82,13 +104,13 @@ public class ClientController {
     void updateAddress(@PathVariable long id, @Valid @RequestBody AddressRequest request) {
         if (request.isDefault() == 1) {
             jdbc.sql("UPDATE address SET is_default=0 WHERE user_id=:userId AND id<>:id AND deleted_at IS NULL")
-                .params(Map.of("userId", DEMO_USER_ID, "id", id)).update();
+                .params(Map.of("userId", userId(), "id", id)).update();
         }
         int changed = jdbc.sql("""
             UPDATE address SET contact_name=:contactName,contact_phone=:contactPhone,province=:province,
               city=:city,district=:district,detail=:detail,is_default=:isDefault
             WHERE id=:id AND user_id=:userId AND deleted_at IS NULL
-            """).params(Map.of("id", id, "userId", DEMO_USER_ID, "contactName", request.contactName(),
+            """).params(Map.of("id", id, "userId", userId(), "contactName", request.contactName(),
                 "contactPhone", request.contactPhone(), "province", request.province(), "city", request.city(),
                 "district", request.district(), "detail", request.detail(), "isDefault", request.isDefault())).update();
         if (changed == 0) throw new IllegalArgumentException("地址不存在");
@@ -97,7 +119,7 @@ public class ClientController {
     @DeleteMapping("/addresses/{id}")
     void deleteAddress(@PathVariable long id) {
         int changed = jdbc.sql("UPDATE address SET deleted_at=NOW(),is_default=0 WHERE id=:id AND user_id=:userId AND deleted_at IS NULL")
-            .params(Map.of("id", id, "userId", DEMO_USER_ID)).update();
+            .params(Map.of("id", id, "userId", userId())).update();
         if (changed == 0) throw new IllegalArgumentException("地址不存在");
     }
 
@@ -107,35 +129,38 @@ public class ClientController {
             SELECT id,username,real_name AS realName,phone,role_code AS roleCode,status,
               DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
             FROM enterprise_user WHERE enterprise_id=:enterpriseId AND deleted_at IS NULL ORDER BY id
-            """).param("enterpriseId", DEMO_ENTERPRISE_ID).query().listOfRows();
+            """).param("enterpriseId", enterpriseId()).query().listOfRows();
     }
 
     @PostMapping("/members")
     @ResponseStatus(HttpStatus.CREATED)
     void createMember(@Valid @RequestBody MemberRequest request) {
+        requireEnterpriseAdmin();
         jdbc.sql("""
             INSERT INTO enterprise_user(enterprise_id,username,password_hash,real_name,phone,role_code,status)
             VALUES(:enterpriseId,:username,'{noop}demo-password',:realName,:phone,:roleCode,:status)
-            """).params(Map.of("enterpriseId", DEMO_ENTERPRISE_ID, "username", request.username(),
+            """).params(Map.of("enterpriseId", enterpriseId(), "username", request.username(),
                 "realName", request.realName(), "phone", request.phone(), "roleCode", request.roleCode(),
                 "status", request.status())).update();
     }
 
     @PutMapping("/members/{id}")
     void updateMember(@PathVariable long id,@Valid @RequestBody MemberRequest request) {
+        requireEnterpriseAdmin();
         int changed=jdbc.sql("""
             UPDATE enterprise_user SET username=:username,real_name=:realName,phone=:phone,role_code=:roleCode,status=:status
             WHERE id=:id AND enterprise_id=:enterpriseId AND deleted_at IS NULL
-            """).params(Map.of("id",id,"enterpriseId",DEMO_ENTERPRISE_ID,"username",request.username(),
+            """).params(Map.of("id",id,"enterpriseId",enterpriseId(),"username",request.username(),
                 "realName",request.realName(),"phone",request.phone(),"roleCode",request.roleCode(),"status",request.status())).update();
         if(changed==0)throw new IllegalArgumentException("企业成员不存在");
     }
 
     @DeleteMapping("/members/{id}")
     void deleteMember(@PathVariable long id) {
-        if(id==DEMO_USER_ID)throw new IllegalArgumentException("当前企业主账号不能删除");
+        requireEnterpriseAdmin();
+        if(id==userId())throw new IllegalArgumentException("当前企业主账号不能删除");
         int changed=jdbc.sql("UPDATE enterprise_user SET deleted_at=NOW(),status=0 WHERE id=:id AND enterprise_id=:enterpriseId AND deleted_at IS NULL")
-            .params(Map.of("id",id,"enterpriseId",DEMO_ENTERPRISE_ID)).update();
+            .params(Map.of("id",id,"enterpriseId",enterpriseId())).update();
         if(changed==0)throw new IllegalArgumentException("企业成员不存在");
     }
 
@@ -148,7 +173,7 @@ public class ClientController {
               DATE_FORMAT(i.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,i.remark
             FROM invoice_record i JOIN order_main o ON o.id=i.order_main_id
             WHERE i.enterprise_id=:enterpriseId ORDER BY i.id DESC
-            """).param("enterpriseId",DEMO_ENTERPRISE_ID).query().listOfRows();
+            """).param("enterpriseId",enterpriseId()).query().listOfRows();
     }
 
     @GetMapping("/cart")
@@ -166,7 +191,7 @@ public class ClientController {
             LEFT JOIN agreement_item ai ON ai.agreement_id=a.id AND ai.sku_id=s.id
               AND ai.status=1 AND ai.deleted_at IS NULL
             WHERE c.user_id=:userId ORDER BY c.id
-            """).params(Map.of("enterpriseId", DEMO_ENTERPRISE_ID, "userId", DEMO_USER_ID))
+            """).params(Map.of("enterpriseId", enterpriseId(), "userId", userId()))
             .query().listOfRows();
     }
 
@@ -180,14 +205,14 @@ public class ClientController {
         if (request.quantity() > stock) throw new IllegalArgumentException("加入数量不能超过可售库存");
         var existingId = jdbc.sql("""
             SELECT id FROM cart_item WHERE user_id=:userId AND sku_id=:skuId AND solution_id IS NULL LIMIT 1
-            """).params(Map.of("userId", DEMO_USER_ID, "skuId", request.skuId()))
+            """).params(Map.of("userId", userId(), "skuId", request.skuId()))
             .query(Long.class).optional();
         if (existingId.isPresent()) {
             jdbc.sql("UPDATE cart_item SET quantity=LEAST(quantity+:quantity,:stock),selected=1 WHERE id=:id")
                 .params(Map.of("quantity", request.quantity(), "stock", stock, "id", existingId.get())).update();
         } else {
             jdbc.sql("INSERT INTO cart_item(user_id,sku_id,quantity,selected) VALUES(:userId,:skuId,:quantity,1)")
-                .params(Map.of("userId", DEMO_USER_ID, "skuId", request.skuId(), "quantity", request.quantity())).update();
+                .params(Map.of("userId", userId(), "skuId", request.skuId(), "quantity", request.quantity())).update();
         }
     }
 
@@ -196,18 +221,18 @@ public class ClientController {
         int stock = jdbc.sql("""
             SELECT s.stock-s.reserved_stock FROM cart_item c JOIN product_sku s ON s.id=c.sku_id
             WHERE c.id=:id AND c.user_id=:userId
-            """).params(Map.of("id", id, "userId", DEMO_USER_ID)).query(Integer.class)
+            """).params(Map.of("id", id, "userId", userId())).query(Integer.class)
             .optional().orElseThrow(() -> new IllegalArgumentException("购物车商品不存在"));
         if (request.quantity() > stock) throw new IllegalArgumentException("购买数量不能超过可售库存");
         jdbc.sql("UPDATE cart_item SET quantity=:quantity,selected=:selected WHERE id=:id AND user_id=:userId")
             .params(Map.of("quantity", request.quantity(), "selected", request.selected(),
-                "id", id, "userId", DEMO_USER_ID)).update();
+                "id", id, "userId", userId())).update();
     }
 
     @DeleteMapping("/cart/{id}")
     void deleteCart(@PathVariable long id) {
         int changed = jdbc.sql("DELETE FROM cart_item WHERE id=:id AND user_id=:userId")
-            .params(Map.of("id", id, "userId", DEMO_USER_ID)).update();
+            .params(Map.of("id", id, "userId", userId())).update();
         if (changed == 0) throw new IllegalArgumentException("购物车商品不存在");
     }
 
@@ -221,7 +246,7 @@ public class ClientController {
               COUNT(DISTINCT oi.id) AS itemKinds, COALESCE(SUM(oi.quantity),0) AS itemCount
             FROM order_main o LEFT JOIN order_item oi ON oi.order_main_id=o.id
             WHERE o.user_id=:userId GROUP BY o.id ORDER BY o.id DESC
-            """).param("userId", DEMO_USER_ID).query().listOfRows();
+            """).param("userId", userId()).query().listOfRows();
     }
 
     @GetMapping("/orders/{id}")
@@ -232,7 +257,7 @@ public class ClientController {
               DATE_FORMAT(o.payment_due_at,'%Y-%m-%d %H:%i:%s') AS paymentDueAt,
               DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
             FROM order_main o WHERE o.id=:id AND o.user_id=:userId
-            """).params(Map.of("id",id,"userId",DEMO_USER_ID)).query().listOfRows();
+            """).params(Map.of("id",id,"userId",userId())).query().listOfRows();
         if(orders.isEmpty())throw new IllegalArgumentException("订单不存在");
         var items=jdbc.sql("""
             SELECT p.title,s.sku_code AS skuCode,oi.quantity,oi.unit_price AS unitPrice,oi.total_price AS totalPrice
@@ -253,13 +278,13 @@ public class ClientController {
         String idempotencyKey = request != null && request.idempotencyKey() != null
             ? request.idempotencyKey() : UUID.randomUUID().toString();
         var existing = jdbc.sql("SELECT id,order_no AS orderNo FROM order_main WHERE enterprise_id=:enterpriseId AND idempotency_key=:key")
-            .params(Map.of("enterpriseId", DEMO_ENTERPRISE_ID, "key", idempotencyKey)).query().listOfRows();
+            .params(Map.of("enterpriseId", enterpriseId(), "key", idempotencyKey)).query().listOfRows();
         if (!existing.isEmpty()) return existing.getFirst();
 
         long agreementId = jdbc.sql("""
             SELECT id FROM agreement WHERE enterprise_id=:enterpriseId AND status=1 AND deleted_at IS NULL
               AND CURRENT_DATE BETWEEN effective_date AND expiry_date ORDER BY id DESC LIMIT 1
-            """).param("enterpriseId", DEMO_ENTERPRISE_ID).query(Long.class)
+            """).param("enterpriseId", enterpriseId()).query(Long.class)
             .optional().orElseThrow(() -> new IllegalArgumentException("企业当前没有生效协议，无法下单"));
         List<Map<String, Object>> lines = jdbc.sql("""
             SELECT c.id AS cartId,c.sku_id AS skuId,c.quantity,p.title,s.sku_code AS skuCode,
@@ -268,7 +293,7 @@ public class ClientController {
             LEFT JOIN agreement_item ai ON ai.agreement_id=:agreementId AND ai.sku_id=s.id
               AND ai.status=1 AND ai.deleted_at IS NULL
             WHERE c.user_id=:userId AND c.selected=1
-            """).params(Map.of("agreementId", agreementId, "userId", DEMO_USER_ID)).query().listOfRows();
+            """).params(Map.of("agreementId", agreementId, "userId", userId())).query().listOfRows();
         if (lines.isEmpty()) throw new IllegalArgumentException("请先选择需要结算的商品");
         for (var line : lines) {
             if (((Number) line.get("quantity")).intValue() > ((Number) line.get("availableStock")).intValue()) {
@@ -282,7 +307,7 @@ public class ClientController {
             SELECT id,contact_name AS contactName,contact_phone AS contactPhone,
               CONCAT(province,city,district,detail) AS fullAddress
             FROM address WHERE user_id=:userId AND deleted_at IS NULL ORDER BY is_default DESC,id LIMIT 1
-            """).param("userId", DEMO_USER_ID).query().listOfRows();
+            """).param("userId", userId()).query().listOfRows();
         if (addresses.isEmpty()) throw new IllegalArgumentException("请先维护收货地址");
         Map<String, Object> address = addresses.getFirst();
         String orderNo = "PO" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
@@ -290,7 +315,7 @@ public class ClientController {
             INSERT INTO order_main(order_no,enterprise_id,user_id,agreement_id,item_amount,freight_amount,
               payable_amount,payment_status,order_status,price_version,idempotency_key,payment_due_at)
             VALUES(:orderNo,:enterpriseId,:userId,:agreementId,:amount,0,:amount,0,0,:priceVersion,:key,DATE_ADD(NOW(),INTERVAL 48 HOUR))
-            """).params(Map.of("orderNo", orderNo, "enterpriseId", DEMO_ENTERPRISE_ID, "userId", DEMO_USER_ID,
+            """).params(Map.of("orderNo", orderNo, "enterpriseId", enterpriseId(), "userId", userId(),
                 "agreementId", agreementId, "amount", amount, "priceVersion", UUID.randomUUID().toString(), "key", idempotencyKey)).update();
         long orderId = jdbc.sql("SELECT id FROM order_main WHERE order_no=:orderNo").param("orderNo", orderNo).query(Long.class).single();
         String subOrderNo = orderNo + "-01";
@@ -316,8 +341,15 @@ public class ClientController {
             jdbc.sql("UPDATE product_sku SET reserved_stock=reserved_stock+:quantity WHERE id=:skuId")
                 .params(Map.of("quantity", quantity, "skuId", skuId)).update();
         }
-        jdbc.sql("DELETE FROM cart_item WHERE user_id=:userId AND selected=1").param("userId", DEMO_USER_ID).update();
+        jdbc.sql("DELETE FROM cart_item WHERE user_id=:userId AND selected=1").param("userId", userId()).update();
         return Map.of("id", orderId, "orderNo", orderNo, "payableAmount", amount, "paymentMethod", "银行转账");
+    }
+
+    private long userId() { return auth.current().userId(); }
+    private long enterpriseId() { return auth.current().enterpriseId(); }
+    private void requireEnterpriseAdmin() {
+        if(!"ENTERPRISE_ADMIN".equals(auth.current().roleCode()))
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN,"仅企业管理员可管理成员");
     }
 
     public record CartRequest(@NotNull Long skuId, @Min(1) @Max(9999) int quantity) {}

@@ -16,7 +16,7 @@ public class SecurityConfig {
             .cors(Customizer.withDefaults())
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/actuator/health/**", "/api/openapi/**", "/api/docs/**", "/api/public/**", "/api/client/**").permitAll()
+                .requestMatchers("/error", "/actuator/health/**", "/api/openapi/**", "/api/docs/**", "/api/public/**", "/api/auth/**", "/api/client/**").permitAll()
                 .requestMatchers("/api/admin/**").hasRole("ADMIN")
                 .anyRequest().authenticated())
             .httpBasic(Customizer.withDefaults())

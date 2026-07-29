@@ -7,13 +7,20 @@ param(
 $ErrorActionPreference = "Stop"
 $credential = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("${AdminUser}:${AdminPassword}"))
 $adminHeaders = @{ Authorization = "Basic $credential"; "Content-Type" = "application/json" }
-$jsonHeaders = @{ "Content-Type" = "application/json" }
+$clientSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+$loginResponse = Invoke-WebRequest -Method POST -Uri "$BaseUrl/api/auth/login" -ContentType "application/json" `
+  -Body (@{ enterpriseId=1; username="demo"; password="demo-password" } | ConvertTo-Json) -WebSession $clientSession -UseBasicParsing
+$jsonHeaders = @{ "Content-Type" = "application/json"; "X-Test-Client" = "1" }
 $stamp = [DateTimeOffset]::Now.ToUnixTimeSeconds()
 $script:Passed = 0
 
 function Call-Api {
   param([string]$Method, [string]$Path, $Body, $Headers = $jsonHeaders)
-  $args = @{ Method=$Method; Uri="$BaseUrl$Path"; Headers=$Headers; UseBasicParsing=$true }
+  $wireHeaders=@{}+$Headers
+  $useClientSession=$wireHeaders.ContainsKey("X-Test-Client")
+  $wireHeaders.Remove("X-Test-Client")
+  $args = @{ Method=$Method; Uri="$BaseUrl$Path"; Headers=$wireHeaders; UseBasicParsing=$true }
+  if($useClientSession){$args.WebSession=$clientSession}
   if ($null -ne $Body) { $args.Body = ($Body | ConvertTo-Json -Depth 8) }
   $response = Invoke-WebRequest @args
   if ($response.Content) { return $response.Content | ConvertFrom-Json }
