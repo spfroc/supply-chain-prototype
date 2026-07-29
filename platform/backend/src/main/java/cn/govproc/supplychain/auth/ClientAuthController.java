@@ -4,9 +4,7 @@ import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
-import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.time.Duration;
 import java.util.List;
@@ -36,16 +34,25 @@ public class ClientAuthController {
 
     @PostMapping("/register") @ResponseStatus(HttpStatus.CREATED) @Transactional
     Map<String,Object> register(@Valid @RequestBody RegisterRequest r,HttpServletResponse response) {
-        long exists=jdbc.sql("SELECT COUNT(*) FROM enterprise WHERE id=:id AND status=1 AND deleted_at IS NULL")
-          .param("id",r.enterpriseId()).query(Long.class).single();
-        if(exists==0) throw new IllegalArgumentException("企业不存在或已停用");
+        var enterprises=jdbc.sql("""
+          SELECT id FROM enterprise
+          WHERE name=:name AND status=1 AND deleted_at IS NULL
+          """).param("name",r.enterpriseName().trim()).query(Long.class).list();
+        if(enterprises.isEmpty()) throw new IllegalArgumentException("未找到该企业，请核对企业全称");
+        if(enterprises.size()>1) throw new IllegalArgumentException("企业名称不唯一，请联系平台管理员");
+        long enterpriseId=enterprises.getFirst();
+        long usernameExists=jdbc.sql("""
+          SELECT COUNT(*) FROM enterprise_user
+          WHERE username=:username AND deleted_at IS NULL
+          """).param("username",r.username()).query(Long.class).single();
+        if(usernameExists>0) throw new IllegalArgumentException("登录账号已存在，请更换账号");
         jdbc.sql("""
           INSERT INTO enterprise_user(enterprise_id,username,password_hash,real_name,phone,role_code,status)
           VALUES(:enterpriseId,:username,:password,:realName,:phone,'BUYER',1)
-          """).params(Map.of("enterpriseId",r.enterpriseId(),"username",r.username(),
+          """).params(Map.of("enterpriseId",enterpriseId,"username",r.username(),
           "password",encoder.encode(r.password()),"realName",r.realName(),"phone",r.phone())).update();
         long userId=jdbc.sql("SELECT id FROM enterprise_user WHERE enterprise_id=:enterpriseId AND username=:username AND deleted_at IS NULL")
-          .params(Map.of("enterpriseId",r.enterpriseId(),"username",r.username())).query(Long.class).single();
+          .params(Map.of("enterpriseId",enterpriseId,"username",r.username())).query(Long.class).single();
         issueSession(userId,response);
         return Map.of("userId",userId);
     }
@@ -55,12 +62,14 @@ public class ClientAuthController {
         var users=jdbc.sql("""
           SELECT u.id,u.password_hash AS passwordHash FROM enterprise_user u
           JOIN enterprise e ON e.id=u.enterprise_id
-          WHERE u.enterprise_id=:enterpriseId AND u.username=:username AND u.status=1
+          WHERE u.username=:username AND u.status=1
             AND u.deleted_at IS NULL AND e.status=1 AND e.deleted_at IS NULL
-          """).params(Map.of("enterpriseId",r.enterpriseId(),"username",r.username())).query().listOfRows();
-        if(users.isEmpty()||!encoder.matches(r.password(),String.valueOf(users.getFirst().get("passwordHash"))))
-            throw new IllegalArgumentException("企业、账号或密码错误");
-        long userId=((Number)users.getFirst().get("id")).longValue();
+          """).param("username",r.username()).query().listOfRows();
+        var matched=users.stream()
+          .filter(user->encoder.matches(r.password(),String.valueOf(user.get("passwordHash")))).toList();
+        if(matched.isEmpty()) throw new IllegalArgumentException("账号或密码错误");
+        if(matched.size()>1) throw new IllegalArgumentException("账号关联多个企业，请联系平台管理员处理");
+        long userId=((Number)matched.getFirst().get("id")).longValue();
         issueSession(userId,response);
         return Map.of("userId",userId);
     }
@@ -97,7 +106,7 @@ public class ClientAuthController {
         cookie.setSecure(false);cookie.setAttribute("SameSite","Lax");response.addCookie(cookie);
     }
 
-    public record LoginRequest(@NotNull @Min(1) Long enterpriseId,@NotBlank String username,@NotBlank String password){}
-    public record RegisterRequest(@NotNull @Min(1) Long enterpriseId,@NotBlank @Size(min=3,max=80) String username,
+    public record LoginRequest(@NotBlank String username,@NotBlank String password){}
+    public record RegisterRequest(@NotBlank String enterpriseName,@NotBlank @Size(min=3,max=80) String username,
       @NotBlank @Size(min=8,max=72) String password,@NotBlank String realName,@NotBlank String phone){}
 }
