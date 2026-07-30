@@ -222,6 +222,30 @@ Case "PORTAL-BRAND-001" "品牌支持新增、编辑和删除" {
   if (!$saved -or $saved.name -notmatch "UPDATED") { throw "品牌编辑未保存" }
   Expect-Status (Invoke-Api DELETE "/api/admin/content/brands/list/$id" $null $adminHeaders) @(200,204)
 }
+Case "PORTAL-PLATFORM-PRODUCT-001" "平台与商品多对多关联并保存平台价格和链接" {
+  $platformCreated=Invoke-Api POST "/api/admin/content/platform" @{
+    title="QA-PLATFORM-$stamp";subtitle="平台商品测试";imageUrl="";linkUrl="";sortOrder=99;status=1
+  } $adminHeaders
+  Expect-Status $platformCreated @(201)
+  $platformId=[long]$platformCreated.Data.id
+  $sku=(Invoke-Api GET "/api/public/catalog/products?enterpriseId=1" $null @{}).Data|Select-Object -First 1
+  $relation=Invoke-Api POST "/api/admin/content/platform/$platformId/products" @{
+    skuId=$sku.skuId;platformPrice=123.45;productUrl="https://example.com/item/$stamp";listingStatus=1
+  } $adminHeaders
+  Expect-Status $relation @(201)
+  $relationId=[long]$relation.Data.id
+  $public=(Invoke-Api GET "/api/public/portal/platforms/$platformId/products" $null @{}).Data
+  if($public.products.Count -ne 1 -or [decimal]$public.products[0].platformPrice -ne 123.45 -or $public.products[0].productUrl -notmatch "$stamp"){
+    throw "平台商品关联或平台字段未同步"
+  }
+  Expect-Status (Invoke-Api PUT "/api/admin/content/platform/$platformId/products/$relationId" @{
+    skuId=$sku.skuId;platformPrice=120.00;productUrl="https://example.com/item/updated";listingStatus=0
+  } $adminHeaders) @(200,204)
+  $public=(Invoke-Api GET "/api/public/portal/platforms/$platformId/products" $null @{}).Data
+  if($public.products.Count -ne 0){throw "平台商品下架后仍在客户端展示"}
+  Expect-Status (Invoke-Api DELETE "/api/admin/content/platform/$platformId/products/$relationId" $null $adminHeaders) @(200,204)
+  Expect-Status (Invoke-Api DELETE "/api/admin/content/platform/$platformId" $null $adminHeaders) @(200,204)
+}
 
 # ---------- 商品分类 ----------
 $categoryLevel1=$null

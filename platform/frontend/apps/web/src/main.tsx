@@ -5,12 +5,12 @@ import "./manage.css";
 import "./auth.css";
 import "./categories.css";
 
-type View="home"|"products"|"solutions"|"platforms"|"content"|"detail"|"cart"|"orders"|"profile"|"addresses"|"invoices"|"members";
+type View="home"|"products"|"solutions"|"platforms"|"platform-products"|"content"|"detail"|"cart"|"orders"|"profile"|"addresses"|"invoices"|"members";
 type Row=Record<string,any>;
 const money=(value:any)=>`¥${Number(value||0).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const dateTime=(value:string)=>value?new Intl.DateTimeFormat("zh-CN",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(value.replace(" ","T"))):"—";
 const orderStatus=["待付款","待发货","运输中","已完成","已取消"];
-const routeViews:View[]=["home","products","solutions","platforms","content","cart","orders","profile","addresses","invoices","members"];
+const routeViews:View[]=["home","products","solutions","platforms","platform-products","content","cart","orders","profile","addresses","invoices","members"];
 const routeFromLocation=()=>{const value=new URLSearchParams(location.search).get("view") as View|null;return value&&routeViews.includes(value)?value:"home"};
 
 async function api<T>(path:string,init?:RequestInit):Promise<T>{
@@ -21,7 +21,7 @@ async function api<T>(path:string,init?:RequestInit):Promise<T>{
 }
 
 function App(){
-  const [view,setView]=useState<View>(routeFromLocation);const [products,setProducts]=useState<Row[]>([]);const [categories,setCategories]=useState<Row[]>([]);const [portal,setPortal]=useState<Row>({});const [categoryId,setCategoryId]=useState<number|undefined>(()=>{const value=Number(new URLSearchParams(location.search).get("categoryId"));return value||undefined});const [profile,setProfile]=useState<Row>({});const [summary,setSummary]=useState<Row>({});
+  const [view,setView]=useState<View>(routeFromLocation);const [products,setProducts]=useState<Row[]>([]);const [categories,setCategories]=useState<Row[]>([]);const [portal,setPortal]=useState<Row>({});const [categoryId,setCategoryId]=useState<number|undefined>(()=>{const value=Number(new URLSearchParams(location.search).get("categoryId"));return value||undefined});const [platformId,setPlatformId]=useState<number|undefined>(()=>{const value=Number(new URLSearchParams(location.search).get("platformId"));return value||undefined});const [profile,setProfile]=useState<Row>({});const [summary,setSummary]=useState<Row>({});
   const [cart,setCart]=useState<Row[]>([]);const [selected,setSelected]=useState<Row>();const [toast,setToast]=useState("");
   const [current,setCurrent]=useState<Row>();const [authReady,setAuthReady]=useState(false);const [siteConfig,setSiteConfig]=useState<Row>({});
   const siteName=siteConfig["platform.name"]||"政企采购供应链";const servicePhone=siteConfig["platform.servicePhone"]||"400-800-2026";
@@ -29,9 +29,9 @@ function App(){
   const loadCart=()=>api<Row[]>("/api/client/cart").then(setCart).catch(e=>notify(e.message));
   const loadAccount=async()=>{const session=await api<Row>("/api/auth/session");if(!session.authenticated)throw new Error("请先登录");setCurrent(session.user);const [p,s]=await Promise.all([api<Row>("/api/client/profile"),api<Row>("/api/client/summary")]);setProfile(p);setSummary(s);await loadCart()};
   useEffect(()=>{void api<Row>("/api/public/config").then(setSiteConfig).catch(()=>{});void api<Row>("/api/public/portal").then(setPortal).catch(()=>{});void api<Row[]>("/api/public/catalog/categories").then(setCategories);void api<Row[]>("/api/public/catalog/products?enterpriseId=1").then(setProducts);void loadAccount().catch(()=>{}).finally(()=>setAuthReady(true));},[]);
-  useEffect(()=>{const pop=()=>{setView(routeFromLocation());const id=Number(new URLSearchParams(location.search).get("categoryId"));setCategoryId(id||undefined)};addEventListener("popstate",pop);return()=>removeEventListener("popstate",pop)},[]);
-  const navigate=(target:View,nextCategory?:number)=>{setView(target);setCategoryId(nextCategory);const url=new URL(location.href);if(target==="home")url.searchParams.delete("view");else url.searchParams.set("view",target);if(nextCategory)url.searchParams.set("categoryId",String(nextCategory));else url.searchParams.delete("categoryId");history.pushState({view:target},"",url)};
-  const openNavigation=(item:Row,index:number)=>{const fallback:View=index===0?"home":item.title.includes("方案")?"solutions":item.title.includes("平台")?"platforms":"products";if(/^https?:\/\//.test(item.linkUrl||"")){location.href=item.linkUrl;return}const configured=item.linkUrl?new URL(item.linkUrl,location.origin):null;const configuredView=configured?.searchParams.get("view") as View|null;navigate(configuredView&&routeViews.includes(configuredView)?configuredView:fallback)};
+  useEffect(()=>{const pop=()=>{const params=new URLSearchParams(location.search);setView(routeFromLocation());setCategoryId(Number(params.get("categoryId"))||undefined);setPlatformId(Number(params.get("platformId"))||undefined)};addEventListener("popstate",pop);return()=>removeEventListener("popstate",pop)},[]);
+  const navigate=(target:View,nextCategory?:number,nextPlatform?:number)=>{setView(target);setCategoryId(nextCategory);setPlatformId(nextPlatform);const url=new URL(location.href);if(target==="home")url.searchParams.delete("view");else url.searchParams.set("view",target);if(nextCategory)url.searchParams.set("categoryId",String(nextCategory));else url.searchParams.delete("categoryId");if(nextPlatform)url.searchParams.set("platformId",String(nextPlatform));else url.searchParams.delete("platformId");history.pushState({view:target},"",url)};
+  const openNavigation=(item:Row,index:number)=>{const fallback:View=index===0?"home":item.title.includes("方案")?"solutions":item.title.includes("平台")?"platforms":"products";if(/^https?:\/\//.test(item.linkUrl||"")){location.href=item.linkUrl;return}const configured=item.linkUrl?new URL(item.linkUrl,location.origin):null;const configuredView=configured?.searchParams.get("view") as View|null;navigate(configuredView&&routeViews.includes(configuredView)?configuredView:fallback,undefined,Number(configured?.searchParams.get("platformId"))||undefined)};
   const add=async(product:Row,quantity=1)=>{try{await api("/api/client/cart",{method:"POST",body:JSON.stringify({skuId:product.skuId,quantity})});await loadCart();notify("已加入采购车");}catch(e){notify((e as Error).message);}};
   const goProduct=(product:Row)=>{setSelected(product);setView("detail");scrollTo(0,0);};
   const logout=async()=>{await api("/api/auth/logout",{method:"POST"});setCurrent(undefined);setProfile({});setCart([]);setView("home")};
@@ -47,6 +47,7 @@ function App(){
     {view==="home"&&<Home products={products} categories={categories} portal={portal} open={goProduct} add={add} all={(id?:number)=>navigate("products",id)}/>}
     {view==="products"&&<Products products={products} categories={categories} initialCategory={categoryId} open={goProduct} add={add}/>}
     {(["solutions","platforms","content"] as View[]).includes(view)&&<PortalList type={view as "solutions"|"platforms"|"content"} rows={portal[view==="solutions"?"solution":view==="platforms"?"platform":"content"]||[]} back={()=>setView("home")}/>}
+    {view==="platform-products"&&platformId&&<PlatformProducts platformId={platformId} open={goProduct}/>}
     {view==="detail"&&selected&&<Detail product={selected} back={()=>setView("products")} add={add}/>}
     {view==="cart"&&<Cart rows={cart} reload={loadCart} orders={()=>setView("orders")} notify={notify}/>}
     {view==="orders"&&<Orders go={setView}/>}
@@ -83,6 +84,12 @@ function Products({products,categories,initialCategory,open,add}:{products:Row[]
 function PortalList({type,rows,back}:{type:"solutions"|"platforms"|"content";rows:Row[];back:()=>void}){
   const title=type==="solutions"?"场景方案":type==="platforms"?"平台比价":"内容中心";
   return <main className="page"><div className="breadcrumb"><button onClick={back}>首页</button>　/　{title}</div><section className="section"><div className="section-head"><div><span>ENTERPRISE SERVICE</span><h2>{title}</h2><p>内容由管理后台统一维护并实时发布</p></div></div><div className="product-grid">{rows.map((row,index)=><article className="product-card" key={row.id}><div className={`product-image p${index%5}`}><i>{row.title.slice(0,1)}</i></div><div className="product-info"><small>{title}</small><h3>{row.title}</h3><p>{row.subtitle||"暂无说明"}</p>{row.linkUrl&&<a href={row.linkUrl}>查看详情 ›</a>}</div></article>)}</div></section></main>;
+}
+
+function PlatformProducts({platformId,open}:{platformId:number;open:(r:Row)=>void}){
+  const [data,setData]=useState<Row>({products:[]});const [loading,setLoading]=useState(true);
+  useEffect(()=>{setLoading(true);void api<Row>(`/api/public/portal/platforms/${platformId}/products`).then(setData).finally(()=>setLoading(false))},[platformId]);
+  return <main className="page"><div className="breadcrumb">首页　/　采购平台　/　{data.platform?.title||"商品列表"}</div><section className="listing"><div className="listing-head"><div><h1>{data.platform?.title||"平台商品"}</h1><p>{data.platform?.subtitle||"平台关联商品"} · 共 {(data.products||[]).length} 款</p></div></div>{loading?<div className="empty small">正在加载平台商品…</div>:<div className="product-grid">{(data.products||[]).map((product:Row,index:number)=><article className="product-card" key={product.relationId} onClick={()=>open(product)}><div className={`product-image p${index%5}`}>{product.mainImage?<img src={product.mainImage} alt={product.title}/>:<i>{["💻","📄","🖨️","📦"][index%4]}</i>}<span>平台商品</span></div><div className="product-info"><small>{data.platform?.title}</small><h3>{product.title}</h3><p>{product.summary}</p><div className="price"><strong>{money(product.platformPrice)}</strong><del>{money(product.marketPrice)}</del></div><div className="stock"><span>库存 {product.availableStock} · 浏览 {product.clickCount}</span><a href={product.productUrl} target="_blank" rel="noreferrer" onClick={event=>event.stopPropagation()}>平台链接</a></div></div></article>)}</div>}{!loading&&!(data.products||[]).length&&<div className="empty"><h2>该平台暂未关联上架商品</h2><p>请在管理后台的平台商品管理中添加商品</p></div>}</section></main>;
 }
 
 function ProductCard({product,index,open,add}:{product:Row;index:number;open:(r:Row)=>void;add:(r:Row)=>void}){

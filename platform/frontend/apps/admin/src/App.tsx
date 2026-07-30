@@ -220,18 +220,24 @@ function PortalManager({module}:{module:Module}) {
   const current=meta[module];
   const endpoint=`/api/admin/content/${current.type}`;
   const rows=useLoad<Row[]>(()=>rootApi(endpoint),[module]);
+  const products=useLoad<Row[]>(()=>rootApi("/api/admin/business/products"));
   const [form]=Form.useForm();const [open,setOpen]=useState(false);const [editing,setEditing]=useState<Row>();
+  const [relationForm]=Form.useForm();const [platform,setPlatform]=useState<Row>();const [relations,setRelations]=useState<Row[]>([]);const [productOpen,setProductOpen]=useState(false);const [relationEditing,setRelationEditing]=useState<Row>();const [relationEditorOpen,setRelationEditorOpen]=useState(false);
   const isBrand=module==="brands";
   const show=(row?:Row)=>{setEditing(row);form.resetFields();form.setFieldsValue(row||{sortOrder:0,status:1});setOpen(true)};
   const save=async()=>{try{const values=await form.validateFields();const response=await fetch(`${endpoint}${editing?`/${editing.id}`:""}`,{method:editing?"PUT":"POST",headers:apiHeaders(),body:JSON.stringify(values)});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||data.message||"保存失败")}setOpen(false);message.success(`${current.name}已保存`);void rows.refresh()}catch(error){if(error instanceof Error)message.error(error.message)}};
   const remove=(row:Row)=>modal.confirm({title:`确认删除“${row.title||row.name}”？`,okButtonProps:{danger:true},onOk:async()=>{const response=await fetch(`${endpoint}/${row.id}`,{method:"DELETE",headers:apiHeaders()});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"删除失败")}message.success("删除成功");void rows.refresh()}});
+  const loadPlatformProducts=async(row:Row)=>{setPlatform(row);setRelations(await rootApi(`/api/admin/content/platform/${row.id}/products`));setProductOpen(true)};
+  const showRelation=(row?:Row)=>{setRelationEditing(row);relationForm.resetFields();relationForm.setFieldsValue(row||{skuId:products.data?.[0]?.skuId,listingStatus:1});setRelationEditorOpen(true)};
+  const saveRelation=async()=>{try{const values=await relationForm.validateFields();const url=`/api/admin/content/platform/${platform!.id}/products${relationEditing?`/${relationEditing.id}`:""}`;const response=await fetch(url,{method:relationEditing?"PUT":"POST",headers:apiHeaders(),body:JSON.stringify(values)});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"平台商品保存失败")}setRelations(await rootApi(`/api/admin/content/platform/${platform!.id}/products`));setRelationEditorOpen(false);message.success("平台商品已保存")}catch(error){message.error((error as Error).message)}};
+  const removeRelation=(row:Row)=>modal.confirm({title:`确认移除“${row.title}”？`,onOk:async()=>{await fetch(`/api/admin/content/platform/${platform!.id}/products/${row.id}`,{method:"DELETE",headers:apiHeaders()});setRelations(await rootApi(`/api/admin/content/platform/${platform!.id}/products`));message.success("平台商品已移除")}});
   const columns:ColumnsType<Row>=[
     {title:current.name,render:(_,row)=><div className="user-cell"><i>{current.name.slice(0,1)}</i><span><strong>{row.title||row.name}</strong><small>{row.subtitle||row.description||"—"}</small></span></div>},
     ...(isBrand?[]:[{title:"跳转链接",dataIndex:"linkUrl",render:(v:string)=>v||"—"}]),
     {title:"排序",dataIndex:"sortOrder",width:90},
     {title:"状态",dataIndex:"status",width:100,render:(v:number)=><Tag color={Number(v)===1?"green":"default"}>{Number(v)===1?"启用":"停用"}</Tag>},
     {title:"更新时间",dataIndex:isBrand?"createdAt":"updatedAt",render:dateTime},
-    {title:"操作",width:150,render:(_,row)=><Space><Button type="link" onClick={()=>show(row)}>编辑</Button><Button type="link" danger onClick={()=>remove(row)}>删除</Button></Space>}
+    {title:"操作",width:module==="platforms"?250:150,render:(_,row)=><Space>{module==="platforms"&&<Button type="link" onClick={()=>void loadPlatformProducts(row)}>商品管理</Button>}<Button type="link" onClick={()=>show(row)}>编辑</Button><Button type="link" danger onClick={()=>remove(row)}>删除</Button></Space>}
   ];
   return <><Card className="data-card" title={current.title} extra={<Button type="primary" onClick={()=>show()}>＋ 新增{current.name}</Button>}><Table rowKey="id" loading={rows.loading} dataSource={rows.data} columns={columns}/></Card>
     <Modal open={open} title={`${editing?"编辑":"新增"}${current.name}`} width={680} onCancel={()=>setOpen(false)} onOk={()=>void save()}><Form form={form} layout="vertical" className="two-column-form">
@@ -241,7 +247,9 @@ function PortalManager({module}:{module:Module}) {
       <Form.Item name={isBrand?"logo":"imageUrl"} label={isBrand?"品牌 Logo":"展示图片"} className="full"><Input placeholder="请输入 OSS 图片地址（可选）"/></Form.Item>
       {!isBrand&&<Form.Item name="linkUrl" label="跳转链接" className="full"><Input placeholder="/web/?view=products 或 https://..."/></Form.Item>}
       <Form.Item name="status" label="状态"><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]}/></Form.Item>
-    </Form></Modal></>;
+    </Form></Modal>
+    <Modal open={productOpen} title={`${platform?.title||""} · 平台商品`} width={940} footer={null} onCancel={()=>setProductOpen(false)}><Space style={{marginBottom:16}}><Button type="primary" onClick={()=>showRelation()}>＋ 添加商品</Button><Typography.Text copyable={{text:`/web/?view=platform-products&platformId=${platform?.id}`}}>导航入口：/web/?view=platform-products&amp;platformId={platform?.id}</Typography.Text></Space><Table rowKey="id" dataSource={relations} pagination={false} columns={[{title:"商品",render:(_,r)=><><strong>{r.title}</strong><small className="subline">{r.skuCode}</small></>},{title:"平台价",dataIndex:"platformPrice",render:v=>`¥${Number(v).toFixed(2)}`},{title:"平台链接",dataIndex:"productUrl",ellipsis:true},{title:"状态",dataIndex:"listingStatus",render:v=><Tag color={Number(v)===1?"green":"default"}>{Number(v)===1?"上架":"下架"}</Tag>},{title:"点击量",dataIndex:"clickCount"},{title:"操作",render:(_,r)=><Space><Button type="link" onClick={()=>showRelation(r)}>编辑</Button><Button type="link" danger onClick={()=>removeRelation(r)}>移除</Button></Space>}]}/></Modal>
+    <Modal open={relationEditorOpen} title={`${relationEditing?"编辑":"添加"}平台商品`} onCancel={()=>setRelationEditorOpen(false)} onOk={()=>void saveRelation()}><Form form={relationForm} layout="vertical"><Form.Item name="skuId" label="关联现有商品" rules={[{required:true,message:"请选择商品"}]}><Select showSearch optionFilterProp="label" disabled={!!relationEditing} options={(products.data||[]).map(row=>({value:row.skuId,label:`${row.title} · ${row.skuCode}`}))}/></Form.Item><Form.Item name="platformPrice" label="平台售价" rules={[{required:true,message:"请输入平台售价"}]}><InputNumber min={0} precision={2} style={{width:"100%"}}/></Form.Item><Form.Item name="productUrl" label="平台商品链接" rules={[{required:true,message:"请输入平台商品链接"}]}><Input placeholder="https://..."/></Form.Item><Form.Item name="listingStatus" label="上架状态"><Select options={[{value:1,label:"上架"},{value:0,label:"下架"}]}/></Form.Item></Form></Modal></>;
 }
 
 function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []) {
