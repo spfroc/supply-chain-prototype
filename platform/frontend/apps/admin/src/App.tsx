@@ -104,13 +104,23 @@ function ProductImageUpload({
   value,
   onChange,
   multiple = false,
+  kind = multiple ? "gallery" : "main",
 }: {
   value?: string;
   onChange?: (value: string) => void;
   multiple?: boolean;
+  kind?: "main" | "gallery" | "brand" | "banner" | "portal";
 }) {
   const { message } = AntApp.useApp();
   const limit = multiple ? 6 : 1;
+  const profiles = {
+    main: { minWidth: 600, minHeight: 600, maxWidth: 3000, maxHeight: 3000, ratio: 1, ratioLabel: "1:1", maxMb: 5, title: "主图" },
+    gallery: { minWidth: 600, minHeight: 600, maxWidth: 3000, maxHeight: 3000, ratio: 1, ratioLabel: "1:1", maxMb: 5, title: "配图" },
+    brand: { minWidth: 300, minHeight: 300, maxWidth: 2000, maxHeight: 2000, ratio: 1, ratioLabel: "1:1", maxMb: 2, title: "Logo" },
+    banner: { minWidth: 1200, minHeight: 400, maxWidth: 3840, maxHeight: 1280, ratio: 3, ratioLabel: "3:1", maxMb: 5, title: "轮播图" },
+    portal: { minWidth: 800, minHeight: 450, maxWidth: 3840, maxHeight: 2160, ratio: 16 / 9, ratioLabel: "16:9", maxMb: 5, title: "展示图" },
+  };
+  const profile = profiles[kind];
   const urls = String(value || "")
     .split("\n")
     .map((url) => url.trim())
@@ -126,15 +136,23 @@ function ProductImageUpload({
     try {
       if (!["image/jpeg", "image/png"].includes(file.type))
         throw new Error("仅支持 JPG、PNG 图片");
-      if (file.size > 5 * 1024 * 1024) throw new Error("图片不能超过5MB");
+      if (file.size > profile.maxMb * 1024 * 1024)
+        throw new Error(`图片不能超过${profile.maxMb}MB`);
       const { width, height } = await imageDimensions(file);
-      if (width < 600 || height < 600 || width > 3000 || height > 3000)
-        throw new Error("图片宽高须在600至3000像素之间");
-      if (Math.abs(width / height - 1) > 0.03)
-        throw new Error("商品图片须为1:1正方形");
+      if (
+        width < profile.minWidth ||
+        height < profile.minHeight ||
+        width > profile.maxWidth ||
+        height > profile.maxHeight
+      )
+        throw new Error(
+          `图片尺寸须在${profile.minWidth}×${profile.minHeight}至${profile.maxWidth}×${profile.maxHeight}之间`,
+        );
+      if (Math.abs(width / height - profile.ratio) / profile.ratio > 0.03)
+        throw new Error(`图片须为${profile.ratioLabel}比例`);
       const body = new FormData();
       body.append("file", file);
-      body.append("kind", multiple ? "gallery" : "main");
+      body.append("kind", kind);
       const response = await fetch("/api/admin/business/uploads/images", {
         method: "POST",
         headers: { Authorization: `Basic ${adminCredential()}` },
@@ -167,12 +185,13 @@ function ProductImageUpload({
         {files.length < limit && (
           <div className="upload-trigger">
             <b>＋</b>
-            <span>{multiple ? "上传配图" : "上传主图"}</span>
+            <span>上传{profile.title}</span>
           </div>
         )}
       </Upload>
       <small>
-        JPG/PNG，1:1 正方形，600×600 至 3000×3000，单张不超过5MB
+        JPG/PNG，{profile.ratioLabel}，{profile.minWidth}×{profile.minHeight} 至{" "}
+        {profile.maxWidth}×{profile.maxHeight}，单张不超过{profile.maxMb}MB
         {multiple ? "，最多6张" : ""}
       </small>
     </div>
@@ -1877,8 +1896,21 @@ function PortalManager({ module }: { module: Module }) {
             name={isBrand ? "logo" : "imageUrl"}
             label={isBrand ? "品牌 Logo" : "展示图片"}
             className="full"
+            rules={
+              module === "banners"
+                ? [{ required: true, message: "请上传轮播图片" }]
+                : undefined
+            }
           >
-            <Input placeholder="请输入 OSS 图片地址（可选）" />
+            <ProductImageUpload
+              kind={
+                isBrand
+                  ? "brand"
+                  : module === "banners"
+                    ? "banner"
+                    : "portal"
+              }
+            />
           </Form.Item>
           {!isBrand && (
             <Form.Item name="linkUrl" label="跳转链接" className="full">

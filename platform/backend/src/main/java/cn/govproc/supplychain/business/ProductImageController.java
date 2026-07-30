@@ -26,9 +26,6 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api")
 public class ProductImageController {
-    private static final long MAX_BYTES = 5L * 1024 * 1024;
-    private static final int MIN_SIDE = 600;
-    private static final int MAX_SIDE = 3000;
     private static final Set<String> CONTENT_TYPES = Set.of("image/jpeg", "image/png");
     private final Path uploadDirectory;
 
@@ -41,17 +38,26 @@ public class ProductImageController {
     Map<String, Object> upload(@RequestParam MultipartFile file, @RequestParam(defaultValue = "gallery") String kind)
         throws IOException {
         if (file.isEmpty()) throw new IllegalArgumentException("请选择图片文件");
-        if (file.getSize() > MAX_BYTES) throw new IllegalArgumentException("图片不能超过5MB");
+        ImageProfile profile = switch (kind) {
+            case "main", "gallery" -> new ImageProfile(600, 600, 3000, 3000, 1.0, 5);
+            case "brand" -> new ImageProfile(300, 300, 2000, 2000, 1.0, 2);
+            case "banner" -> new ImageProfile(1200, 400, 3840, 1280, 3.0, 5);
+            case "portal" -> new ImageProfile(800, 450, 3840, 2160, 16.0 / 9.0, 5);
+            default -> throw new IllegalArgumentException("未知图片用途");
+        };
+        if (file.getSize() > profile.maxMegabytes() * 1024L * 1024L)
+            throw new IllegalArgumentException("图片不能超过" + profile.maxMegabytes() + "MB");
         if (!CONTENT_TYPES.contains(file.getContentType())) throw new IllegalArgumentException("仅支持 JPG、PNG 图片");
 
         BufferedImage image = ImageIO.read(file.getInputStream());
         if (image == null) throw new IllegalArgumentException("无法识别图片内容");
         int width = image.getWidth(), height = image.getHeight();
-        if (width < MIN_SIDE || height < MIN_SIDE || width > MAX_SIDE || height > MAX_SIDE)
-            throw new IllegalArgumentException("图片宽高须在600至3000像素之间");
+        if (width < profile.minWidth() || height < profile.minHeight()
+            || width > profile.maxWidth() || height > profile.maxHeight())
+            throw new IllegalArgumentException("图片尺寸不符合当前用途要求");
         double ratio = (double) width / height;
-        if (Math.abs(ratio - 1.0) > 0.03)
-            throw new IllegalArgumentException(("main".equals(kind) ? "商品主图" : "商品配图") + "须为1:1正方形");
+        if (Math.abs(ratio - profile.ratio()) / profile.ratio() > 0.03)
+            throw new IllegalArgumentException("图片宽高比例不符合当前用途要求");
 
         String extension = "image/png".equals(file.getContentType()) ? ".png" : ".jpg";
         String filename = UUID.randomUUID() + extension;
@@ -65,6 +71,10 @@ public class ProductImageController {
             "size", file.getSize()
         );
     }
+
+    private record ImageProfile(
+        int minWidth, int minHeight, int maxWidth, int maxHeight, double ratio, int maxMegabytes
+    ) {}
 
     @GetMapping("/public/uploads/images/{filename:.+}")
     ResponseEntity<Resource> image(@PathVariable String filename) throws IOException {
