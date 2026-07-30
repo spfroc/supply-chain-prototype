@@ -1,0 +1,17 @@
+.listing-layout{position:relative}
+.category-filters{position:relative;z-index:5;overflow:visible}
+.category-node{position:relative}
+.category-node>button{border:0;background:none;width:100%;display:flex;justify-content:space-between;padding:10px;border-radius:6px;text-align:left}
+.category-node>button:hover,.category-node>button.active{background:#eaf3ff;color:#1767d2}
+.category-flyout{position:absolute;left:calc(100% + 10px);top:-14px;width:430px;min-height:150px;padding:18px 20px;background:#fff;border:1px solid #dfe6f0;border-radius:10px;box-shadow:0 18px 45px #162f5126;z-index:20}
+.category-flyout:before{content:"";position:absolute;left:-12px;top:0;width:12px;height:100%}
+.category-flyout header{display:flex;justify-content:space-between;align-items:center;padding-bottom:12px;border-bottom:1px solid #edf0f4}
+.category-flyout header strong{font-size:18px}
+.category-flyout button{border:0;background:none;color:#34435a;padding:5px 8px;border-radius:5px}
+.category-flyout header button{color:#1767d2}
+.category-flyout section{display:grid;grid-template-columns:105px 1fr;gap:12px;padding:12px 0;border-bottom:1px dashed #e7ebf1}
+.category-flyout section:last-child{border-bottom:0}
+.category-flyout section>button{font-weight:700;text-align:left;color:#17233c}
+.category-flyout section>div{display:flex;flex-wrap:wrap;gap:4px 8px}
+.category-flyout button:hover,.category-flyout button.active{background:#eaf3ff;color:#1767d2}
+@media(max-width:1100px){.category-flyout{width:360px}}
