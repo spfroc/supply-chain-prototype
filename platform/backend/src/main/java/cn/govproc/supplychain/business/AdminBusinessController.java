@@ -361,9 +361,14 @@ public class AdminBusinessController {
             throw new IllegalArgumentException("密码长度必须为8至72位");
     }
     public record ProductRequest(@NotBlank String title,@NotNull Long categoryId,@NotNull Long brandId,
-        String mainImage,String gallery,String attributes,String summary,String detailHtml,
+        @NotBlank String mainImage,String gallery,String attributes,String summary,String detailHtml,
         String deliveryDescription,String afterSalesHtml,String spec,
-      @NotNull @DecimalMin("0") BigDecimal marketPrice,@NotNull @DecimalMin("0") BigDecimal memberPrice,@Min(0) int stock,int status){}
+      @NotNull @DecimalMin("0") BigDecimal marketPrice,@NotNull @DecimalMin("0") BigDecimal memberPrice,@Min(0) int stock,int status){
+        public ProductRequest {
+            long galleryCount=gallery==null?0:gallery.lines().filter(line->!line.isBlank()).count();
+            if(galleryCount>6) throw new IllegalArgumentException("商品配图最多上传6张");
+        }
+    }
     public record CategoryRequest(@NotBlank String name,Long parentId,@Min(1) int level,
       @Min(0) int sortOrder,String icon,int status){}
     public record EnterpriseRequest(@NotBlank String name,@NotBlank String creditCode,@NotBlank String contactName,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   App as AntApp,
   Button,
@@ -20,8 +20,10 @@ import {
   Table,
   Tag,
   Typography,
+  Upload,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
+import type { UploadFile } from "antd/es/upload/interface";
 import zhCN from "antd/locale/zh_CN";
 
 type Row = Record<string, any>;
@@ -80,6 +82,159 @@ async function rootApi<T>(path: string): Promise<T> {
   const response = await fetch(path, { headers: apiHeaders() });
   if (!response.ok) throw new Error(`请求失败（${response.status}）`);
   return response.json();
+}
+
+function imageDimensions(file: File) {
+  return new Promise<{ width: number; height: number }>((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const image = new window.Image();
+    image.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("无法读取图片"));
+    };
+    image.src = url;
+  });
+}
+
+function ProductImageUpload({
+  value,
+  onChange,
+  multiple = false,
+}: {
+  value?: string;
+  onChange?: (value: string) => void;
+  multiple?: boolean;
+}) {
+  const { message } = AntApp.useApp();
+  const limit = multiple ? 6 : 1;
+  const urls = String(value || "")
+    .split("\n")
+    .map((url) => url.trim())
+    .filter(Boolean);
+  const files: UploadFile[] = urls.map((url, index) => ({
+    uid: `${index}-${url}`,
+    name: url.split("/").pop() || `商品图片${index + 1}`,
+    status: "done",
+    url,
+  }));
+  const upload = async (options: any) => {
+    const file = options.file as File;
+    try {
+      if (!["image/jpeg", "image/png"].includes(file.type))
+        throw new Error("仅支持 JPG、PNG 图片");
+      if (file.size > 5 * 1024 * 1024) throw new Error("图片不能超过5MB");
+      const { width, height } = await imageDimensions(file);
+      if (width < 600 || height < 600 || width > 3000 || height > 3000)
+        throw new Error("图片宽高须在600至3000像素之间");
+      if (Math.abs(width / height - 1) > 0.03)
+        throw new Error("商品图片须为1:1正方形");
+      const body = new FormData();
+      body.append("file", file);
+      body.append("kind", multiple ? "gallery" : "main");
+      const response = await fetch("/api/admin/business/uploads/images", {
+        method: "POST",
+        headers: { Authorization: `Basic ${adminCredential()}` },
+        body,
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || "图片上传失败");
+      const next = multiple ? [...urls, result.url].slice(0, limit) : [result.url];
+      onChange?.(next.join("\n"));
+      options.onSuccess(result);
+      message.success("图片上传成功");
+    } catch (error) {
+      options.onError(error);
+      message.error((error as Error).message);
+    }
+  };
+  return (
+    <div className="product-image-upload">
+      <Upload
+        accept=".jpg,.jpeg,.png"
+        listType="picture-card"
+        fileList={files}
+        maxCount={limit}
+        customRequest={upload}
+        onRemove={(file) => {
+          onChange?.(urls.filter((url) => url !== file.url).join("\n"));
+          return true;
+        }}
+      >
+        {files.length < limit && (
+          <div className="upload-trigger">
+            <b>＋</b>
+            <span>{multiple ? "上传配图" : "上传主图"}</span>
+          </div>
+        )}
+      </Upload>
+      <small>
+        JPG/PNG，1:1 正方形，600×600 至 3000×3000，单张不超过5MB
+        {multiple ? "，最多6张" : ""}
+      </small>
+    </div>
+  );
+}
+
+function RichTextEditor({
+  value,
+  onChange,
+}: {
+  value?: string;
+  onChange?: (value: string) => void;
+}) {
+  const editor = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (editor.current && editor.current.innerHTML !== (value || ""))
+      editor.current.innerHTML = value || "";
+  }, [value]);
+  const command = (name: string, commandValue?: string) => {
+    editor.current?.focus();
+    document.execCommand(name, false, commandValue);
+    onChange?.(editor.current?.innerHTML || "");
+  };
+  return (
+    <div className="rich-editor">
+      <div className="rich-toolbar">
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command("bold")}>
+          加粗
+        </button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command("italic")}>
+          斜体
+        </button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command("formatBlock", "h2")}>
+          标题
+        </button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command("insertUnorderedList")}>
+          列表
+        </button>
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            const url = window.prompt("请输入链接地址");
+            if (url) command("createLink", url);
+          }}
+        >
+          链接
+        </button>
+        <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command("removeFormat")}>
+          清除格式
+        </button>
+      </div>
+      <div
+        ref={editor}
+        className="rich-content"
+        contentEditable
+        suppressContentEditableWarning
+        data-placeholder="请输入商品详情，可设置标题、加粗、列表和链接"
+        onInput={(event) => onChange?.(event.currentTarget.innerHTML)}
+      />
+    </div>
+  );
 }
 
 const navItems = [
@@ -895,11 +1050,16 @@ function BusinessModule({ module }: { module: Module }) {
                   ]}
                 />
               </Form.Item>
-              <Form.Item name="mainImage" label="商品主图" className="full">
-                <Input placeholder="请输入 OSS 图片地址" />
+              <Form.Item
+                name="mainImage"
+                label="商品主图"
+                className="full"
+                rules={[{ required: true, message: "请上传商品主图" }]}
+              >
+                <ProductImageUpload />
               </Form.Item>
               <Form.Item name="gallery" label="商品配图" className="full">
-                <Input.TextArea rows={2} placeholder="每行一个图片地址" />
+                <ProductImageUpload multiple />
               </Form.Item>
               <Form.Item name="attributes" label="商品属性" className="full">
                 <Input.TextArea
@@ -911,10 +1071,7 @@ function BusinessModule({ module }: { module: Module }) {
                 <Input.TextArea rows={2} />
               </Form.Item>
               <Form.Item name="detailHtml" label="富文本详情" className="full">
-                <Input.TextArea
-                  rows={5}
-                  placeholder="支持填写商品详细介绍或 HTML 内容"
-                />
+                <RichTextEditor />
               </Form.Item>
               <Form.Item name="deliveryDescription" label="配送说明" className="full">
                 <Input.TextArea

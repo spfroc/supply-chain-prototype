@@ -33,10 +33,12 @@ function Pass([string]$Name) {
 
 $product = Call-Api POST "/api/admin/business/products" @{
   title="交互测试商品-$stamp"; categoryId=3; brandId=1; summary="创建"; spec="标准";
+  mainImage="https://example.com/test-main.jpg"; gallery="";
   marketPrice=199; memberPrice=169; stock=20; status=1
 } $adminHeaders
 Call-Api PUT "/api/admin/business/products/$($product.id)" @{
   title="交互测试商品-$stamp-已编辑"; categoryId=3; brandId=1; summary="编辑"; spec="升级";
+  mainImage="https://example.com/test-main.jpg"; gallery="";
   marketPrice=209; memberPrice=179; stock=25; status=1
 } $adminHeaders | Out-Null
 Call-Api PUT "/api/admin/business/products/$($product.id)/stock" @{ stock=30 } $adminHeaders | Out-Null

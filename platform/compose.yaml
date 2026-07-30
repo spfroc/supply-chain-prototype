@@ -60,6 +60,9 @@ services:
       ALIYUN_OSS_BUCKET: ${ALIYUN_OSS_BUCKET:-}
       ALIYUN_OSS_ACCESS_KEY_ID: ${ALIYUN_OSS_ACCESS_KEY_ID:-}
       ALIYUN_OSS_ACCESS_KEY_SECRET: ${ALIYUN_OSS_ACCESS_KEY_SECRET:-}
+      UPLOAD_DIR: /app/uploads
+    volumes:
+      - upload_data:/app/uploads
     depends_on:
       mysql: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -92,6 +95,7 @@ services:
 volumes:
   mysql_data:
   redis_data:
+  upload_data:
 
 networks:
   internal:

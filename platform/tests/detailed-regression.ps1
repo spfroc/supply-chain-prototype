@@ -311,6 +311,15 @@ Case "BIZ-PROD-003" "商品价格不能为负数" {
   $body = $validProduct.Clone(); $body.title = "NEGATIVE-$stamp"; $body.memberPrice = -1
   Expect-Status (Invoke-Api POST "/api/admin/business/products" $body $adminHeaders) @(400)
 }
+Case "BIZ-PROD-003A" "商品主图必填" {
+  $body = $validProduct.Clone(); $body.title = "NO-IMAGE-$stamp"; $body.mainImage = ""
+  Expect-Status (Invoke-Api POST "/api/admin/business/products" $body $adminHeaders) @(400)
+}
+Case "BIZ-PROD-003B" "商品配图最多六张" {
+  $body = $validProduct.Clone(); $body.title = "TOO-MANY-IMAGES-$stamp"
+  $body.gallery = (1..7 | ForEach-Object { "https://example.com/$_.jpg" }) -join "`n"
+  Expect-Status (Invoke-Api POST "/api/admin/business/products" $body $adminHeaders) @(400)
+}
 Case "BIZ-PROD-004" "无效分类或品牌被数据库约束拒绝" {
   $body = $validProduct.Clone(); $body.title = "INVALID-CATEGORY-$stamp"; $body.categoryId = 999999
   Expect-Status (Invoke-Api POST "/api/admin/business/products" $body $adminHeaders) @(409)

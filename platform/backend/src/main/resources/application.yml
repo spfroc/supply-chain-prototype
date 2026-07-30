@@ -41,3 +41,5 @@ springdoc:
     path: /api/docs
   api-docs:
     path: /api/openapi
+app:
+  upload-dir: ${UPLOAD_DIR:/app/uploads}
