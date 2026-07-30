@@ -33,7 +33,8 @@ public class AdminBusinessController {
           SELECT p.id,p.spu_code AS spuCode,p.title,p.summary,p.main_image AS mainImage,
             JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')) AS gallery,
             JSON_UNQUOTE(JSON_EXTRACT(p.attributes_json,'$.content')) AS attributes,
-            p.detail_html AS detailHtml,p.category_id AS categoryId,p.brand_id AS brandId,
+            p.detail_html AS detailHtml,p.delivery_description AS deliveryDescription,
+            p.after_sales_html AS afterSalesHtml,p.category_id AS categoryId,p.brand_id AS brandId,
             p.status,s.id AS skuId,s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
             s.stock,s.reserved_stock AS reservedStock,DATE_FORMAT(p.updated_at,'%Y-%m-%d %H:%i:%s') AS updatedAt
           FROM product_spu p JOIN product_sku s ON s.spu_id=p.id AND s.deleted_at IS NULL
@@ -48,13 +49,15 @@ public class AdminBusinessController {
         String spuCode="SPU-"+suffix, skuCode="SKU-"+suffix;
         jdbc.sql("""
           INSERT INTO product_spu(spu_code,title,category_id,brand_id,main_image,gallery_json,attributes_json,
-            summary,detail_html,status)
+            summary,detail_html,delivery_description,after_sales_html,status)
           VALUES(:code,:title,:categoryId,:brandId,:mainImage,JSON_OBJECT('content',:gallery),
-            JSON_OBJECT('content',:attributes),:summary,:detailHtml,:status)
+            JSON_OBJECT('content',:attributes),:summary,:detailHtml,:deliveryDescription,:afterSalesHtml,:status)
           """)
-          .params(Map.of("code",spuCode,"title",r.title(),"categoryId",r.categoryId(),"brandId",r.brandId(),
-            "mainImage",value(r.mainImage()),"gallery",value(r.gallery()),"attributes",value(r.attributes()),
-            "summary",value(r.summary()),"detailHtml",value(r.detailHtml()),"status",r.status())).update();
+          .param("code",spuCode).param("title",r.title()).param("categoryId",r.categoryId()).param("brandId",r.brandId())
+          .param("mainImage",value(r.mainImage())).param("gallery",value(r.gallery())).param("attributes",value(r.attributes()))
+          .param("summary",value(r.summary())).param("detailHtml",value(r.detailHtml()))
+          .param("deliveryDescription",value(r.deliveryDescription())).param("afterSalesHtml",value(r.afterSalesHtml()))
+          .param("status",r.status()).update();
         long id=jdbc.sql("SELECT id FROM product_spu WHERE spu_code=:code").param("code",spuCode).query(Long.class).single();
         jdbc.sql("""
           INSERT INTO product_sku(spu_id,sku_code,spec_json,market_price,member_price,stock,status)
@@ -71,12 +74,14 @@ public class AdminBusinessController {
           UPDATE product_spu SET title=:title,category_id=:categoryId,brand_id=:brandId,
           main_image=:mainImage,gallery_json=JSON_OBJECT('content',:gallery),
           attributes_json=JSON_OBJECT('content',:attributes),summary=:summary,detail_html=:detailHtml,
+          delivery_description=:deliveryDescription,after_sales_html=:afterSalesHtml,
           status=:status WHERE id=:id AND deleted_at IS NULL
           """)
           .param("id",id).param("title",r.title()).param("categoryId",r.categoryId()).param("brandId",r.brandId())
           .param("mainImage",value(r.mainImage())).param("gallery",value(r.gallery()))
           .param("attributes",value(r.attributes())).param("summary",value(r.summary()))
-          .param("detailHtml",value(r.detailHtml())).param("status",r.status()).update(),"商品不存在");
+          .param("detailHtml",value(r.detailHtml())).param("deliveryDescription",value(r.deliveryDescription()))
+          .param("afterSalesHtml",value(r.afterSalesHtml())).param("status",r.status()).update(),"商品不存在");
         jdbc.sql("""
           UPDATE product_sku SET spec_json=JSON_OBJECT('规格',:spec),market_price=:marketPrice,
           member_price=:memberPrice,stock=:stock,status=:status WHERE spu_id=:id AND deleted_at IS NULL
@@ -356,7 +361,8 @@ public class AdminBusinessController {
             throw new IllegalArgumentException("密码长度必须为8至72位");
     }
     public record ProductRequest(@NotBlank String title,@NotNull Long categoryId,@NotNull Long brandId,
-      String mainImage,String gallery,String attributes,String summary,String detailHtml,String spec,
+        String mainImage,String gallery,String attributes,String summary,String detailHtml,
+        String deliveryDescription,String afterSalesHtml,String spec,
       @NotNull @DecimalMin("0") BigDecimal marketPrice,@NotNull @DecimalMin("0") BigDecimal memberPrice,@Min(0) int stock,int status){}
     public record CategoryRequest(@NotBlank String name,Long parentId,@Min(1) int level,
       @Min(0) int sortOrder,String icon,int status){}

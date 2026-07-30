@@ -238,11 +238,21 @@ Case "PORTAL-PLATFORM-PRODUCT-001" "平台与商品多对多关联并保存平�
   if($public.products.Count -ne 1 -or [decimal]$public.products[0].platformPrice -ne 123.45 -or $public.products[0].productUrl -notmatch "$stamp"){
     throw "平台商品关联或平台字段未同步"
   }
+  $catalogProduct=(Invoke-Api GET "/api/public/catalog/products?enterpriseId=1" $null @{}).Data |
+    Where-Object skuId -eq $sku.skuId | Select-Object -First 1
+  if($catalogProduct.platformNames -notmatch "QA-PLATFORM-$stamp"){
+    throw "首页与商品列表未返回平台标签"
+  }
   Expect-Status (Invoke-Api PUT "/api/admin/content/platform/$platformId/products/$relationId" @{
     skuId=$sku.skuId;platformPrice=120.00;productUrl="https://example.com/item/updated";listingStatus=0
   } $adminHeaders) @(200,204)
   $public=(Invoke-Api GET "/api/public/portal/platforms/$platformId/products" $null @{}).Data
   if($public.products.Count -ne 0){throw "平台商品下架后仍在客户端展示"}
+  $catalogProduct=(Invoke-Api GET "/api/public/catalog/products?enterpriseId=1" $null @{}).Data |
+    Where-Object skuId -eq $sku.skuId | Select-Object -First 1
+  if($catalogProduct.platformNames -match "QA-PLATFORM-$stamp"){
+    throw "平台商品下架后标签仍在首页或列表展示"
+  }
   Expect-Status (Invoke-Api DELETE "/api/admin/content/platform/$platformId/products/$relationId" $null $adminHeaders) @(200,204)
   Expect-Status (Invoke-Api DELETE "/api/admin/content/platform/$platformId" $null $adminHeaders) @(200,204)
 }
@@ -275,21 +285,22 @@ $validProduct = @{
   title=$productTitle; categoryId=$script:categoryLevel3; brandId=1; summary="QA-SUMMARY"; spec="QA-SPEC";
   mainImage="https://example.com/main.jpg"; gallery="https://example.com/1.jpg`nhttps://example.com/2.jpg";
   attributes="颜色：黑色；保修：三年"; detailHtml="<p>QA 商品详情</p>";
+  deliveryDescription="QA-DELIVERY-NATIONWIDE"; afterSalesHtml="<p>QA-AFTER-SALES-POLICY</p>";
   marketPrice=999.00; memberPrice=899.00; stock=20; status=1
 }
 Case "BIZ-PROD-SEED-001" "Web/H5 商品目录至少包含十款在售商品" {
   $catalog = (Invoke-Api GET "/api/public/catalog/products?enterpriseId=1" $null @{}).Data
   if (@($catalog).Count -lt 10) { throw "公开商品不足10款，实际 $(@($catalog).Count) 款" }
 }
-Case "BIZ-PROD-001" "新增商品并保存标题、价格、规格和库存" {
+Case "BIZ-PROD-001" "新增商品并保存标题、价格、规格、详情、配送售后和库存" {
   $r = Invoke-Api POST "/api/admin/business/products" $validProduct $adminHeaders
   Expect-Status $r @(201)
   $script:productId = [long]$r.Data.id
   $saved = (Invoke-Api GET "/api/admin/business/products" $null $adminHeaders).Data |
     Where-Object id -eq $script:productId | Select-Object -First 1
   $script:skuId = [long]$saved.skuId
-  if (!$saved -or $saved.title -ne $productTitle -or [decimal]$saved.memberPrice -ne 899 -or $saved.stock -ne 20 -or $saved.mainImage -ne "https://example.com/main.jpg" -or $saved.detailHtml -notmatch "QA") {
-    throw "商品字段保存不完整"
+  if (!$saved -or $saved.title -ne $productTitle -or [decimal]$saved.memberPrice -ne 899 -or $saved.stock -ne 20 -or $saved.mainImage -ne "https://example.com/main.jpg" -or $saved.detailHtml -notmatch "QA" -or $saved.deliveryDescription -ne "QA-DELIVERY-NATIONWIDE" -or $saved.afterSalesHtml -notmatch "QA-AFTER-SALES-POLICY") {
+    throw "商品字段保存不完整：$($saved | ConvertTo-Json -Compress)"
   }
 }
 Case "BIZ-PROD-002" "商品标题必填校验" {
@@ -307,10 +318,11 @@ Case "BIZ-PROD-004" "无效分类或品牌被数据库约束拒绝" {
 Case "BIZ-PROD-005" "编辑商品后字段立即更新" {
   $body = $validProduct.Clone()
   $body.title = "$productTitle-UPDATED"; $body.summary = "UPDATED-SUMMARY"; $body.memberPrice = 859; $body.stock = 30
+  $body.deliveryDescription = "UPDATED-DELIVERY"; $body.afterSalesHtml = "<p>UPDATED-SERVICE</p>"
   Expect-Status (Invoke-Api PUT "/api/admin/business/products/$($script:productId)" $body $adminHeaders) @(200,204)
   $saved = (Invoke-Api GET "/api/admin/business/products" $null $adminHeaders).Data |
     Where-Object id -eq $script:productId | Select-Object -First 1
-  if ($saved.title -ne "$productTitle-UPDATED" -or [decimal]$saved.memberPrice -ne 859 -or $saved.stock -ne 30) {
+  if ($saved.title -ne "$productTitle-UPDATED" -or [decimal]$saved.memberPrice -ne 859 -or $saved.stock -ne 30 -or $saved.deliveryDescription -ne "UPDATED-DELIVERY" -or $saved.afterSalesHtml -notmatch "UPDATED-SERVICE") {
     throw "商品编辑结果不正确"
   }
 }
