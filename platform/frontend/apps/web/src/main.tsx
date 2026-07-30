@@ -10,6 +10,8 @@ type Row=Record<string,any>;
 const money=(value:any)=>`¥${Number(value||0).toLocaleString("zh-CN",{minimumFractionDigits:2,maximumFractionDigits:2})}`;
 const dateTime=(value:string)=>value?new Intl.DateTimeFormat("zh-CN",{year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",hour12:false}).format(new Date(value.replace(" ","T"))):"—";
 const orderStatus=["待付款","待发货","运输中","已完成","已取消"];
+const routeViews:View[]=["home","products","solutions","platforms","content","cart","orders","profile","addresses","invoices","members"];
+const routeFromLocation=()=>{const value=new URLSearchParams(location.search).get("view") as View|null;return value&&routeViews.includes(value)?value:"home"};
 
 async function api<T>(path:string,init?:RequestInit):Promise<T>{
   const response=await fetch(path,{...init,headers:{"Content-Type":"application/json",...init?.headers}});
@@ -19,7 +21,7 @@ async function api<T>(path:string,init?:RequestInit):Promise<T>{
 }
 
 function App(){
-  const [view,setView]=useState<View>("home");const [products,setProducts]=useState<Row[]>([]);const [categories,setCategories]=useState<Row[]>([]);const [portal,setPortal]=useState<Row>({});const [categoryId,setCategoryId]=useState<number>();const [profile,setProfile]=useState<Row>({});const [summary,setSummary]=useState<Row>({});
+  const [view,setView]=useState<View>(routeFromLocation);const [products,setProducts]=useState<Row[]>([]);const [categories,setCategories]=useState<Row[]>([]);const [portal,setPortal]=useState<Row>({});const [categoryId,setCategoryId]=useState<number|undefined>(()=>{const value=Number(new URLSearchParams(location.search).get("categoryId"));return value||undefined});const [profile,setProfile]=useState<Row>({});const [summary,setSummary]=useState<Row>({});
   const [cart,setCart]=useState<Row[]>([]);const [selected,setSelected]=useState<Row>();const [toast,setToast]=useState("");
   const [current,setCurrent]=useState<Row>();const [authReady,setAuthReady]=useState(false);const [siteConfig,setSiteConfig]=useState<Row>({});
   const siteName=siteConfig["platform.name"]||"政企采购供应链";const servicePhone=siteConfig["platform.servicePhone"]||"400-800-2026";
@@ -27,6 +29,9 @@ function App(){
   const loadCart=()=>api<Row[]>("/api/client/cart").then(setCart).catch(e=>notify(e.message));
   const loadAccount=async()=>{const session=await api<Row>("/api/auth/session");if(!session.authenticated)throw new Error("请先登录");setCurrent(session.user);const [p,s]=await Promise.all([api<Row>("/api/client/profile"),api<Row>("/api/client/summary")]);setProfile(p);setSummary(s);await loadCart()};
   useEffect(()=>{void api<Row>("/api/public/config").then(setSiteConfig).catch(()=>{});void api<Row>("/api/public/portal").then(setPortal).catch(()=>{});void api<Row[]>("/api/public/catalog/categories").then(setCategories);void api<Row[]>("/api/public/catalog/products?enterpriseId=1").then(setProducts);void loadAccount().catch(()=>{}).finally(()=>setAuthReady(true));},[]);
+  useEffect(()=>{const pop=()=>{setView(routeFromLocation());const id=Number(new URLSearchParams(location.search).get("categoryId"));setCategoryId(id||undefined)};addEventListener("popstate",pop);return()=>removeEventListener("popstate",pop)},[]);
+  const navigate=(target:View,nextCategory?:number)=>{setView(target);setCategoryId(nextCategory);const url=new URL(location.href);if(target==="home")url.searchParams.delete("view");else url.searchParams.set("view",target);if(nextCategory)url.searchParams.set("categoryId",String(nextCategory));else url.searchParams.delete("categoryId");history.pushState({view:target},"",url)};
+  const openNavigation=(item:Row,index:number)=>{const fallback:View=index===0?"home":item.title.includes("方案")?"solutions":item.title.includes("平台")?"platforms":"products";if(/^https?:\/\//.test(item.linkUrl||"")){location.href=item.linkUrl;return}const configured=item.linkUrl?new URL(item.linkUrl,location.origin):null;const configuredView=configured?.searchParams.get("view") as View|null;navigate(configuredView&&routeViews.includes(configuredView)?configuredView:fallback)};
   const add=async(product:Row,quantity=1)=>{try{await api("/api/client/cart",{method:"POST",body:JSON.stringify({skuId:product.skuId,quantity})});await loadCart();notify("已加入采购车");}catch(e){notify((e as Error).message);}};
   const goProduct=(product:Row)=>{setSelected(product);setView("detail");scrollTo(0,0);};
   const logout=async()=>{await api("/api/auth/logout",{method:"POST"});setCurrent(undefined);setProfile({});setCart([]);setView("home")};
@@ -38,8 +43,8 @@ function App(){
       <label className="search">⌕<input placeholder="搜索商品、品牌、型号或方案"/><button onClick={()=>setView("products")}>搜索</button></label>
       <button className="cart-button" onClick={()=>setView("cart")}>采购车 <b>{cart.reduce((n,r)=>n+Number(r.quantity),0)}</b></button>
     </header>
-    <nav className="nav">{(portal.navigation||[{title:"首页"},{title:"办公集采"},{title:"场景方案"},{title:"平台比价"}]).map((item:Row,index:number)=>{const target:View=index===0?"home":item.title.includes("方案")?"solutions":item.title.includes("平台")?"platforms":"products";return <button key={item.id||item.title} className={view===target?"active":""} onClick={()=>{setCategoryId(undefined);setView(target)}}>{item.title}</button>})}<span>企业协议已生效</span></nav>
-    {view==="home"&&<Home products={products} categories={categories} portal={portal} open={goProduct} add={add} all={(id?:number)=>{setCategoryId(id);setView("products")}}/>}
+    <nav className="nav">{(portal.navigation||[{title:"首页"},{title:"办公集采"},{title:"场景方案"},{title:"平台比价"}]).map((item:Row,index:number)=>{const fallback:View=index===0?"home":item.title.includes("方案")?"solutions":item.title.includes("平台")?"platforms":"products";const configured=item.linkUrl?new URL(item.linkUrl,location.origin).searchParams.get("view") as View:null;const target=configured&&routeViews.includes(configured)?configured:fallback;return <button key={item.id||item.title} className={view===target?"active":""} onClick={()=>openNavigation(item,index)}>{item.title}</button>})}<span>企业协议已生效</span></nav>
+    {view==="home"&&<Home products={products} categories={categories} portal={portal} open={goProduct} add={add} all={(id?:number)=>navigate("products",id)}/>}
     {view==="products"&&<Products products={products} categories={categories} initialCategory={categoryId} open={goProduct} add={add}/>}
     {(["solutions","platforms","content"] as View[]).includes(view)&&<PortalList type={view as "solutions"|"platforms"|"content"} rows={portal[view==="solutions"?"solution":view==="platforms"?"platform":"content"]||[]} back={()=>setView("home")}/>}
     {view==="detail"&&selected&&<Detail product={selected} back={()=>setView("products")} add={add}/>}
