@@ -183,6 +183,6 @@ public class ContentAdminController {
     public record BrandRequest(@NotBlank String name, String logo, String description,
                                @NotNull Integer sortOrder, @NotNull Integer status) {}
     public record PlatformProductRequest(@NotNull Long skuId,
-        @NotNull @DecimalMin("0") BigDecimal platformPrice,@NotBlank String productUrl,
+        @NotNull @DecimalMin("0") BigDecimal platformPrice,String productUrl,
         @NotNull Integer listingStatus) {}
 }

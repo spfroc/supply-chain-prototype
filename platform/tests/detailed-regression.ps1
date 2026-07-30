@@ -244,6 +244,13 @@ Case "PORTAL-PLATFORM-PRODUCT-001" "平台与商品多对多关联并保存平�
     throw "首页与商品列表未返回平台标签"
   }
   Expect-Status (Invoke-Api PUT "/api/admin/content/platform/$platformId/products/$relationId" @{
+    skuId=$sku.skuId;platformPrice=121.00;productUrl="";listingStatus=1
+  } $adminHeaders) @(200,204)
+  $public=(Invoke-Api GET "/api/public/portal/platforms/$platformId/products" $null @{}).Data
+  if($public.products.Count -ne 1 -or $null -ne $public.products[0].productUrl -and $public.products[0].productUrl -ne ""){
+    throw "未填写链接的平台商品仍返回了平台链接"
+  }
+  Expect-Status (Invoke-Api PUT "/api/admin/content/platform/$platformId/products/$relationId" @{
     skuId=$sku.skuId;platformPrice=120.00;productUrl="https://example.com/item/updated";listingStatus=0
   } $adminHeaders) @(200,204)
   $public=(Invoke-Api GET "/api/public/portal/platforms/$platformId/products" $null @{}).Data

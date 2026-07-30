@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { Dialog, Toast } from "antd-mobile";
 import "./style.css";
@@ -45,6 +45,8 @@ function App() {
   const [detail, setDetail] = useState<Row>();
   const [current, setCurrent] = useState<Row>();
   const [authReady, setAuthReady] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const pendingAction = useRef<undefined | (() => void)>(undefined);
   const [siteConfig, setSiteConfig] = useState<Row>({});
   const siteName = siteConfig["platform.name"] || "政企采购供应链";
   const servicePhone = siteConfig["platform.servicePhone"] || "400-800-2026";
@@ -62,6 +64,21 @@ function App() {
     setProfile(await api<Row>("/api/client/profile"));
     await loadCart();
   };
+  const requireAuth = (action: () => void) => {
+    if (current) {
+      action();
+      return;
+    }
+    pendingAction.current = action;
+    setAuthOpen(true);
+  };
+  const authSuccess = async () => {
+    await loadAccount();
+    setAuthOpen(false);
+    const action = pendingAction.current;
+    pendingAction.current = undefined;
+    action?.();
+  };
   useEffect(() => {
     void api<Row>("/api/public/config")
       .then(setSiteConfig)
@@ -77,7 +94,7 @@ function App() {
       .catch(() => {})
       .finally(() => setAuthReady(true));
   }, []);
-  const add = async (p: Row) => {
+  const addToCart = async (p: Row) => {
     try {
       await api("/api/client/cart", {
         method: "POST",
@@ -89,6 +106,15 @@ function App() {
       Toast.show((e as Error).message);
     }
   };
+  const add = async (p: Row) => {
+    if (!current) {
+      requireAuth(() => void addToCart(p));
+      return;
+    }
+    await addToCart(p);
+  };
+  const openProtectedTab = (target: Tab) =>
+    requireAuth(() => setTab(target));
   const logout = async () => {
     await api("/api/auth/logout", { method: "POST" });
     setCurrent(undefined);
@@ -97,14 +123,26 @@ function App() {
     setTab("home");
   };
   if (!authReady) return <div className="m-auth-loading">正在加载…</div>;
-  if (!current) return <MobileAuth onSuccess={() => void loadAccount()} />;
   if (detail)
     return (
-      <ProductDetail
-        product={detail}
-        back={() => setDetail(undefined)}
-        add={add}
-      />
+      <>
+        <ProductDetail
+          product={detail}
+          back={() => setDetail(undefined)}
+          add={add}
+        />
+        {authOpen && !current && (
+          <div className="m-auth-modal">
+            <MobileAuth
+              onSuccess={() => void authSuccess()}
+              onCancel={() => {
+                pendingAction.current = undefined;
+                setAuthOpen(false);
+              }}
+            />
+          </div>
+        )}
+      </>
     );
   return (
     <div className="mobile-app">
@@ -114,11 +152,15 @@ function App() {
           <span>
             <strong>{siteName}</strong>
             <small>
-              {profile.enterpriseName || "山东高速数字科技"} · 协议生效中
+              {current
+                ? `${profile.enterpriseName || "企业采购账号"} · 协议生效中`
+                : "游客浏览 · 登录后使用企业采购功能"}
             </small>
           </span>
         </div>
-        <button>{servicePhone}</button>
+        <button onClick={() => !current && setAuthOpen(true)}>
+          {current ? servicePhone : "登录"}
+        </button>
       </header>
       <section className="mobile-content">
         {tab === "home" && (
@@ -159,7 +201,12 @@ function App() {
           <button
             key={x[0]}
             className={tab === x[0] ? "active" : ""}
-            onClick={() => setTab(x[0] as Tab)}
+            onClick={() => {
+              const target = x[0] as Tab;
+              if (["cart", "orders", "mine"].includes(target))
+                openProtectedTab(target);
+              else setTab(target);
+            }}
           >
             <i>
               {x[1]}
@@ -171,11 +218,28 @@ function App() {
           </button>
         ))}
       </nav>
+      {authOpen && !current && (
+        <div className="m-auth-modal">
+          <MobileAuth
+            onSuccess={() => void authSuccess()}
+            onCancel={() => {
+              pendingAction.current = undefined;
+              setAuthOpen(false);
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
 
-function MobileAuth({ onSuccess }: { onSuccess: () => void }) {
+function MobileAuth({
+  onSuccess,
+  onCancel,
+}: {
+  onSuccess: () => void;
+  onCancel?: () => void;
+}) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [form, setForm] = useState<Row>({ enterpriseName: "" });
   const [submitting, setSubmitting] = useState(false);
@@ -207,6 +271,11 @@ function MobileAuth({ onSuccess }: { onSuccess: () => void }) {
   };
   return (
     <div className="m-auth">
+      {onCancel && (
+        <button className="m-auth-close" onClick={onCancel} aria-label="关闭登录窗口">
+          ×
+        </button>
+      )}
       <header>
         <i>政</i>
         <div>

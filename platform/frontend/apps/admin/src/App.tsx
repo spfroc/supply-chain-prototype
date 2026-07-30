@@ -1992,7 +1992,7 @@ function PortalManager({ module }: { module: Module }) {
           <Form.Item
             name="productUrl"
             label="平台商品链接"
-            rules={[{ required: true, message: "请输入平台商品链接" }]}
+            extra="选填；不填写时 Web/H5 不显示平台跳转入口"
           >
             <Input placeholder="https://..." />
           </Form.Item>

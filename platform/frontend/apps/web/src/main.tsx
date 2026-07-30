@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import "./style.css";
 import "./manage.css";
@@ -48,6 +48,14 @@ const routeViews: View[] = [
   "invoices",
   "members",
 ];
+const protectedViews = new Set<View>([
+  "cart",
+  "orders",
+  "profile",
+  "addresses",
+  "invoices",
+  "members",
+]);
 const routeFromLocation = () => {
   const value = new URLSearchParams(location.search).get("view") as View | null;
   return value && routeViews.includes(value) ? value : "home";
@@ -93,6 +101,8 @@ function App() {
   const [toast, setToast] = useState("");
   const [current, setCurrent] = useState<Row>();
   const [authReady, setAuthReady] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const pendingAction = useRef<undefined | (() => void)>(undefined);
   const [siteConfig, setSiteConfig] = useState<Row>({});
   const siteName = siteConfig["platform.name"] || "政企采购供应链";
   const servicePhone = siteConfig["platform.servicePhone"] || "400-800-2026";
@@ -116,6 +126,21 @@ function App() {
     setSummary(s);
     await loadCart();
   };
+  const requireAuth = (action: () => void) => {
+    if (current) {
+      action();
+      return;
+    }
+    pendingAction.current = action;
+    setAuthOpen(true);
+  };
+  const authSuccess = async () => {
+    await loadAccount();
+    setAuthOpen(false);
+    const action = pendingAction.current;
+    pendingAction.current = undefined;
+    action?.();
+  };
   useEffect(() => {
     void api<Row>("/api/public/config")
       .then(setSiteConfig)
@@ -132,6 +157,9 @@ function App() {
       .finally(() => setAuthReady(true));
   }, []);
   useEffect(() => {
+    if (authReady && !current && protectedViews.has(view)) setAuthOpen(true);
+  }, [authReady, current, view]);
+  useEffect(() => {
     const pop = () => {
       const params = new URLSearchParams(location.search);
       setView(routeFromLocation());
@@ -141,7 +169,7 @@ function App() {
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
   }, []);
-  const navigate = (
+  const applyNavigation = (
     target: View,
     nextCategory?: number,
     nextPlatform?: number,
@@ -157,6 +185,17 @@ function App() {
     if (nextPlatform) url.searchParams.set("platformId", String(nextPlatform));
     else url.searchParams.delete("platformId");
     history.pushState({ view: target }, "", url);
+  };
+  const navigate = (
+    target: View,
+    nextCategory?: number,
+    nextPlatform?: number,
+  ) => {
+    if (protectedViews.has(target) && !current) {
+      requireAuth(() => applyNavigation(target, nextCategory, nextPlatform));
+      return;
+    }
+    applyNavigation(target, nextCategory, nextPlatform);
   };
   const openNavigation = (item: Row, index: number) => {
     const fallback: View =
@@ -183,7 +222,7 @@ function App() {
       Number(configured?.searchParams.get("platformId")) || undefined,
     );
   };
-  const add = async (product: Row, quantity = 1) => {
+  const addToCart = async (product: Row, quantity = 1) => {
     try {
       await api("/api/client/cart", {
         method: "POST",
@@ -195,6 +234,13 @@ function App() {
       notify((e as Error).message);
     }
   };
+  const add = async (product: Row, quantity = 1) => {
+    if (!current) {
+      requireAuth(() => void addToCart(product, quantity));
+      return;
+    }
+    await addToCart(product, quantity);
+  };
   const goProduct = (product: Row) => {
     setSelected(product);
     setView("detail");
@@ -205,24 +251,27 @@ function App() {
     setCurrent(undefined);
     setProfile({});
     setCart([]);
-    setView("home");
+    navigate("home");
   };
   if (!authReady)
     return <div className="auth-loading">正在加载企业采购平台…</div>;
-  if (!current)
-    return (
-      <AuthPage siteName={siteName} onSuccess={() => void loadAccount()} />
-    );
+  const displayView = !current && protectedViews.has(view) ? "home" : view;
   return (
     <div className="shop">
       <div className="topbar">
         <span>{siteName} · 自营正品 · 协议价格</span>
         <div>
-          <button onClick={() => setView("orders")}>我的订单</button>
-          <button onClick={() => setView("profile")}>
-            {current.realName} · 企业中心
-          </button>
-          <button onClick={() => void logout()}>退出登录</button>
+          {current ? (
+            <>
+              <button onClick={() => navigate("orders")}>我的订单</button>
+              <button onClick={() => navigate("profile")}>
+                {current.realName} · 企业中心
+              </button>
+              <button onClick={() => void logout()}>退出登录</button>
+            </>
+          ) : (
+            <button onClick={() => setAuthOpen(true)}>登录 / 注册</button>
+          )}
         </div>
       </div>
       <header className="header">
@@ -237,7 +286,7 @@ function App() {
           ⌕<input placeholder="搜索商品、品牌、型号或方案" />
           <button onClick={() => setView("products")}>搜索</button>
         </label>
-        <button className="cart-button" onClick={() => setView("cart")}>
+        <button className="cart-button" onClick={() => navigate("cart")}>
           采购车 <b>{cart.reduce((n, r) => n + Number(r.quantity), 0)}</b>
         </button>
       </header>
@@ -270,16 +319,16 @@ function App() {
           return (
             <button
               key={item.id || item.title}
-              className={view === target ? "active" : ""}
+              className={displayView === target ? "active" : ""}
               onClick={() => openNavigation(item, index)}
             >
               {item.title}
             </button>
           );
         })}
-        <span>企业协议已生效</span>
+        <span>{current ? "企业协议已生效" : "游客浏览"}</span>
       </nav>
-      {view === "home" && (
+      {displayView === "home" && (
         <Home
           products={products}
           categories={categories}
@@ -289,7 +338,7 @@ function App() {
           all={(id?: number) => navigate("products", id)}
         />
       )}
-      {view === "products" && (
+      {displayView === "products" && (
         <Products
           products={products}
           categories={categories}
@@ -298,14 +347,14 @@ function App() {
           add={add}
         />
       )}
-      {(["solutions", "platforms", "content"] as View[]).includes(view) && (
+      {(["solutions", "platforms", "content"] as View[]).includes(displayView) && (
         <PortalList
-          type={view as "solutions" | "platforms" | "content"}
+          type={displayView as "solutions" | "platforms" | "content"}
           rows={
             portal[
-              view === "solutions"
+              displayView === "solutions"
                 ? "solution"
-                : view === "platforms"
+                : displayView === "platforms"
                   ? "platform"
                   : "content"
             ] || []
@@ -313,25 +362,25 @@ function App() {
           back={() => setView("home")}
         />
       )}
-      {view === "platform-products" && platformId && (
+      {displayView === "platform-products" && platformId && (
         <PlatformProducts platformId={platformId} open={goProduct} />
       )}
-      {view === "detail" && selected && (
+      {displayView === "detail" && selected && (
         <Detail product={selected} back={() => setView("products")} add={add} />
       )}
-      {view === "cart" && (
+      {displayView === "cart" && (
         <Cart
           rows={cart}
           reload={loadCart}
-          orders={() => setView("orders")}
+          orders={() => navigate("orders")}
           notify={notify}
         />
       )}
-      {view === "orders" && <Orders go={setView} />}
-      {view === "profile" && (
+      {displayView === "orders" && <Orders go={(target) => navigate(target)} />}
+      {displayView === "profile" && (
         <Profile profile={profile} summary={summary} go={setView} />
       )}
-      {(["addresses", "invoices", "members"] as View[]).includes(view) && (
+      {(["addresses", "invoices", "members"] as View[]).includes(displayView) && (
         <AccountData
           view={view as "addresses" | "invoices" | "members"}
           roleCode={profile.roleCode}
@@ -346,6 +395,19 @@ function App() {
         <p>服务电话 {servicePhone}　工作日 09:00–18:00</p>
       </footer>
       {toast && <div className="toast">✓ {toast}</div>}
+      {authOpen && !current && (
+        <div className="auth-modal-backdrop">
+          <AuthPage
+            siteName={siteName}
+            onSuccess={() => void authSuccess()}
+            onCancel={() => {
+              pendingAction.current = undefined;
+              setAuthOpen(false);
+              if (protectedViews.has(view)) navigate("home");
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -353,9 +415,11 @@ function App() {
 function AuthPage({
   siteName,
   onSuccess,
+  onCancel,
 }: {
   siteName: string;
   onSuccess: () => void;
+  onCancel?: () => void;
 }) {
   const [mode, setMode] = useState<"login" | "register">("login");
   const [form, setForm] = useState<Row>({ enterpriseName: "" });
@@ -390,6 +454,11 @@ function AuthPage({
   };
   return (
     <main className="auth-page">
+      {onCancel && (
+        <button className="auth-close" onClick={onCancel} aria-label="关闭登录窗口">
+          ×
+        </button>
+      )}
       <section className="auth-brand">
         <i>政</i>
         <span>政企采购供应链</span>
@@ -898,14 +967,16 @@ function PlatformProducts({
                     <span>
                       库存 {product.availableStock} · 浏览 {product.clickCount}
                     </span>
-                    <a
-                      href={product.productUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      平台链接
-                    </a>
+                    {product.productUrl && (
+                      <a
+                        href={product.productUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        平台链接
+                      </a>
+                    )}
                   </div>
                 </div>
               </article>
