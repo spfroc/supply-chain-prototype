@@ -32,7 +32,7 @@ function App(){
   if(!authReady)return <div className="auth-loading">正在加载企业采购平台…</div>;
   if(!current)return <AuthPage siteName={siteName} onSuccess={()=>void loadAccount()}/>;
   return <div className="shop">
-    <div className="topbar"><span>{siteName} · 自营正品 · 协议价格</span><div><button onClick={()=>setView("orders")}>我的订单</button><button onClick={()=>setView("profile")}>{current.realName} · 企业中心</button><button onClick={()=>void logout()}>退出登录</button><a href="/admin/">管理后台</a></div></div>
+    <div className="topbar"><span>{siteName} · 自营正品 · 协议价格</span><div><button onClick={()=>setView("orders")}>我的订单</button><button onClick={()=>setView("profile")}>{current.realName} · 企业中心</button><button onClick={()=>void logout()}>退出登录</button></div></div>
     <header className="header"><button className="logo" onClick={()=>setView("home")}><i>政</i><span><strong>{siteName}</strong><small>SUPPLY CHAIN</small></span></button>
       <label className="search">⌕<input placeholder="搜索商品、品牌、型号或方案"/><button onClick={()=>setView("products")}>搜索</button></label>
       <button className="cart-button" onClick={()=>setView("cart")}>采购车 <b>{cart.reduce((n,r)=>n+Number(r.quantity),0)}</b></button>

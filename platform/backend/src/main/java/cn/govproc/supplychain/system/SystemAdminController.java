@@ -6,6 +6,7 @@ import jakarta.validation.constraints.NotEmpty;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.security.Principal;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
@@ -26,6 +27,19 @@ public class SystemAdminController {
 
     public SystemAdminController(JdbcClient jdbc) {
         this.jdbc = jdbc;
+    }
+
+    @GetMapping("/me")
+    Map<String, Object> me(Principal principal) {
+        return jdbc.sql("""
+            SELECT u.id,u.username,u.real_name AS realName,
+                   GROUP_CONCAT(r.name ORDER BY r.id SEPARATOR '、') AS roleNames
+            FROM sys_admin_user u
+            LEFT JOIN sys_admin_user_role ur ON ur.user_id=u.id
+            LEFT JOIN sys_role r ON r.id=ur.role_id
+            WHERE u.username=:username AND u.status=1 AND u.deleted_at IS NULL
+            GROUP BY u.id
+            """).param("username", principal.getName()).query().singleRow();
     }
 
     @GetMapping("/summary")

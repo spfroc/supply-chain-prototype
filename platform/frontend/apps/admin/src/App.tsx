@@ -8,13 +8,14 @@ import zhCN from "antd/locale/zh_CN";
 
 type Row = Record<string, any>;
 type Module = "overview" | "products" | "categories" | "brands" | "platforms" | "navigations" | "banners" | "solutions" | "contents" | "enterprises" | "agreements" | "orders" | "users" | "roles" | "permissions" | "logs" | "configs";
-const apiHeaders = { "Content-Type": "application/json", Authorization: `Basic ${btoa("admin:change-me-before-production")}` };
+const adminCredential=()=>sessionStorage.getItem("adminCredential")||"";
+const apiHeaders=()=>({ "Content-Type": "application/json", Authorization: `Basic ${adminCredential()}` });
 const dateTime = (value?: string) => value ? new Intl.DateTimeFormat("zh-CN", {
   year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false
 }).format(new Date(value.replace(" ", "T"))) : "—";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api/admin/system${path}`, { ...init, headers: { ...apiHeaders, ...init?.headers } });
+  const response = await fetch(`/api/admin/system${path}`, { ...init, headers: { ...apiHeaders(), ...init?.headers } });
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
     throw new Error(payload.message || payload.detail || `请求失败（${response.status}）`);
@@ -24,7 +25,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 async function rootApi<T>(path: string): Promise<T> {
-  const response = await fetch(path, { headers: apiHeaders });
+  const response = await fetch(path, { headers: apiHeaders() });
   if (!response.ok) throw new Error(`请求失败（${response.status}）`);
   return response.json();
 }
@@ -56,13 +57,23 @@ const navItems = [
 ];
 
 export function App() {
+  const [authenticated,setAuthenticated]=useState(!!adminCredential());
+  const logout=()=>{sessionStorage.removeItem("adminCredential");setAuthenticated(false)};
   return <ConfigProvider locale={zhCN} theme={{ token: {
     colorPrimary: "#1767d2", borderRadius: 10, fontSize: 16, colorText: "#17243d"
-  }}}><AntApp><AdminApp /></AntApp></ConfigProvider>;
+  }}}><AntApp>{authenticated?<AdminApp logout={logout}/>:<AdminLogin success={()=>setAuthenticated(true)}/>}</AntApp></ConfigProvider>;
 }
 
-function AdminApp() {
+function AdminLogin({success}:{success:()=>void}) {
+  const [username,setUsername]=useState("");const [password,setPassword]=useState("");const [error,setError]=useState("");const [loading,setLoading]=useState(false);
+  const login=async()=>{setError("");if(!username.trim()||!password){setError("请输入后台账号和密码");return}setLoading(true);try{const credential=btoa(unescape(encodeURIComponent(`${username.trim()}:${password}`)));const response=await fetch("/api/admin/system/me",{headers:{Authorization:`Basic ${credential}`}});if(!response.ok)throw new Error("后台账号或密码错误");sessionStorage.setItem("adminCredential",credential);success()}catch(e){setError((e as Error).message)}finally{setLoading(false)}};
+  return <main className="admin-login"><section><div className="brand"><i>链</i><div><strong>供应链运营中心</strong><small>ADMIN CONSOLE</small></div></div><h1>管理后台登录</h1><p>仅限平台运营、财务及系统管理人员使用</p><label>后台账号<Input value={username} onChange={e=>setUsername(e.target.value)} onPressEnter={()=>void login()} placeholder="请输入后台账号"/></label><label>登录密码<Input.Password value={password} onChange={e=>setPassword(e.target.value)} onPressEnter={()=>void login()} placeholder="请输入登录密码"/></label>{error&&<div className="login-error">{error}</div>}<Button type="primary" loading={loading} block onClick={()=>void login()}>登录管理后台</Button><small>企业采购成员请使用 Web 或 H5 客户端登录</small></section></main>;
+}
+
+function AdminApp({logout}:{logout:()=>void}) {
   const [module, setModule] = useState<Module>("overview");
+  const [admin,setAdmin]=useState<Row>({});
+  useEffect(()=>{void api<Row>("/me").then(setAdmin)},[]);
   const titles: Record<Module, [string,string]> = {
     overview:["经营概览","掌握平台账户、权限与关键业务运行状态"],
     products:["商品管理","维护自营商品、SKU、协议价格与可售库存"],
@@ -93,11 +104,11 @@ function AdminApp() {
       <Layout.Header className="admin-header">
         <div><small>运营管理 / 系统管理 /</small><strong>{titles[module][0]}</strong></div>
         <label className="global-search">⌕ <input placeholder="搜索用户、角色或日志" /></label>
-        <div className="admin-account"><span>王</span><div><strong>王运营</strong><small>超级管理员</small></div></div>
+        <div className="admin-account"><span>{String(admin.realName||"管").slice(0,1)}</span><div><strong>{admin.realName||admin.username||"后台用户"}</strong><small>{admin.roleNames||"后台角色"}</small></div><Button type="text" onClick={logout}>退出</Button></div>
       </Layout.Header>
       <Layout.Content className="admin-content">
         <div className="page-heading"><div><span>2026年7月29日 · 数据实时更新</span><Typography.Title level={2}>{titles[module][0]}</Typography.Title><p>{titles[module][1]}</p></div>
-          <Space><Button href="/web/">查看客户端</Button><Button onClick={() => location.reload()}>刷新数据</Button></Space></div>
+          <Space><Button onClick={() => location.reload()}>刷新数据</Button></Space></div>
         {module === "overview" && <Overview go={setModule}/>}
         {(["products","enterprises","agreements","orders"] as Module[]).includes(module) && <BusinessModule module={module}/>}
         {module === "categories" && <Categories />}
@@ -122,7 +133,7 @@ function BusinessModule({module}:{module:Module}) {
   const [form]=Form.useForm();const [memberForm]=Form.useForm();const [open,setOpen]=useState(false);const [editing,setEditing]=useState<Row>();const [mode,setMode]=useState<"entity"|"stock"|"item">("entity");
   const [agreement,setAgreement]=useState<Row>();const [items,setItems]=useState<Row[]>([]);const [itemOpen,setItemOpen]=useState(false);const [detail,setDetail]=useState<Row>();
   const [memberEnterprise,setMemberEnterprise]=useState<Row>();const [members,setMembers]=useState<Row[]>([]);const [memberOpen,setMemberOpen]=useState(false);const [memberEditing,setMemberEditing]=useState<Row>();const [memberEditorOpen,setMemberEditorOpen]=useState(false);
-  const business=async(path:string,init?:RequestInit)=>{const r=await fetch(`/api/admin/business${path}`,{...init,headers:{...apiHeaders,...init?.headers}});if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||"操作失败")}const text=await r.text();return text?JSON.parse(text):undefined};
+  const business=async(path:string,init?:RequestInit)=>{const r=await fetch(`/api/admin/business${path}`,{...init,headers:{...apiHeaders(),...init?.headers}});if(!r.ok){const d=await r.json().catch(()=>({}));throw new Error(d.detail||"操作失败")}const text=await r.text();return text?JSON.parse(text):undefined};
   const show=(row?:Row,nextMode:"entity"|"stock"="entity")=>{setEditing(row);setMode(nextMode);form.resetFields();
     if(nextMode==="stock")form.setFieldsValue({stock:row?.stock});
     else if(module==="products")form.setFieldsValue(row?{...row,status:Number(row.status),spec:"标准规格"}:{categoryId:(categories.data||[]).find(x=>Number(x.level)===3)?.id,brandId:1,status:1,stock:0});
@@ -136,8 +147,8 @@ function BusinessModule({module}:{module:Module}) {
   const remove=(row:Row)=>modal.confirm({title:`确认删除“${row.title||row.name}”？`,content:"有关联订单的数据会提示改为停用。",okButtonProps:{danger:true},onOk:async()=>{try{await business(`${endpoint}/${row.id}`,{method:"DELETE"});message.success("删除成功");void rows.refresh()}catch(e){message.error((e as Error).message)}}});
   const toggle=async(row:Row)=>{try{await business(`/products/${row.id}/status`,{method:"PUT",body:JSON.stringify({status:Number(row.status)===1?2:1})});message.success(Number(row.status)===1?"商品已下架":"商品已上架");void rows.refresh()}catch(e){message.error((e as Error).message)}};
   const openItems=async(row:Row)=>{setAgreement(row);setItems(await rootApi(`/api/admin/agreements/${row.id}/items`));setItemOpen(true)};
-  const saveItem=async()=>{try{const v=await form.validateFields();const url=editing?`/api/admin/agreements/${agreement!.id}/items/${editing.id}`:`/api/admin/agreements/${agreement!.id}/items`;const r=await fetch(url,{method:editing?"PUT":"POST",headers:apiHeaders,body:JSON.stringify(v)});if(!r.ok)throw new Error("协议商品保存失败");setItems(await rootApi(`/api/admin/agreements/${agreement!.id}/items`));setMode("entity");setEditing(undefined);form.resetFields();message.success("协议商品已保存")}catch(e){message.error((e as Error).message)}};
-  const removeItem=(row:Row)=>modal.confirm({title:"移除协议商品？",onOk:async()=>{await fetch(`/api/admin/agreements/${agreement!.id}/items/${row.id}`,{method:"DELETE",headers:apiHeaders});setItems(await rootApi(`/api/admin/agreements/${agreement!.id}/items`));message.success("已移除")}});
+  const saveItem=async()=>{try{const v=await form.validateFields();const url=editing?`/api/admin/agreements/${agreement!.id}/items/${editing.id}`:`/api/admin/agreements/${agreement!.id}/items`;const r=await fetch(url,{method:editing?"PUT":"POST",headers:apiHeaders(),body:JSON.stringify(v)});if(!r.ok)throw new Error("协议商品保存失败");setItems(await rootApi(`/api/admin/agreements/${agreement!.id}/items`));setMode("entity");setEditing(undefined);form.resetFields();message.success("协议商品已保存")}catch(e){message.error((e as Error).message)}};
+  const removeItem=(row:Row)=>modal.confirm({title:"移除协议商品？",onOk:async()=>{await fetch(`/api/admin/agreements/${agreement!.id}/items/${row.id}`,{method:"DELETE",headers:apiHeaders()});setItems(await rootApi(`/api/admin/agreements/${agreement!.id}/items`));message.success("已移除")}});
   const orderDetail=async(row:Row)=>setDetail(await business(`/orders/${row.id}`));
   const advanceOrder=async(row:Row)=>{const payment=Number(row.paymentStatus)===2?2:2;const status=Number(row.orderStatus)===0?1:Math.min(3,Number(row.orderStatus)+1);await business(`/orders/${row.id}/status`,{method:"PUT",body:JSON.stringify({paymentStatus:payment,orderStatus:status})});message.success("订单状态已更新");void rows.refresh()};
   const loadMembers=async(enterprise:Row)=>{setMemberEnterprise(enterprise);setMembers(await business(`/enterprises/${enterprise.id}/members`));setMemberOpen(true)};
@@ -180,8 +191,8 @@ function Categories() {
   const rows=useLoad<Row[]>(()=>rootApi("/api/admin/business/categories"));
   const [form]=Form.useForm();const [open,setOpen]=useState(false);const [editing,setEditing]=useState<Row>();
   const show=(row?:Row)=>{setEditing(row);form.resetFields();form.setFieldsValue(row?{...row,parentId:row.parentId||undefined}:{level:1,sortOrder:0,status:1});setOpen(true)};
-  const save=async()=>{try{const values=await form.validateFields();const response=await fetch(`/api/admin/business/categories${editing?`/${editing.id}`:""}`,{method:editing?"PUT":"POST",headers:apiHeaders,body:JSON.stringify(values)});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"分类保存失败")}setOpen(false);message.success("分类已保存");void rows.refresh()}catch(error){message.error((error as Error).message)}};
-  const remove=(row:Row)=>modal.confirm({title:`确认删除分类“${row.name}”？`,content:"存在子分类或关联商品时不能删除。",okButtonProps:{danger:true},onOk:async()=>{const response=await fetch(`/api/admin/business/categories/${row.id}`,{method:"DELETE",headers:apiHeaders});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"分类删除失败")}message.success("分类已删除");void rows.refresh()}});
+  const save=async()=>{try{const values=await form.validateFields();const response=await fetch(`/api/admin/business/categories${editing?`/${editing.id}`:""}`,{method:editing?"PUT":"POST",headers:apiHeaders(),body:JSON.stringify(values)});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"分类保存失败")}setOpen(false);message.success("分类已保存");void rows.refresh()}catch(error){message.error((error as Error).message)}};
+  const remove=(row:Row)=>modal.confirm({title:`确认删除分类“${row.name}”？`,content:"存在子分类或关联商品时不能删除。",okButtonProps:{danger:true},onOk:async()=>{const response=await fetch(`/api/admin/business/categories/${row.id}`,{method:"DELETE",headers:apiHeaders()});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"分类删除失败")}message.success("分类已删除");void rows.refresh()}});
   const level=Form.useWatch("level",form);
   const parentOptions=(rows.data||[]).filter(row=>Number(row.level)===Number(level)-1&&Number(row.status)===1&&row.id!==editing?.id).map(row=>({value:row.id,label:`${row.level}级 · ${row.name}`}));
   const columns:ColumnsType<Row>=[
@@ -212,8 +223,8 @@ function PortalManager({module}:{module:Module}) {
   const [form]=Form.useForm();const [open,setOpen]=useState(false);const [editing,setEditing]=useState<Row>();
   const isBrand=module==="brands";
   const show=(row?:Row)=>{setEditing(row);form.resetFields();form.setFieldsValue(row||{sortOrder:0,status:1});setOpen(true)};
-  const save=async()=>{try{const values=await form.validateFields();const response=await fetch(`${endpoint}${editing?`/${editing.id}`:""}`,{method:editing?"PUT":"POST",headers:apiHeaders,body:JSON.stringify(values)});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||data.message||"保存失败")}setOpen(false);message.success(`${current.name}已保存`);void rows.refresh()}catch(error){if(error instanceof Error)message.error(error.message)}};
-  const remove=(row:Row)=>modal.confirm({title:`确认删除“${row.title||row.name}”？`,okButtonProps:{danger:true},onOk:async()=>{const response=await fetch(`${endpoint}/${row.id}`,{method:"DELETE",headers:apiHeaders});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"删除失败")}message.success("删除成功");void rows.refresh()}});
+  const save=async()=>{try{const values=await form.validateFields();const response=await fetch(`${endpoint}${editing?`/${editing.id}`:""}`,{method:editing?"PUT":"POST",headers:apiHeaders(),body:JSON.stringify(values)});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||data.message||"保存失败")}setOpen(false);message.success(`${current.name}已保存`);void rows.refresh()}catch(error){if(error instanceof Error)message.error(error.message)}};
+  const remove=(row:Row)=>modal.confirm({title:`确认删除“${row.title||row.name}”？`,okButtonProps:{danger:true},onOk:async()=>{const response=await fetch(`${endpoint}/${row.id}`,{method:"DELETE",headers:apiHeaders()});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"删除失败")}message.success("删除成功");void rows.refresh()}});
   const columns:ColumnsType<Row>=[
     {title:current.name,render:(_,row)=><div className="user-cell"><i>{current.name.slice(0,1)}</i><span><strong>{row.title||row.name}</strong><small>{row.subtitle||row.description||"—"}</small></span></div>},
     ...(isBrand?[]:[{title:"跳转链接",dataIndex:"linkUrl",render:(v:string)=>v||"—"}]),

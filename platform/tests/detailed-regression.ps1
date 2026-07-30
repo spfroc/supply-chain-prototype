@@ -104,6 +104,18 @@ Case "SYS-USER-001" "新增后台用户并分配指定角色" {
     throw "用户角色或启用状态未保存"
   }
 }
+Case "AUTH-ISOLATION-001" "后台用户只能登录管理后台，不能登录 Web/H5" {
+  $qaCredential = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("${username}:Qa-password-2026"))
+  $qaHeaders = @{ Authorization="Basic $qaCredential"; "Content-Type"="application/json" }
+  $me = Invoke-Api GET "/api/admin/system/me" $null $qaHeaders
+  Expect-Status $me @(200)
+  if ($me.Data.username -ne $username) { throw "后台登录身份不正确" }
+  Expect-Status (Invoke-Api POST "/api/auth/login" @{username=$username;password="Qa-password-2026"} @{}) @(400)
+}
+Case "AUTH-ISOLATION-002" "企业成员账号不能登录管理后台" {
+  $enterpriseCredential = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("demo:demo-password"))
+  Expect-Status (Invoke-Api GET "/api/admin/system/me" $null @{Authorization="Basic $enterpriseCredential"}) @(401)
+}
 Case "SYS-USER-002" "重复后台账号被拒绝" {
   $r = Invoke-Api POST "/api/admin/system/users" @{
     username=$username; password="Qa-password-2026"; realName="重复账号"; phone="";
