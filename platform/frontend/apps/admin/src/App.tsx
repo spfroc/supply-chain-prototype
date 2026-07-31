@@ -3290,7 +3290,13 @@ function Configs() {
           rowKey="id"
           loading={optionValues.loading}
           dataSource={optionValues.data || []}
-          pagination={false}
+          pagination={{
+            defaultPageSize: 8,
+            showSizeChanger: true,
+            pageSizeOptions: [8, 15, 30],
+            showTotal: (total) => `共 ${total} 个选项`,
+            showQuickJumper: true,
+          }}
           columns={[
             { title: "选项名称", dataIndex: "label" },
             { title: "选项值", dataIndex: "optionValue" },
