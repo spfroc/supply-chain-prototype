@@ -268,7 +268,10 @@ public class ClientController {
         var items=jdbc.sql("""
             SELECT p.title,p.main_image AS mainImage,s.sku_code AS skuCode,os.sub_order_no AS subOrderNo,
               os.address_snapshot AS addressSnapshot,
-              oi.quantity,oi.unit_price AS unitPrice,oi.total_price AS totalPrice
+              oi.quantity,oi.unit_price AS unitPrice,oi.total_price AS totalPrice,
+              oi.fulfillment_status AS fulfillmentStatus,oi.logistics_company AS logisticsCompany,
+              oi.logistics_no AS logisticsNo,oi.logistics_status AS logisticsStatus,
+              DATE_FORMAT(oi.shipped_at,'%Y-%m-%d %H:%i:%s') AS shippedAt
             FROM order_item oi JOIN product_sku s ON s.id=oi.sku_id JOIN product_spu p ON p.id=s.spu_id
             JOIN order_sub os ON os.id=oi.order_sub_id
             WHERE oi.order_main_id=:id

@@ -332,12 +332,45 @@ public class AdminBusinessController {
         var items=jdbc.sql("""
           SELECT oi.id,p.title,p.main_image AS mainImage,s.sku_code AS skuCode,
             os.sub_order_no AS subOrderNo,os.address_snapshot AS addressSnapshot,
-            oi.quantity,oi.unit_price AS unitPrice,oi.total_price AS totalPrice
+            oi.quantity,oi.unit_price AS unitPrice,oi.total_price AS totalPrice,
+            oi.fulfillment_status AS fulfillmentStatus,oi.logistics_company AS logisticsCompany,
+            oi.logistics_no AS logisticsNo,oi.logistics_status AS logisticsStatus,
+            DATE_FORMAT(oi.shipped_at,'%Y-%m-%d %H:%i:%s') AS shippedAt
           FROM order_item oi JOIN product_sku s ON s.id=oi.sku_id
           JOIN product_spu p ON p.id=s.spu_id JOIN order_sub os ON os.id=oi.order_sub_id
           WHERE oi.order_main_id=:id
           """).param("id",id).query().listOfRows();
         return Map.of("order",order,"items",items);
+    }
+
+    @PutMapping("/orders/{orderId}/items/{itemId}/logistics")
+    @Transactional
+    void itemLogistics(@PathVariable long orderId,@PathVariable long itemId,
+                       @RequestBody ItemLogisticsRequest r) {
+        if(r.fulfillmentStatus()<0||r.fulfillmentStatus()>4)
+            throw new IllegalArgumentException("商品发货状态无效");
+        if(r.fulfillmentStatus()>0&&(value(r.logisticsCompany()).isBlank()||value(r.logisticsNo()).isBlank()))
+            throw new IllegalArgumentException("已发货商品必须填写物流公司和运单号");
+        require(jdbc.sql("""
+          UPDATE order_item SET fulfillment_status=:status,logistics_company=:company,
+            logistics_no=:logisticsNo,logistics_status=:logisticsStatus,
+            shipped_at=CASE WHEN :status>0 THEN COALESCE(shipped_at,NOW()) ELSE NULL END
+          WHERE id=:itemId AND order_main_id=:orderId
+          """).params(Map.of("status",r.fulfillmentStatus(),"company",value(r.logisticsCompany()),
+            "logisticsNo",value(r.logisticsNo()),"logisticsStatus",value(r.logisticsStatus()),
+            "itemId",itemId,"orderId",orderId)).update(),"订单商品不存在");
+        Map<String,Object> stats=jdbc.sql("""
+          SELECT COUNT(*) total,
+            SUM(CASE WHEN fulfillment_status>=1 AND fulfillment_status<>4 THEN 1 ELSE 0 END) shipped,
+            SUM(CASE WHEN fulfillment_status=3 THEN 1 ELSE 0 END) delivered
+          FROM order_item WHERE order_main_id=:orderId
+          """).param("orderId",orderId).query().singleRow();
+        int total=((Number)stats.get("total")).intValue();
+        int shipped=((Number)stats.get("shipped")).intValue();
+        int delivered=((Number)stats.get("delivered")).intValue();
+        int orderStatus=shipped==0?1:(shipped<total?5:(delivered==total?3:2));
+        jdbc.sql("UPDATE order_main SET order_status=:status WHERE id=:id AND order_status<>4")
+          .params(Map.of("status",orderStatus,"id",orderId)).update();
     }
 
     @PutMapping("/orders/{id}/status")
@@ -386,4 +419,6 @@ public class AdminBusinessController {
     public record StatusRequest(int status){}
     public record StockRequest(@Min(0) int stock){}
     public record OrderStatusRequest(int paymentStatus,int orderStatus){}
+    public record ItemLogisticsRequest(int fulfillmentStatus,String logisticsCompany,
+        String logisticsNo,String logisticsStatus){}
 }

@@ -42,7 +42,7 @@ const deliveryAddress = (value: any) => {
         .join(" · ")
     : "配送地址待确认";
 };
-const statuses = ["待付款", "待发货", "运输中", "已完成", "已取消"];
+const statuses = ["待付款", "待发货", "运输中", "已完成", "已取消", "部分发货"];
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(path, {
     ...init,
@@ -1169,6 +1169,10 @@ function Orders() {
                 {x.skuCode} · {x.subOrderNo} · ×{x.quantity}
               </span>
               <address>{deliveryAddress(x.addressSnapshot)}</address>
+              <span>
+                {["待发货", "已发货", "运输中", "已签收", "已取消"][Number(x.fulfillmentStatus)] || "待发货"}
+                {x.logisticsNo ? ` · ${x.logisticsCompany} ${x.logisticsNo}` : ""}
+              </span>
             </div>
             <b>{money(x.totalPrice)}</b>
           </article>

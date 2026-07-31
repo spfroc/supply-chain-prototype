@@ -672,6 +672,7 @@ function BusinessModule({ module }: { module: Module }) {
   );
   const [form] = Form.useForm();
   const [memberForm] = Form.useForm();
+  const [logisticsForm] = Form.useForm();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Row>();
   const [mode, setMode] = useState<"entity" | "stock" | "item">("entity");
@@ -679,6 +680,7 @@ function BusinessModule({ module }: { module: Module }) {
   const [items, setItems] = useState<Row[]>([]);
   const [itemOpen, setItemOpen] = useState(false);
   const [detail, setDetail] = useState<Row>();
+  const [logisticsItem, setLogisticsItem] = useState<Row>();
   const [memberEnterprise, setMemberEnterprise] = useState<Row>();
   const [members, setMembers] = useState<Row[]>([]);
   const [memberOpen, setMemberOpen] = useState(false);
@@ -817,6 +819,30 @@ function BusinessModule({ module }: { module: Module }) {
     });
   const orderDetail = async (row: Row) =>
     setDetail(await business(`/orders/${row.id}`));
+  const editLogistics = (row: Row) => {
+    setLogisticsItem(row);
+    logisticsForm.setFieldsValue({
+      fulfillmentStatus: Number(row.fulfillmentStatus || 0),
+      logisticsCompany: row.logisticsCompany || "",
+      logisticsNo: row.logisticsNo || "",
+      logisticsStatus: row.logisticsStatus || "",
+    });
+  };
+  const saveLogistics = async () => {
+    try {
+      const values = await logisticsForm.validateFields();
+      await business(
+        `/orders/${detail!.order.id}/items/${logisticsItem!.id}/logistics`,
+        { method: "PUT", body: JSON.stringify(values) },
+      );
+      setDetail(await business(`/orders/${detail!.order.id}`));
+      setLogisticsItem(undefined);
+      message.success("商品物流信息已保存，订单状态已自动更新");
+      void rows.refresh();
+    } catch (error) {
+      message.error((error as Error).message);
+    }
+  };
   const advanceOrder = async (row: Row) => {
     const payment = Number(row.paymentStatus) === 2 ? 2 : 2;
     const status =
@@ -1078,7 +1104,7 @@ function BusinessModule({ module }: { module: Module }) {
         dataIndex: "orderStatus",
         render: (v) => (
           <Tag color="blue">
-            {["待付款", "待发货", "运输中", "已完成", "已取消"][v]}
+            {["待付款", "待发货", "运输中", "已完成", "已取消", "部分发货"][v]}
           </Tag>
         ),
       },
@@ -1631,6 +1657,32 @@ function BusinessModule({ module }: { module: Module }) {
                     </div>
                   ),
                 },
+                {
+                  title: "发货状态",
+                  dataIndex: "fulfillmentStatus",
+                  width: 95,
+                  render: (value) => (
+                    <Tag color={Number(value) >= 1 ? "blue" : "orange"}>
+                      {["待发货", "已发货", "运输中", "已签收", "已取消"][
+                        Number(value)
+                      ] || "待发货"}
+                    </Tag>
+                  ),
+                },
+                {
+                  title: "物流信息",
+                  width: 170,
+                  render: (_: any, row: Row) =>
+                    row.logisticsNo ? (
+                      <div className="admin-logistics">
+                        <strong>{row.logisticsCompany}</strong>
+                        <span>{row.logisticsNo}</span>
+                        {row.logisticsStatus && <small>{row.logisticsStatus}</small>}
+                      </div>
+                    ) : (
+                      "—"
+                    ),
+                },
                 { title: "数量", dataIndex: "quantity", width: 70 },
                 {
                   title: "单价",
@@ -1644,10 +1696,56 @@ function BusinessModule({ module }: { module: Module }) {
                   width: 110,
                   render: (v) => `¥${Number(v).toFixed(2)}`,
                 },
+                {
+                  title: "操作",
+                  width: 90,
+                  fixed: "right",
+                  render: (_: any, row: Row) => (
+                    <Button type="link" onClick={() => editLogistics(row)}>
+                      物流
+                    </Button>
+                  ),
+                },
               ]}
+              scroll={{ x: 1280 }}
             />
           </>
         )}
+      </Modal>
+      <Modal
+        open={!!logisticsItem}
+        title={`商品物流 · ${logisticsItem?.title || ""}`}
+        okText="保存物流"
+        cancelText="取消"
+        onOk={() => void saveLogistics()}
+        onCancel={() => setLogisticsItem(undefined)}
+      >
+        <Form form={logisticsForm} layout="vertical">
+          <Form.Item
+            name="fulfillmentStatus"
+            label="商品发货状态"
+            rules={[{ required: true, message: "请选择商品发货状态" }]}
+          >
+            <Select
+              options={[
+                { value: 0, label: "待发货" },
+                { value: 1, label: "已发货" },
+                { value: 2, label: "运输中" },
+                { value: 3, label: "已签收" },
+                { value: 4, label: "已取消" },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item name="logisticsCompany" label="物流公司">
+            <Input placeholder="例如：顺丰速运、京东物流" />
+          </Form.Item>
+          <Form.Item name="logisticsNo" label="运单号">
+            <Input placeholder="请输入物流运单号" />
+          </Form.Item>
+          <Form.Item name="logisticsStatus" label="物流状态说明">
+            <Input placeholder="例如：已揽收、运输途中、派送中" />
+          </Form.Item>
+        </Form>
       </Modal>
     </>
   );

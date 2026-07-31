@@ -56,7 +56,7 @@ const deliveryAddress = (value: any) => {
         .join(" · ")
     : "配送地址待确认";
 };
-const orderStatus = ["待付款", "待发货", "运输中", "已完成", "已取消"];
+const orderStatus = ["待付款", "待发货", "运输中", "已完成", "已取消", "部分发货"];
 const routeViews: View[] = [
   "home",
   "products",
@@ -1860,6 +1860,12 @@ function Orders({ go }: { go: (v: View) => void }) {
                     <strong>{x.title}</strong>
                     <small>{x.skuCode} · 配送单 {x.subOrderNo}</small>
                     <address>{deliveryAddress(x.addressSnapshot)}</address>
+                    <small>
+                      发货状态：{["待发货", "已发货", "运输中", "已签收", "已取消"][Number(x.fulfillmentStatus)] || "待发货"}
+                      {x.logisticsNo
+                        ? ` · ${x.logisticsCompany} ${x.logisticsNo}${x.logisticsStatus ? ` · ${x.logisticsStatus}` : ""}`
+                        : ""}
+                    </small>
                   </span>
                   <b>× {x.quantity}</b>
                   <em>{money(x.totalPrice)}</em>
