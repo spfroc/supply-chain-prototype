@@ -221,6 +221,64 @@ public class SystemAdminController {
             .param("type", type).query().listOfRows();
     }
 
+    @GetMapping("/option-groups")
+    List<Map<String, Object>> optionGroups() {
+        return jdbc.sql("""
+            SELECT g.id,g.option_code AS optionCode,g.option_name AS optionName,
+              g.control_type AS controlType,g.sort_order AS sortOrder,g.status,
+              COUNT(o.id) AS optionCount,
+              DATE_FORMAT(g.updated_at, '%Y-%m-%d %H:%i:%s') AS updatedAt
+            FROM system_option_group g
+            LEFT JOIN system_option o ON o.option_type=g.option_code AND o.deleted_at IS NULL
+            GROUP BY g.id
+            ORDER BY g.sort_order,g.id
+            """).query().listOfRows();
+    }
+
+    @PostMapping("/option-groups")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Transactional
+    Map<String, Object> createOptionGroup(@Valid @RequestBody OptionGroupRequest request) {
+        String code = "OPTION_" + UUID.randomUUID().toString().replace("-", "").substring(0, 16).toUpperCase();
+        jdbc.sql("""
+            INSERT INTO system_option_group(option_code,option_name,control_type,sort_order,status)
+            VALUES(:code,:name,:controlType,:sortOrder,:status)
+            """).params(Map.of(
+                "code", code, "name", request.optionName(),
+                "controlType", request.controlType(), "sortOrder", request.sortOrder(),
+                "status", request.status()
+            )).update();
+        long id = jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single();
+        log("系统管理", "新增选项组", "SYSTEM_OPTION_GROUP", String.valueOf(id));
+        return Map.of("id", id, "optionCode", code);
+    }
+
+    @PutMapping("/option-groups/{id}")
+    @Transactional
+    void updateOptionGroup(@PathVariable long id, @Valid @RequestBody OptionGroupRequest request) {
+        requireChanged(jdbc.sql("""
+            UPDATE system_option_group SET option_name=:name,control_type=:controlType,
+              sort_order=:sortOrder,status=:status WHERE id=:id
+            """).params(Map.of(
+                "id", id, "name", request.optionName(),
+                "controlType", request.controlType(), "sortOrder", request.sortOrder(),
+                "status", request.status()
+            )).update(), "选项组不存在");
+        log("系统管理", "编辑选项组", "SYSTEM_OPTION_GROUP", String.valueOf(id));
+    }
+
+    @DeleteMapping("/option-groups/{id}")
+    @Transactional
+    void deleteOptionGroup(@PathVariable long id) {
+        String code = jdbc.sql("SELECT option_code FROM system_option_group WHERE id=:id")
+            .param("id", id).query(String.class).optional().orElseThrow(() -> new IllegalArgumentException("选项组不存在"));
+        long count = jdbc.sql("SELECT COUNT(*) FROM system_option WHERE option_type=:code")
+            .param("code", code).query(Long.class).single();
+        if (count > 0) throw new IllegalArgumentException("请先删除该选项组中的全部选项");
+        jdbc.sql("DELETE FROM system_option_group WHERE id=:id").param("id", id).update();
+        log("系统管理", "删除选项组", "SYSTEM_OPTION_GROUP", String.valueOf(id));
+    }
+
     @PostMapping("/options")
     @ResponseStatus(HttpStatus.CREATED)
     @Transactional
@@ -309,5 +367,9 @@ public class SystemAdminController {
     public record OptionRequest(
         @NotBlank String optionType, @NotBlank String label, @NotBlank String optionValue,
         int sortOrder, int status
+    ) {}
+
+    public record OptionGroupRequest(
+        @NotBlank String optionName, @NotBlank String controlType, int sortOrder, int status
     ) {}
 }

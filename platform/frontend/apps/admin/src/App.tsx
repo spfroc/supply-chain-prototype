@@ -2969,10 +2969,21 @@ function Logs() {
 function Configs() {
   const { message } = AntApp.useApp();
   const result = useLoad<Row[]>(() => api("/configs"));
-  const options = useLoad<Row[]>(() => api("/options?type=LOGISTICS_COMPANY"));
+  const options = useLoad<Row[]>(() => api("/option-groups"));
   const [optionForm] = Form.useForm();
+  const [valueForm] = Form.useForm();
   const [optionOpen, setOptionOpen] = useState(false);
   const [editingOption, setEditingOption] = useState<Row>();
+  const [managedGroup, setManagedGroup] = useState<Row>();
+  const [valueOpen, setValueOpen] = useState(false);
+  const [editingValue, setEditingValue] = useState<Row>();
+  const optionValues = useLoad<Row[]>(
+    () =>
+      managedGroup
+        ? api(`/options?type=${encodeURIComponent(managedGroup.optionCode)}`)
+        : Promise.resolve([]),
+    [managedGroup?.optionCode],
+  );
   const [saving, setSaving] = useState<number>();
   const save = async (row: Row, value: any) => {
     setSaving(row.id);
@@ -3008,7 +3019,8 @@ function Configs() {
     optionForm.resetFields();
     optionForm.setFieldsValue(
       row || {
-        optionType: "LOGISTICS_COMPANY",
+        optionName: "",
+        controlType: "RADIO",
         sortOrder: (options.data?.length || 0) * 10 + 10,
         status: 1,
       },
@@ -3018,11 +3030,16 @@ function Configs() {
   const saveOption = async () => {
     try {
       const values = await optionForm.validateFields();
-      await api(editingOption ? `/options/${editingOption.id}` : "/options", {
+      await api(
+        editingOption
+          ? `/option-groups/${editingOption.id}`
+          : "/option-groups",
+        {
         method: editingOption ? "PUT" : "POST",
         body: JSON.stringify(values),
-      });
-      message.success(editingOption ? "物流公司已更新" : "物流公司已添加");
+        },
+      );
+      message.success(editingOption ? "选项配置已更新" : "选项配置已添加");
       setOptionOpen(false);
       void options.refresh();
     } catch (error) {
@@ -3031,17 +3048,16 @@ function Configs() {
   };
   const updateOptionStatus = async (row: Row, checked: boolean) => {
     try {
-      await api(`/options/${row.id}`, {
+      await api(`/option-groups/${row.id}`, {
         method: "PUT",
         body: JSON.stringify({
-          optionType: row.optionType,
-          label: row.label,
-          optionValue: row.optionValue,
+          optionName: row.optionName,
+          controlType: row.controlType,
           sortOrder: row.sortOrder,
           status: checked ? 1 : 0,
         }),
       });
-      message.success(checked ? "物流公司已启用" : "物流公司已停用");
+      message.success(checked ? "选项配置已启用" : "选项配置已停用");
       void options.refresh();
     } catch (error) {
       message.error((error as Error).message);
@@ -3049,14 +3065,58 @@ function Configs() {
   };
   const removeOption = (row: Row) =>
     Modal.confirm({
-      title: "删除物流公司",
-      content: `确认删除“${row.label}”吗？历史订单中的物流信息不会受影响。`,
+      title: "删除选项配置",
+      content: `确认删除“${row.optionName}”吗？请先清空其中的选项值。`,
+      okText: "删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        await api(`/option-groups/${row.id}`, { method: "DELETE" });
+        message.success("选项配置已删除");
+        void options.refresh();
+      },
+    });
+  const showValue = (row?: Row) => {
+    setEditingValue(row);
+    valueForm.resetFields();
+    valueForm.setFieldsValue(
+      row || {
+        optionType: managedGroup?.optionCode,
+        sortOrder: (optionValues.data?.length || 0) * 10 + 10,
+        status: 1,
+      },
+    );
+    setValueOpen(true);
+  };
+  const saveValue = async () => {
+    try {
+      const values = await valueForm.validateFields();
+      await api(editingValue ? `/options/${editingValue.id}` : "/options", {
+        method: editingValue ? "PUT" : "POST",
+        body: JSON.stringify({
+          ...values,
+          optionType: managedGroup?.optionCode,
+        }),
+      });
+      message.success(editingValue ? "选项值已更新" : "选项值已添加");
+      setValueOpen(false);
+      void optionValues.refresh();
+      void options.refresh();
+    } catch (error) {
+      if (error instanceof Error) message.error(error.message);
+    }
+  };
+  const removeValue = (row: Row) =>
+    Modal.confirm({
+      title: "删除选项值",
+      content: `确认删除“${row.label}”吗？`,
       okText: "删除",
       okButtonProps: { danger: true },
       cancelText: "取消",
       onOk: async () => {
         await api(`/options/${row.id}`, { method: "DELETE" });
-        message.success("物流公司已删除");
+        message.success("选项值已删除");
+        void optionValues.refresh();
         void options.refresh();
       },
     });
@@ -3086,10 +3146,10 @@ function Configs() {
               label: "选项管理",
               children: (
                 <Card
-                  title="物流公司选项"
+                  title="选项配置列表"
                   extra={
                     <Button type="primary" onClick={() => showOption()}>
-                      新增物流公司
+                      新增选项配置
                     </Button>
                   }
                 >
@@ -3099,8 +3159,22 @@ function Configs() {
                     dataSource={options.data || []}
                     pagination={false}
                     columns={[
-                      { title: "物流公司", dataIndex: "label" },
-                      { title: "选项值", dataIndex: "optionValue" },
+                      { title: "选项名称", dataIndex: "optionName" },
+                      {
+                        title: "选项类型",
+                        dataIndex: "controlType",
+                        render: (value: string) =>
+                          ({
+                            RADIO: "单选",
+                            SELECT_MULTIPLE: "下拉多选",
+                            CHECKBOX_MULTIPLE: "Checkbox 多选",
+                          })[value] || value,
+                      },
+                      {
+                        title: "选项数量",
+                        dataIndex: "optionCount",
+                        width: 110,
+                      },
                       { title: "排序", dataIndex: "sortOrder", width: 100 },
                       {
                         title: "状态",
@@ -3124,9 +3198,15 @@ function Configs() {
                       },
                       {
                         title: "操作",
-                        width: 150,
+                        width: 260,
                         render: (_: unknown, row: Row) => (
                           <Space>
+                            <Button
+                              type="link"
+                              onClick={() => setManagedGroup(row)}
+                            >
+                              管理选项
+                            </Button>
                             <Button type="link" onClick={() => showOption(row)}>
                               编辑
                             </Button>
@@ -3150,30 +3230,119 @@ function Configs() {
       </Card>
       <Modal
         open={optionOpen}
-        title={editingOption ? "编辑物流公司" : "新增物流公司"}
+        title={editingOption ? "编辑选项配置" : "新增选项配置"}
         okText="保存"
         cancelText="取消"
         onOk={() => void saveOption()}
         onCancel={() => setOptionOpen(false)}
       >
         <Form form={optionForm} layout="vertical">
-          <Form.Item name="optionType" hidden>
-            <Input />
+          <Form.Item
+            name="optionName"
+            label="选项名称"
+            rules={[{ required: true, message: "请输入选项名称" }]}
+          >
+            <Input placeholder="例如：物流公司、商品标签" maxLength={120} />
           </Form.Item>
           <Form.Item
-            name="label"
-            label="物流公司名称"
-            rules={[{ required: true, message: "请输入物流公司名称" }]}
+            name="controlType"
+            label="选项类型"
+            rules={[{ required: true, message: "请选择选项类型" }]}
           >
-            <Input placeholder="例如：顺丰速运" maxLength={120} />
+            <Select
+              options={[
+                { value: "RADIO", label: "单选" },
+                { value: "SELECT_MULTIPLE", label: "下拉多选" },
+                { value: "CHECKBOX_MULTIPLE", label: "Checkbox 多选" },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            name="sortOrder"
+            label="排序"
+            rules={[{ required: true, message: "请输入排序值" }]}
+          >
+            <InputNumber min={0} precision={0} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name="status" label="状态">
+            <Select
+              options={[
+                { value: 1, label: "启用" },
+                { value: 0, label: "停用" },
+              ]}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        open={!!managedGroup}
+        width={880}
+        footer={null}
+        title={`${managedGroup?.optionName || ""} · 选项管理`}
+        onCancel={() => setManagedGroup(undefined)}
+      >
+        <div style={{ marginBottom: 16, textAlign: "right" }}>
+          <Button type="primary" onClick={() => showValue()}>
+            新增选项
+          </Button>
+        </div>
+        <Table
+          rowKey="id"
+          loading={optionValues.loading}
+          dataSource={optionValues.data || []}
+          pagination={false}
+          columns={[
+            { title: "选项名称", dataIndex: "label" },
+            { title: "选项值", dataIndex: "optionValue" },
+            { title: "排序", dataIndex: "sortOrder", width: 90 },
+            {
+              title: "状态",
+              width: 90,
+              render: (_: unknown, row: Row) => (
+                <Tag color={Number(row.status) === 1 ? "green" : "default"}>
+                  {Number(row.status) === 1 ? "启用" : "停用"}
+                </Tag>
+              ),
+            },
+            {
+              title: "操作",
+              width: 140,
+              render: (_: unknown, row: Row) => (
+                <Space>
+                  <Button type="link" onClick={() => showValue(row)}>
+                    编辑
+                  </Button>
+                  <Button type="link" danger onClick={() => removeValue(row)}>
+                    删除
+                  </Button>
+                </Space>
+              ),
+            },
+          ]}
+        />
+      </Modal>
+      <Modal
+        open={valueOpen}
+        title={editingValue ? "编辑选项值" : "新增选项值"}
+        okText="保存"
+        cancelText="取消"
+        onOk={() => void saveValue()}
+        onCancel={() => setValueOpen(false)}
+      >
+        <Form form={valueForm} layout="vertical">
+          <Form.Item
+            name="label"
+            label="选项名称"
+            rules={[{ required: true, message: "请输入选项名称" }]}
+          >
+            <Input placeholder="请输入展示名称" maxLength={120} />
           </Form.Item>
           <Form.Item
             name="optionValue"
             label="选项值"
-            tooltip="订单中实际保存的物流公司名称"
             rules={[{ required: true, message: "请输入选项值" }]}
           >
-            <Input placeholder="例如：顺丰速运" maxLength={160} />
+            <Input placeholder="请输入保存值" maxLength={160} />
           </Form.Item>
           <Form.Item
             name="sortOrder"
