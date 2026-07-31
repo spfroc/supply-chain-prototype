@@ -177,6 +177,49 @@ function ProductImageUpload({
         fileList={files}
         maxCount={limit}
         customRequest={upload}
+        itemRender={(originNode, file) =>
+          multiple ? (
+            <div
+              className="sortable-upload-item"
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData("text/plain", file.url || "");
+              }}
+              onDragOver={(event) => {
+                event.preventDefault();
+                event.dataTransfer.dropEffect = "move";
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                const sourceUrl = event.dataTransfer.getData("text/plain");
+                const targetUrl = file.url || "";
+                const sourceIndex = urls.indexOf(sourceUrl);
+                const targetIndex = urls.indexOf(targetUrl);
+                if (
+                  sourceIndex < 0 ||
+                  targetIndex < 0 ||
+                  sourceIndex === targetIndex
+                )
+                  return;
+                const next = [...urls];
+                const [moved] = next.splice(sourceIndex, 1);
+                next.splice(targetIndex, 0, moved);
+                onChange?.(next.join("\n"));
+                message.success("配图顺序已调整，请保存商品");
+              }}
+            >
+              {originNode}
+              <span className="upload-order">
+                {urls.indexOf(file.url || "") + 1}
+              </span>
+              <span className="upload-drag-hint">拖动排序</span>
+            </div>
+          ) : (
+            originNode
+          )
+        }
         onRemove={(file) => {
           onChange?.(urls.filter((url) => url !== file.url).join("\n"));
           return true;
@@ -192,7 +235,7 @@ function ProductImageUpload({
       <small>
         JPG/PNG，{profile.ratioLabel}，{profile.minWidth}×{profile.minHeight} 至{" "}
         {profile.maxWidth}×{profile.maxHeight}，单张不超过{profile.maxMb}MB
-        {multiple ? "，最多6张" : ""}
+        {multiple ? "，最多6张，可拖动调整顺序" : ""}
       </small>
     </div>
   );
