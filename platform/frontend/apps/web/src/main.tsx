@@ -1582,14 +1582,22 @@ function Orders({ go }: { go: (v: View) => void }) {
           <i>鲁</i>
           <strong>企业采购中心</strong>
         </div>
-        {["账户概览", "我的订单", "地址管理", "发票管理", "企业成员"].map(
-          (x, i) => (
-            <button className={i === 1 ? "active" : ""} key={x}>
-              {x}
+        {[
+          ["profile", "账户概览"],
+          ["orders", "我的订单"],
+          ["addresses", "地址管理"],
+          ["invoices", "发票管理"],
+          ["members", "企业成员"],
+        ].map((item) => (
+            <button
+              className={item[0] === "orders" ? "active" : ""}
+              key={item[0]}
+              onClick={() => go(item[0] as View)}
+            >
+              {item[1]}
               <span>›</span>
             </button>
-          ),
-        )}
+          ))}
       </aside>
       <section>
         <div className="account-heading">
