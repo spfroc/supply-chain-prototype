@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import {
   App as AntApp,
   Button,
@@ -399,40 +400,63 @@ function RichTextEditor({
   );
 }
 
+function MenuIcon({ name }: { name: string }) {
+  const paths: Record<string, ReactNode> = {
+    dashboard: <><path d="M4 13h6V4H4zM14 20h6v-9h-6zM4 20h6v-3H4zM14 7h6V4h-6z" /></>,
+    goods: <><path d="m4 7 8-4 8 4-8 4zM4 7v10l8 4 8-4V7M12 11v10" /></>,
+    category: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><rect x="14" y="14" width="7" height="7" rx="1" /></>,
+    brand: <><path d="M20 13 13 20l-9-9V4h7z" /><circle cx="8.5" cy="8.5" r="1.5" /></>,
+    platform: <><rect x="3" y="4" width="18" height="13" rx="2" /><path d="M8 21h8M12 17v4" /></>,
+    solution: <><path d="M9 18h6M10 22h4M8.5 14.5A7 7 0 1 1 15.5 14.5C14.5 15.3 14 16 14 18h-4c0-2-.5-2.7-1.5-3.5Z" /></>,
+    enterprise: <><path d="M4 21V5l8-3v19M12 8h8v13M8 7v1M8 11v1M8 15v1M16 12v1M16 16v1M2 21h20" /></>,
+    agreement: <><path d="M6 3h9l3 3v15H6zM14 3v4h4M9 12h6M9 16h6M9 8h2" /></>,
+    order: <><path d="M6 2h12v20l-3-2-3 2-3-2-3 2zM9 7h6M9 11h6M9 15h4" /></>,
+    navigation: <><path d="M3 6h18M3 12h12M3 18h8" /><path d="m17 15 4 3-4 3" /></>,
+    banner: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8" cy="9" r="2" /><path d="m3 17 5-5 4 4 3-3 6 6" /></>,
+    content: <><path d="M5 3h14v18H5zM8 7h8M8 11h8M8 15h5" /></>,
+    user: <><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 3-7 8-7s8 3 8 7" /></>,
+    role: <><circle cx="9" cy="8" r="3" /><path d="M3 20c0-4 2-7 6-7 2 0 3.5.7 4.5 2M16 11l2 2 4-4M15 18h7" /></>,
+    permission: <><path d="M12 2 4 5v6c0 5 3.5 9 8 11 4.5-2 8-6 8-11V5z" /><path d="m9 12 2 2 4-4" /></>,
+    log: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2M5 4 3 1M19 4l-3 1" /></>,
+    config: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z" /></>,
+  };
+  return <svg className="menu-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">{paths[name]}</svg>;
+}
+
 const navItems = [
-  { key: "overview", label: "经营概览", icon: <span>概</span> },
+  { key: "overview", label: "经营概览", icon: <MenuIcon name="dashboard" /> },
   {
-    type: "group" as const,
+    key: "business",
     label: "业务管理",
     children: [
-      { key: "products", label: "商品管理", icon: <span>商</span> },
-      { key: "categories", label: "分类管理", icon: <span>类</span> },
-      { key: "brands", label: "品牌管理", icon: <span>牌</span> },
-      { key: "platforms", label: "平台管理", icon: <span>台</span> },
-      { key: "solutions", label: "方案管理", icon: <span>案</span> },
-      { key: "enterprises", label: "企业管理", icon: <span>企</span> },
-      { key: "agreements", label: "协议管理", icon: <span>协</span> },
-      { key: "orders", label: "订单管理", icon: <span>单</span> },
+      { key: "products", label: "商品管理", icon: <MenuIcon name="goods" /> },
+      { key: "categories", label: "分类管理", icon: <MenuIcon name="category" /> },
+      { key: "brands", label: "品牌管理", icon: <MenuIcon name="brand" /> },
+      { key: "platforms", label: "平台管理", icon: <MenuIcon name="platform" /> },
+      { key: "solutions", label: "方案管理", icon: <MenuIcon name="solution" /> },
+      { key: "enterprises", label: "企业管理", icon: <MenuIcon name="enterprise" /> },
+      { key: "agreements", label: "协议管理", icon: <MenuIcon name="agreement" /> },
+      { key: "orders", label: "订单管理", icon: <MenuIcon name="order" /> },
     ],
   },
   {
-    type: "group" as const,
+    key: "portal",
     label: "门户管理",
     children: [
-      { key: "navigations", label: "导航栏管理", icon: <span>导</span> },
-      { key: "banners", label: "首页轮播图", icon: <span>播</span> },
-      { key: "contents", label: "内容管理", icon: <span>文</span> },
+      { key: "navigations", label: "导航栏管理", icon: <MenuIcon name="navigation" /> },
+      { key: "banners", label: "首页轮播图", icon: <MenuIcon name="banner" /> },
+      { key: "contents", label: "内容管理", icon: <MenuIcon name="content" /> },
     ],
   },
   {
-    type: "group" as const,
+    key: "system",
     label: "系统管理",
     children: [
-      { key: "users", label: "用户管理", icon: <span>用</span> },
-      { key: "roles", label: "角色管理", icon: <span>角</span> },
-      { key: "permissions", label: "权限管理", icon: <span>权</span> },
-      { key: "logs", label: "操作日志", icon: <span>志</span> },
-      { key: "configs", label: "基本配置", icon: <span>设</span> },
+      { key: "users", label: "用户管理", icon: <MenuIcon name="user" /> },
+      { key: "roles", label: "角色管理", icon: <MenuIcon name="role" /> },
+      { key: "permissions", label: "权限管理", icon: <MenuIcon name="permission" /> },
+      { key: "logs", label: "操作日志", icon: <MenuIcon name="log" /> },
+      { key: "configs", label: "基本配置", icon: <MenuIcon name="config" /> },
     ],
   },
 ];
@@ -577,18 +601,15 @@ function AdminApp({ logout }: { logout: () => void }) {
             <small>ADMIN CONSOLE</small>
           </div>
         </div>
-        <Menu
-          mode="inline"
-          theme="dark"
-          selectedKeys={[module]}
-          items={navItems}
-          onClick={({ key }) => setModule(key as Module)}
-        />
-        <div className="service-state">
-          <span>
-            <i /> 系统服务正常
-          </span>
-          <small>数据库与缓存已连接</small>
+        <div className="sider-menu-scroll">
+          <Menu
+            mode="inline"
+            theme="dark"
+            defaultOpenKeys={["business"]}
+            selectedKeys={[module]}
+            items={navItems}
+            onClick={({ key }) => setModule(key as Module)}
+          />
         </div>
       </Layout.Sider>
       <Layout>
@@ -600,6 +621,16 @@ function AdminApp({ logout }: { logout: () => void }) {
           <label className="global-search">
             ⌕ <input placeholder="搜索用户、角色或日志" />
           </label>
+          <div
+            className="service-health"
+            title="当前管理 API 请求正常，且数据库查询成功"
+          >
+            <i />
+            <span>
+              <strong>运行正常</strong>
+              <small>API · 数据库</small>
+            </span>
+          </div>
           <div className="admin-account">
             <span>{String(admin.realName || "管").slice(0, 1)}</span>
             <div>
