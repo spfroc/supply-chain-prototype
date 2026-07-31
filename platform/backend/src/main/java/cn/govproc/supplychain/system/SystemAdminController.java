@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -204,6 +205,63 @@ public class SystemAdminController {
         log("系统管理", "更新配置", "SYSTEM_CONFIG", String.valueOf(id));
     }
 
+    @GetMapping("/options")
+    List<Map<String, Object>> options(
+        @RequestParam(defaultValue = "LOGISTICS_COMPANY") String type,
+        @RequestParam(required = false) Boolean enabled
+    ) {
+        String statusFilter = Boolean.TRUE.equals(enabled) ? " AND status=1" : "";
+        return jdbc.sql("""
+            SELECT id, option_type AS optionType, label, option_value AS optionValue,
+              sort_order AS sortOrder, status,
+              DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updatedAt
+            FROM system_option
+            WHERE option_type=:type AND deleted_at IS NULL
+            """ + statusFilter + " ORDER BY sort_order,id")
+            .param("type", type).query().listOfRows();
+    }
+
+    @PostMapping("/options")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Transactional
+    Map<String, Object> createOption(@Valid @RequestBody OptionRequest request) {
+        jdbc.sql("""
+            INSERT INTO system_option(option_type,label,option_value,sort_order,status)
+            VALUES(:type,:label,:optionValue,:sortOrder,:status)
+            """).params(Map.of(
+                "type", request.optionType(), "label", request.label(),
+                "optionValue", request.optionValue(), "sortOrder", request.sortOrder(),
+                "status", request.status()
+            )).update();
+        long id = jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single();
+        log("系统管理", "新增选项", "SYSTEM_OPTION", String.valueOf(id));
+        return Map.of("id", id);
+    }
+
+    @PutMapping("/options/{id}")
+    @Transactional
+    void updateOption(@PathVariable long id, @Valid @RequestBody OptionRequest request) {
+        requireChanged(jdbc.sql("""
+            UPDATE system_option SET option_type=:type,label=:label,option_value=:optionValue,
+              sort_order=:sortOrder,status=:status
+            WHERE id=:id AND deleted_at IS NULL
+            """).params(Map.of(
+                "id", id, "type", request.optionType(), "label", request.label(),
+                "optionValue", request.optionValue(), "sortOrder", request.sortOrder(),
+                "status", request.status()
+            )).update(), "选项不存在");
+        log("系统管理", "编辑选项", "SYSTEM_OPTION", String.valueOf(id));
+    }
+
+    @DeleteMapping("/options/{id}")
+    @Transactional
+    void deleteOption(@PathVariable long id) {
+        requireChanged(jdbc.sql("""
+            DELETE FROM system_option WHERE id=:id
+            """).param("id", id).update(), "选项不存在");
+        log("系统管理", "删除选项", "SYSTEM_OPTION", String.valueOf(id));
+    }
+
     private long count(String sql) {
         return jdbc.sql(sql).query(Long.class).single();
     }
@@ -247,4 +305,9 @@ public class SystemAdminController {
     ) {}
 
     public record ConfigRequest(@NotBlank String configValue, String description, int isPublic) {}
+
+    public record OptionRequest(
+        @NotBlank String optionType, @NotBlank String label, @NotBlank String optionValue,
+        int sortOrder, int status
+    ) {}
 }

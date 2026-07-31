@@ -18,6 +18,7 @@ import {
   Statistic,
   Switch,
   Table,
+  Tabs,
   Tag,
   Typography,
   Upload,
@@ -669,6 +670,9 @@ function BusinessModule({ module }: { module: Module }) {
   );
   const categories = useLoad<Row[]>(() =>
     rootApi("/api/admin/business/categories"),
+  );
+  const logisticsCompanies = useLoad<Row[]>(() =>
+    rootApi("/api/admin/system/options?type=LOGISTICS_COMPANY&enabled=true"),
   );
   const [form] = Form.useForm();
   const [memberForm] = Form.useForm();
@@ -1737,7 +1741,16 @@ function BusinessModule({ module }: { module: Module }) {
             />
           </Form.Item>
           <Form.Item name="logisticsCompany" label="物流公司">
-            <Input placeholder="例如：顺丰速运、京东物流" />
+            <Select
+              allowClear
+              showSearch
+              placeholder="请选择物流公司"
+              optionFilterProp="label"
+              options={(logisticsCompanies.data || []).map((item) => ({
+                value: item.optionValue,
+                label: item.label,
+              }))}
+            />
           </Form.Item>
           <Form.Item name="logisticsNo" label="运单号">
             <Input placeholder="请输入物流运单号" />
@@ -2925,6 +2938,10 @@ function Logs() {
 function Configs() {
   const { message } = AntApp.useApp();
   const result = useLoad<Row[]>(() => api("/configs"));
+  const options = useLoad<Row[]>(() => api("/options?type=LOGISTICS_COMPANY"));
+  const [optionForm] = Form.useForm();
+  const [optionOpen, setOptionOpen] = useState(false);
+  const [editingOption, setEditingOption] = useState<Row>();
   const [saving, setSaving] = useState<number>();
   const save = async (row: Row, value: any) => {
     setSaving(row.id);
@@ -2955,21 +2972,196 @@ function Configs() {
       ),
     [result.data],
   );
+  const showOption = (row?: Row) => {
+    setEditingOption(row);
+    optionForm.resetFields();
+    optionForm.setFieldsValue(
+      row || {
+        optionType: "LOGISTICS_COMPANY",
+        sortOrder: (options.data?.length || 0) * 10 + 10,
+        status: 1,
+      },
+    );
+    setOptionOpen(true);
+  };
+  const saveOption = async () => {
+    try {
+      const values = await optionForm.validateFields();
+      await api(editingOption ? `/options/${editingOption.id}` : "/options", {
+        method: editingOption ? "PUT" : "POST",
+        body: JSON.stringify(values),
+      });
+      message.success(editingOption ? "物流公司已更新" : "物流公司已添加");
+      setOptionOpen(false);
+      void options.refresh();
+    } catch (error) {
+      if (error instanceof Error) message.error(error.message);
+    }
+  };
+  const updateOptionStatus = async (row: Row, checked: boolean) => {
+    try {
+      await api(`/options/${row.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          optionType: row.optionType,
+          label: row.label,
+          optionValue: row.optionValue,
+          sortOrder: row.sortOrder,
+          status: checked ? 1 : 0,
+        }),
+      });
+      message.success(checked ? "物流公司已启用" : "物流公司已停用");
+      void options.refresh();
+    } catch (error) {
+      message.error((error as Error).message);
+    }
+  };
+  const removeOption = (row: Row) =>
+    Modal.confirm({
+      title: "删除物流公司",
+      content: `确认删除“${row.label}”吗？历史订单中的物流信息不会受影响。`,
+      okText: "删除",
+      okButtonProps: { danger: true },
+      cancelText: "取消",
+      onOk: async () => {
+        await api(`/options/${row.id}`, { method: "DELETE" });
+        message.success("物流公司已删除");
+        void options.refresh();
+      },
+    });
   return (
-    <div className="config-layout">
-      {groups.map(([group, items]) => (
-        <Card key={group} title={group}>
-          {items.map((row) => (
-            <ConfigRow
-              key={row.id}
-              row={row}
-              saving={saving === row.id}
-              save={(value) => save(row, value)}
+    <>
+      <Card className="config-tabs">
+        <Tabs
+          items={[
+            ...groups.map(([group, items]) => ({
+              key: group,
+              label: group,
+              children: (
+                <div className="config-tab-panel">
+                  {items.map((row) => (
+                    <ConfigRow
+                      key={row.id}
+                      row={row}
+                      saving={saving === row.id}
+                      save={(value) => save(row, value)}
+                    />
+                  ))}
+                </div>
+              ),
+            })),
+            {
+              key: "option-management",
+              label: "选项管理",
+              children: (
+                <Card
+                  title="物流公司选项"
+                  extra={
+                    <Button type="primary" onClick={() => showOption()}>
+                      新增物流公司
+                    </Button>
+                  }
+                >
+                  <Table
+                    rowKey="id"
+                    loading={options.loading}
+                    dataSource={options.data || []}
+                    pagination={false}
+                    columns={[
+                      { title: "物流公司", dataIndex: "label" },
+                      { title: "选项值", dataIndex: "optionValue" },
+                      { title: "排序", dataIndex: "sortOrder", width: 100 },
+                      {
+                        title: "状态",
+                        width: 110,
+                        render: (_: unknown, row: Row) => (
+                          <Switch
+                            checked={Number(row.status) === 1}
+                            checkedChildren="启用"
+                            unCheckedChildren="停用"
+                            onChange={(checked) =>
+                              void updateOptionStatus(row, checked)
+                            }
+                          />
+                        ),
+                      },
+                      {
+                        title: "更新时间",
+                        width: 180,
+                        render: (_: unknown, row: Row) =>
+                          dateTime(row.updatedAt),
+                      },
+                      {
+                        title: "操作",
+                        width: 150,
+                        render: (_: unknown, row: Row) => (
+                          <Space>
+                            <Button type="link" onClick={() => showOption(row)}>
+                              编辑
+                            </Button>
+                            <Button
+                              type="link"
+                              danger
+                              onClick={() => removeOption(row)}
+                            >
+                              删除
+                            </Button>
+                          </Space>
+                        ),
+                      },
+                    ]}
+                  />
+                </Card>
+              ),
+            },
+          ]}
+        />
+      </Card>
+      <Modal
+        open={optionOpen}
+        title={editingOption ? "编辑物流公司" : "新增物流公司"}
+        okText="保存"
+        cancelText="取消"
+        onOk={() => void saveOption()}
+        onCancel={() => setOptionOpen(false)}
+      >
+        <Form form={optionForm} layout="vertical">
+          <Form.Item name="optionType" hidden>
+            <Input />
+          </Form.Item>
+          <Form.Item
+            name="label"
+            label="物流公司名称"
+            rules={[{ required: true, message: "请输入物流公司名称" }]}
+          >
+            <Input placeholder="例如：顺丰速运" maxLength={120} />
+          </Form.Item>
+          <Form.Item
+            name="optionValue"
+            label="选项值"
+            tooltip="订单中实际保存的物流公司名称"
+            rules={[{ required: true, message: "请输入选项值" }]}
+          >
+            <Input placeholder="例如：顺丰速运" maxLength={160} />
+          </Form.Item>
+          <Form.Item
+            name="sortOrder"
+            label="排序"
+            rules={[{ required: true, message: "请输入排序值" }]}
+          >
+            <InputNumber min={0} precision={0} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name="status" label="状态">
+            <Select
+              options={[
+                { value: 1, label: "启用" },
+                { value: 0, label: "停用" },
+              ]}
             />
-          ))}
-        </Card>
-      ))}
-    </div>
+          </Form.Item>
+        </Form>
+      </Modal>
+    </>
   );
 }
 
