@@ -638,6 +638,17 @@ function ProductDetail({
         ? [item.slice(0, separator), item.slice(separator + 1)]
         : ["规格", item];
     });
+  const galleryImages = Array.from(
+    new Set(
+      [product.mainImage, ...String(product.gallery || "").split("\n")]
+        .map((url) => String(url || "").trim())
+        .filter(Boolean),
+    ),
+  );
+  const [activeImage, setActiveImage] = useState(galleryImages[0] || "");
+  useEffect(() => {
+    setActiveImage(galleryImages[0] || "");
+  }, [product.skuId, product.mainImage, product.gallery]);
   return (
     <div className="mobile-app detail-page">
       <header className="sub-header">
@@ -646,9 +657,30 @@ function ProductDetail({
         <button onClick={() => void share()}>分享</button>
       </header>
       <div className="detail-image">
-        <i>💻</i>
-        <span>1 / 4</span>
+        {activeImage ? (
+          <img src={activeImage} alt={product.title} />
+        ) : (
+          <i>暂无商品图片</i>
+        )}
+        <span>
+          {Math.max(1, galleryImages.indexOf(activeImage) + 1)} /{" "}
+          {Math.max(1, galleryImages.length)}
+        </span>
       </div>
+      {galleryImages.length > 1 && (
+        <nav className="mobile-gallery-thumbs">
+          {galleryImages.map((url, index) => (
+            <button
+              key={url}
+              className={activeImage === url ? "active" : ""}
+              onClick={() => setActiveImage(url)}
+              aria-label={`查看商品图片${index + 1}`}
+            >
+              <img src={url} alt={`${product.title} 图片${index + 1}`} />
+            </button>
+          ))}
+        </nav>
+      )}
       <article className="detail-info">
         <div>
           <strong>

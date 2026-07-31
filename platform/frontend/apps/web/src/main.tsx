@@ -1064,6 +1064,17 @@ function Detail({
   const [detailTab, setDetailTab] = useState<
     "detail" | "specification" | "service"
   >("detail");
+  const galleryImages = Array.from(
+    new Set(
+      [product.mainImage, ...String(product.gallery || "").split("\n")]
+        .map((url) => String(url || "").trim())
+        .filter(Boolean),
+    ),
+  );
+  const [activeImage, setActiveImage] = useState(galleryImages[0] || "");
+  useEffect(() => {
+    setActiveImage(galleryImages[0] || "");
+  }, [product.skuId, product.mainImage, product.gallery]);
   const specifications = String(product.attributes || "")
     .split(/[；;\n]/)
     .map((item) => item.trim())
@@ -1082,14 +1093,27 @@ function Detail({
       <section className="detail">
         <div className="detail-gallery">
           <div>
-            <i>💻</i>
+            {activeImage ? (
+              <img src={activeImage} alt={product.title} />
+            ) : (
+              <i>暂无商品图片</i>
+            )}
             <span>协议价商品</span>
           </div>
-          <nav>
-            {[1, 2, 3, 4].map((x) => (
-              <button key={x}>商品图 {x}</button>
-            ))}
-          </nav>
+          {galleryImages.length > 0 && (
+            <nav>
+              {galleryImages.map((url, index) => (
+                <button
+                  key={url}
+                  className={activeImage === url ? "active" : ""}
+                  onClick={() => setActiveImage(url)}
+                  aria-label={`查看商品图片${index + 1}`}
+                >
+                  <img src={url} alt={`${product.title} 图片${index + 1}`} />
+                </button>
+              ))}
+            </nav>
+          )}
         </div>
         <div className="detail-main">
           <span className="self">自营商品</span>

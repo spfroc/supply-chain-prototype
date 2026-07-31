@@ -205,7 +205,9 @@ function RichTextEditor({
   value?: string;
   onChange?: (value: string) => void;
 }) {
+  const { message } = AntApp.useApp();
   const editor = useRef<HTMLDivElement>(null);
+  const localImageInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
     if (editor.current && editor.current.innerHTML !== (value || ""))
       editor.current.innerHTML = value || "";
@@ -214,6 +216,42 @@ function RichTextEditor({
     editor.current?.focus();
     document.execCommand(name, false, commandValue);
     onChange?.(editor.current?.innerHTML || "");
+  };
+  const validNetworkUrl = (value: string) => {
+    try {
+      const url = new URL(value);
+      return ["http:", "https:"].includes(url.protocol);
+    } catch {
+      return false;
+    }
+  };
+  const insertElement = (element: HTMLElement) => {
+    command("insertHTML", element.outerHTML);
+  };
+  const uploadLocalImage = async (file?: File) => {
+    if (!file) return;
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("kind", "rich");
+      const response = await fetch("/api/admin/business/uploads/images", {
+        method: "POST",
+        headers: { Authorization: `Basic ${adminCredential()}` },
+        body,
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.detail || "图片上传失败");
+      const image = document.createElement("img");
+      image.src = result.url;
+      image.alt = file.name.replace(/\.[^.]+$/, "");
+      image.loading = "lazy";
+      insertElement(image);
+      message.success("图片已插入详情");
+    } catch (error) {
+      message.error((error as Error).message);
+    } finally {
+      if (localImageInput.current) localImageInput.current.value = "";
+    }
   };
   return (
     <div className="rich-editor">
@@ -230,6 +268,45 @@ function RichTextEditor({
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command("insertUnorderedList")}>
           列表
         </button>
+        <button type="button" onClick={() => localImageInput.current?.click()}>
+          本地图片
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            const url = window.prompt("请输入网络图片地址（http/https）")?.trim();
+            if (!url) return;
+            if (!validNetworkUrl(url)) {
+              window.alert("请输入有效的网络图片地址");
+              return;
+            }
+            const image = document.createElement("img");
+            image.src = url;
+            image.alt = "商品详情图片";
+            image.loading = "lazy";
+            insertElement(image);
+          }}
+        >
+          网络图片
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            const url = window.prompt("请输入网络视频直链（MP4/WebM 等）")?.trim();
+            if (!url) return;
+            if (!validNetworkUrl(url)) {
+              window.alert("请输入有效的网络视频地址");
+              return;
+            }
+            const video = document.createElement("video");
+            video.src = url;
+            video.controls = true;
+            video.preload = "metadata";
+            insertElement(video);
+          }}
+        >
+          网络视频
+        </button>
         <button
           type="button"
           onMouseDown={(event) => event.preventDefault()}
@@ -244,6 +321,13 @@ function RichTextEditor({
           清除格式
         </button>
       </div>
+      <input
+        ref={localImageInput}
+        className="rich-media-input"
+        type="file"
+        accept=".jpg,.jpeg,.png"
+        onChange={(event) => void uploadLocalImage(event.target.files?.[0])}
+      />
       <div
         ref={editor}
         className="rich-content"

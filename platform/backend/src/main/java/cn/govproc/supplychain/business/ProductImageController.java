@@ -43,6 +43,7 @@ public class ProductImageController {
             case "brand" -> new ImageProfile(300, 300, 2000, 2000, 1.0, 2);
             case "banner" -> new ImageProfile(1200, 400, 3840, 1280, 3.0, 5);
             case "portal" -> new ImageProfile(800, 450, 3840, 2160, 16.0 / 9.0, 5);
+            case "rich" -> new ImageProfile(300, 200, 3840, 3840, 0, 8);
             default -> throw new IllegalArgumentException("未知图片用途");
         };
         if (file.getSize() > profile.maxMegabytes() * 1024L * 1024L)
@@ -56,7 +57,7 @@ public class ProductImageController {
             || width > profile.maxWidth() || height > profile.maxHeight())
             throw new IllegalArgumentException("图片尺寸不符合当前用途要求");
         double ratio = (double) width / height;
-        if (Math.abs(ratio - profile.ratio()) / profile.ratio() > 0.03)
+        if (profile.ratio() > 0 && Math.abs(ratio - profile.ratio()) / profile.ratio() > 0.03)
             throw new IllegalArgumentException("图片宽高比例不符合当前用途要求");
 
         String extension = "image/png".equals(file.getContentType()) ? ".png" : ".jpg";
