@@ -34,6 +34,13 @@ const dateTime = (value: string) =>
         hour12: false,
       }).format(new Date(value.replace(" ", "T")))
     : "—";
+const createIdempotencyKey = () => {
+  if (typeof globalThis.crypto?.randomUUID === "function")
+    return globalThis.crypto.randomUUID();
+  const random = new Uint32Array(4);
+  globalThis.crypto?.getRandomValues?.(random);
+  return `order-${Date.now()}-${Array.from(random).join("-") || Math.random().toString(36).slice(2)}`;
+};
 const orderStatus = ["待付款", "待发货", "运输中", "已完成", "已取消"];
 const routeViews: View[] = [
   "home",
@@ -1493,7 +1500,7 @@ function Checkout({
     try {
       const result = await api<Row>("/api/client/orders", {
         method: "POST",
-        body: JSON.stringify({ idempotencyKey: crypto.randomUUID() }),
+        body: JSON.stringify({ idempotencyKey: createIdempotencyKey() }),
       });
       await reload();
       notify(`订单 ${result.orderNo} 提交成功`);
