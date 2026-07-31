@@ -903,6 +903,7 @@ function Checkout({
     0,
   );
   const [addresses, setAddresses] = useState<Row[]>([]);
+  const [allocations, setAllocations] = useState<Record<string, Row[]>>({});
   const [submitting, setSubmitting] = useState(false);
   useEffect(() => {
     void api<Row[]>("/api/client/addresses")
@@ -910,16 +911,89 @@ function Checkout({
       .catch((error) => Toast.show((error as Error).message));
   }, []);
   const currentAddress = addresses[0];
+  useEffect(() => {
+    if (!addresses.length) return;
+    setAllocations((current) => {
+      const next = { ...current };
+      selected.forEach((row) => {
+        const key = String(row.skuId);
+        if (!next[key]?.length)
+          next[key] = [
+            { addressId: addresses[0].id, quantity: Number(row.quantity) },
+          ];
+      });
+      return next;
+    });
+  }, [addresses, rows]);
+  const changeAllocation = (skuId: number, index: number, changes: Row) =>
+    setAllocations((current) => ({
+      ...current,
+      [skuId]: current[String(skuId)].map((item, itemIndex) =>
+        itemIndex === index ? { ...item, ...changes } : item,
+      ),
+    }));
+  const addAllocation = (row: Row) =>
+    setAllocations((current) => {
+      const key = String(row.skuId);
+      const items = [...(current[key] || [])];
+      const used = new Set(items.map((item) => Number(item.addressId)));
+      const nextAddress = addresses.find(
+        (item) => !used.has(Number(item.id)),
+      );
+      const donorIndex = items.findIndex((item) => Number(item.quantity) > 1);
+      if (!nextAddress || donorIndex < 0) return current;
+      items[donorIndex] = {
+        ...items[donorIndex],
+        quantity: Number(items[donorIndex].quantity) - 1,
+      };
+      items.push({ addressId: nextAddress.id, quantity: 1 });
+      return { ...current, [key]: items };
+    });
+  const removeAllocation = (row: Row, index: number) =>
+    setAllocations((current) => {
+      const key = String(row.skuId);
+      const items = [...current[key]];
+      const [removed] = items.splice(index, 1);
+      items[0] = {
+        ...items[0],
+        quantity: Number(items[0].quantity) + Number(removed.quantity),
+      };
+      return { ...current, [key]: items };
+    });
   const submit = async () => {
     if (!currentAddress) {
       Toast.show("请先在用户中心添加收货地址");
+      return;
+    }
+    const invalid = selected.find((row) => {
+      const items = allocations[String(row.skuId)] || [];
+      return (
+        !items.length ||
+        new Set(items.map((item) => Number(item.addressId))).size !==
+          items.length ||
+        items.some((item) => Number(item.quantity) < 1) ||
+        items.reduce((sum, item) => sum + Number(item.quantity), 0) !==
+          Number(row.quantity)
+      );
+    });
+    if (invalid) {
+      Toast.show(`${invalid.title}的配送数量必须等于购买数量，且地址不能重复`);
       return;
     }
     setSubmitting(true);
     try {
       const result = await api<Row>("/api/client/orders", {
         method: "POST",
-        body: JSON.stringify({ idempotencyKey: createIdempotencyKey() }),
+        body: JSON.stringify({
+          idempotencyKey: createIdempotencyKey(),
+          allocations: selected.flatMap((row) =>
+            (allocations[String(row.skuId)] || []).map((item) => ({
+              skuId: row.skuId,
+              addressId: Number(item.addressId),
+              quantity: Number(item.quantity),
+            })),
+          ),
+        }),
       });
       await reload();
       await Dialog.alert({
@@ -965,10 +1039,62 @@ function Checkout({
       <section className="mobile-checkout-card">
         <h2>商品清单</h2>
         {selected.map((row) => (
-          <article className="mobile-checkout-product" key={row.id}>
-            {row.mainImage ? <img src={row.mainImage} alt={row.title} /> : <i>📦</i>}
-            <span><strong>{row.title}</strong><small>{row.skuCode}　×{row.quantity}</small><b>{money(row.salePrice)}</b></span>
-          </article>
+          <div className="mobile-checkout-product-block" key={row.id}>
+            <article className="mobile-checkout-product">
+              {row.mainImage ? <img src={row.mainImage} alt={row.title} /> : <i>📦</i>}
+              <span><strong>{row.title}</strong><small>{row.skuCode}　×{row.quantity}</small><b>{money(row.salePrice)}</b></span>
+            </article>
+            <div className="mobile-delivery-split">
+              <header>
+                <strong>配送地址分配</strong>
+                <button
+                  disabled={
+                    addresses.length < 2 ||
+                    (allocations[String(row.skuId)] || []).length >=
+                      Math.min(addresses.length, Number(row.quantity))
+                  }
+                  onClick={() => addAllocation(row)}
+                >
+                  ＋ 添加地址
+                </button>
+              </header>
+              {(allocations[String(row.skuId)] || []).map((item, index) => (
+                <div className="mobile-delivery-line" key={`${row.skuId}-${index}`}>
+                  <select
+                    value={item.addressId}
+                    onChange={(event) =>
+                      changeAllocation(row.skuId, index, {
+                        addressId: Number(event.target.value),
+                      })
+                    }
+                  >
+                    {addresses.map((addressRow) => (
+                      <option key={addressRow.id} value={addressRow.id}>
+                        {addressRow.contactName} · {addressRow.city}{addressRow.district}{addressRow.detail}
+                      </option>
+                    ))}
+                  </select>
+                  <label>
+                    数量
+                    <input
+                      type="number"
+                      min="1"
+                      max={row.quantity}
+                      value={item.quantity}
+                      onChange={(event) =>
+                        changeAllocation(row.skuId, index, {
+                          quantity: Math.max(1, Number(event.target.value)),
+                        })
+                      }
+                    />
+                  </label>
+                  {(allocations[String(row.skuId)] || []).length > 1 && (
+                    <button onClick={() => removeAllocation(row, index)}>删除</button>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
         ))}
       </section>
       <section className="mobile-checkout-card mobile-payment">
@@ -1016,7 +1142,7 @@ function Orders() {
         </section>
         <h3>商品明细</h3>
         {detail.items.map((x: Row) => (
-          <article className="h5-manage-row" key={x.skuCode}>
+          <article className="h5-manage-row" key={`${x.skuCode}-${x.subOrderNo}`}>
             {x.mainImage ? (
               <img className="h5-order-cover" src={x.mainImage} alt={x.title} />
             ) : (
@@ -1025,7 +1151,7 @@ function Orders() {
             <div>
               <strong>{x.title}</strong>
               <span>
-                {x.skuCode} · ×{x.quantity}
+                {x.skuCode} · {x.subOrderNo} · ×{x.quantity}
               </span>
             </div>
             <b>{money(x.totalPrice)}</b>

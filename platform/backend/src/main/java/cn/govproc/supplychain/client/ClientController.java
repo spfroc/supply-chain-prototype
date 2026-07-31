@@ -9,6 +9,8 @@ import jakarta.validation.constraints.NotBlank;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -264,9 +266,10 @@ public class ClientController {
             """).params(Map.of("id",id,"userId",userId())).query().listOfRows();
         if(orders.isEmpty())throw new IllegalArgumentException("订单不存在");
         var items=jdbc.sql("""
-            SELECT p.title,p.main_image AS mainImage,s.sku_code AS skuCode,
+            SELECT p.title,p.main_image AS mainImage,s.sku_code AS skuCode,os.sub_order_no AS subOrderNo,
               oi.quantity,oi.unit_price AS unitPrice,oi.total_price AS totalPrice
             FROM order_item oi JOIN product_sku s ON s.id=oi.sku_id JOIN product_spu p ON p.id=s.spu_id
+            JOIN order_sub os ON os.id=oi.order_sub_id
             WHERE oi.order_main_id=:id
             """).param("id",id).query().listOfRows();
         var deliveries=jdbc.sql("""
@@ -311,10 +314,51 @@ public class ClientController {
         var addresses = jdbc.sql("""
             SELECT id,contact_name AS contactName,contact_phone AS contactPhone,
               CONCAT(province,city,district,detail) AS fullAddress
-            FROM address WHERE user_id=:userId AND deleted_at IS NULL ORDER BY is_default DESC,id LIMIT 1
+            FROM address WHERE user_id=:userId AND deleted_at IS NULL ORDER BY is_default DESC,id
             """).param("userId", userId()).query().listOfRows();
         if (addresses.isEmpty()) throw new IllegalArgumentException("请先维护收货地址");
-        Map<String, Object> address = addresses.getFirst();
+        Map<Long, Map<String, Object>> addressById = new HashMap<>();
+        for (var address : addresses) {
+            addressById.put(((Number) address.get("id")).longValue(), address);
+        }
+        Map<Long, Map<String, Object>> lineBySku = new HashMap<>();
+        for (var line : lines) {
+            lineBySku.put(((Number) line.get("skuId")).longValue(), line);
+        }
+        List<DeliveryAllocation> allocations = new ArrayList<>();
+        if (request == null || request.allocations() == null || request.allocations().isEmpty()) {
+            long defaultAddressId = ((Number) addresses.getFirst().get("id")).longValue();
+            for (var line : lines) {
+                allocations.add(new DeliveryAllocation(
+                    ((Number) line.get("skuId")).longValue(),
+                    defaultAddressId,
+                    ((Number) line.get("quantity")).intValue()
+                ));
+            }
+        } else {
+            Map<Long, Integer> allocatedBySku = new HashMap<>();
+            for (var allocation : request.allocations()) {
+                if (allocation == null || allocation.skuId() == null || allocation.addressId() == null
+                    || allocation.quantity() < 1) {
+                    throw new IllegalArgumentException("配送地址和分配数量不能为空");
+                }
+                if (!lineBySku.containsKey(allocation.skuId())) {
+                    throw new IllegalArgumentException("配送商品不在当前结算清单中");
+                }
+                if (!addressById.containsKey(allocation.addressId())) {
+                    throw new IllegalArgumentException("配送地址不存在或不属于当前用户");
+                }
+                allocatedBySku.merge(allocation.skuId(), allocation.quantity(), Integer::sum);
+                allocations.add(allocation);
+            }
+            for (var line : lines) {
+                long skuId = ((Number) line.get("skuId")).longValue();
+                int quantity = ((Number) line.get("quantity")).intValue();
+                if (allocatedBySku.getOrDefault(skuId, 0) != quantity) {
+                    throw new IllegalArgumentException(line.get("title") + "的地址分配数量必须等于购买数量");
+                }
+            }
+        }
         String orderNo = "PO" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
         jdbc.sql("""
             INSERT INTO order_main(order_no,enterprise_id,user_id,agreement_id,item_amount,freight_amount,
@@ -323,18 +367,26 @@ public class ClientController {
             """).params(Map.of("orderNo", orderNo, "enterpriseId", enterpriseId(), "userId", userId(),
                 "agreementId", agreementId, "amount", amount, "priceVersion", UUID.randomUUID().toString(), "key", idempotencyKey)).update();
         long orderId = jdbc.sql("SELECT id FROM order_main WHERE order_no=:orderNo").param("orderNo", orderNo).query(Long.class).single();
-        String subOrderNo = orderNo + "-01";
-        jdbc.sql("""
-            INSERT INTO order_sub(order_main_id,sub_order_no,address_snapshot,status)
-            VALUES(:orderId,:subOrderNo,JSON_OBJECT('contactName',:contactName,'phone',:phone,'address',:address),0)
-            """).params(Map.of("orderId", orderId, "subOrderNo", subOrderNo,
-                "contactName", address.get("contactName"), "phone", address.get("contactPhone"),
-                "address", address.get("fullAddress"))).update();
-        long subOrderId = jdbc.sql("SELECT id FROM order_sub WHERE sub_order_no=:subOrderNo")
-            .param("subOrderNo", subOrderNo).query(Long.class).single();
-        for (var line : lines) {
-            long skuId = ((Number) line.get("skuId")).longValue();
-            int quantity = ((Number) line.get("quantity")).intValue();
+        Map<Long, Long> subOrderByAddress = new HashMap<>();
+        for (var allocation : allocations) {
+            long addressId = allocation.addressId();
+            Long subOrderId = subOrderByAddress.get(addressId);
+            if (subOrderId == null) {
+                Map<String, Object> address = addressById.get(addressId);
+                String subOrderNo = orderNo + "-" + String.format("%02d", subOrderByAddress.size() + 1);
+                jdbc.sql("""
+                    INSERT INTO order_sub(order_main_id,sub_order_no,address_snapshot,status)
+                    VALUES(:orderId,:subOrderNo,JSON_OBJECT('addressId',:addressId,'contactName',:contactName,'phone',:phone,'address',:address),0)
+                    """).params(Map.of("orderId", orderId, "subOrderNo", subOrderNo, "addressId", addressId,
+                        "contactName", address.get("contactName"), "phone", address.get("contactPhone"),
+                        "address", address.get("fullAddress"))).update();
+                subOrderId = jdbc.sql("SELECT id FROM order_sub WHERE sub_order_no=:subOrderNo")
+                    .param("subOrderNo", subOrderNo).query(Long.class).single();
+                subOrderByAddress.put(addressId, subOrderId);
+            }
+            Map<String, Object> line = lineBySku.get(allocation.skuId());
+            long skuId = allocation.skuId();
+            int quantity = allocation.quantity();
             BigDecimal unitPrice = (BigDecimal) line.get("unitPrice");
             jdbc.sql("""
                 INSERT INTO order_item(order_main_id,order_sub_id,sku_id,quantity,unit_price,total_price,snapshot_json)
@@ -359,7 +411,8 @@ public class ClientController {
 
     public record CartRequest(@NotNull Long skuId, @Min(1) @Max(9999) int quantity) {}
     public record CartUpdateRequest(@Min(1) @Max(9999) int quantity, int selected) {}
-    public record CheckoutRequest(String idempotencyKey) {}
+    public record CheckoutRequest(String idempotencyKey,List<DeliveryAllocation> allocations) {}
+    public record DeliveryAllocation(Long skuId,Long addressId,int quantity) {}
     public record AddressRequest(@NotBlank String contactName,@NotBlank String contactPhone,
         @NotBlank String province,@NotBlank String city,@NotBlank String district,@NotBlank String detail,int isDefault) {}
     public record MemberRequest(@NotBlank String username,@NotBlank String realName,@NotBlank String phone,
