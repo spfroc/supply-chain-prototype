@@ -243,8 +243,12 @@ public class ClientController {
               o.payable_amount AS payableAmount, o.payment_status AS paymentStatus, o.order_status AS orderStatus,
               DATE_FORMAT(o.payment_due_at, '%Y-%m-%d %H:%i:%s') AS paymentDueAt,
               DATE_FORMAT(o.created_at, '%Y-%m-%d %H:%i:%s') AS createdAt,
-              COUNT(DISTINCT oi.id) AS itemKinds, COALESCE(SUM(oi.quantity),0) AS itemCount
-            FROM order_main o LEFT JOIN order_item oi ON oi.order_main_id=o.id
+              COUNT(DISTINCT oi.id) AS itemKinds, COALESCE(SUM(oi.quantity),0) AS itemCount,
+              MAX(p.main_image) AS mainImage
+            FROM order_main o
+            LEFT JOIN order_item oi ON oi.order_main_id=o.id
+            LEFT JOIN product_sku s ON s.id=oi.sku_id
+            LEFT JOIN product_spu p ON p.id=s.spu_id
             WHERE o.user_id=:userId GROUP BY o.id ORDER BY o.id DESC
             """).param("userId", userId()).query().listOfRows();
     }
@@ -260,7 +264,8 @@ public class ClientController {
             """).params(Map.of("id",id,"userId",userId())).query().listOfRows();
         if(orders.isEmpty())throw new IllegalArgumentException("订单不存在");
         var items=jdbc.sql("""
-            SELECT p.title,s.sku_code AS skuCode,oi.quantity,oi.unit_price AS unitPrice,oi.total_price AS totalPrice
+            SELECT p.title,p.main_image AS mainImage,s.sku_code AS skuCode,
+              oi.quantity,oi.unit_price AS unitPrice,oi.total_price AS totalPrice
             FROM order_item oi JOIN product_sku s ON s.id=oi.sku_id JOIN product_spu p ON p.id=s.spu_id
             WHERE oi.order_main_id=:id
             """).param("id",id).query().listOfRows();

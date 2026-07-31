@@ -5,7 +5,7 @@ import "./style.css";
 import "./manage.css";
 import "./auth.css";
 import "./platform-tags.css";
-type Tab = "home" | "category" | "cart" | "orders" | "mine";
+type Tab = "home" | "category" | "cart" | "checkout" | "orders" | "mine";
 type Row = Record<string, any>;
 const money = (v: any) =>
   `¥${Number(v || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -101,7 +101,7 @@ function App() {
         body: JSON.stringify({ skuId: p.skuId, quantity: 1 }),
       });
       await loadCart();
-      Toast.show({ icon: "success", content: "已加入采购车" });
+      Toast.show({ icon: "success", content: "已加入购物车" });
     } catch (e) {
       Toast.show((e as Error).message);
     }
@@ -113,6 +113,26 @@ function App() {
     }
     await addToCart(p);
   };
+  const buyNow = (product: Row) =>
+    requireAuth(async () => {
+      await Promise.all(
+        cart
+          .filter(
+            (row) =>
+              Number(row.selected) === 1 &&
+              Number(row.skuId) !== Number(product.skuId),
+          )
+          .map((row) =>
+            api(`/api/client/cart/${row.id}`, {
+              method: "PUT",
+              body: JSON.stringify({ quantity: row.quantity, selected: 0 }),
+            }),
+          ),
+      );
+      await addToCart(product);
+      setDetail(undefined);
+      setTab("checkout");
+    });
   const openProtectedTab = (target: Tab) =>
     requireAuth(() => setTab(target));
   const logout = async () => {
@@ -130,6 +150,7 @@ function App() {
           product={detail}
           back={() => setDetail(undefined)}
           add={add}
+          buyNow={buyNow}
         />
         {authOpen && !current && (
           <div className="m-auth-modal">
@@ -179,7 +200,15 @@ function App() {
           />
         )}
         {tab === "cart" && (
-          <Cart rows={cart} reload={loadCart} orders={() => setTab("orders")} />
+          <Cart rows={cart} reload={loadCart} checkout={() => setTab("checkout")} />
+        )}
+        {tab === "checkout" && (
+          <Checkout
+            rows={cart}
+            reload={loadCart}
+            back={() => setTab("cart")}
+            orders={() => setTab("orders")}
+          />
         )}
         {tab === "orders" && <Orders />}
         {tab === "mine" && (
@@ -194,7 +223,7 @@ function App() {
         {[
           ["home", "⌂", "首页"],
           ["category", "▦", "分类"],
-          ["cart", "▱", "采购车"],
+          ["cart", "▱", "购物车"],
           ["orders", "单", "订单"],
           ["mine", "○", "我的"],
         ].map((x) => (
@@ -301,7 +330,7 @@ function MobileAuth({
         <h1>{mode === "login" ? "欢迎登录" : "注册采购员账号"}</h1>
         <p>
           {mode === "login"
-            ? "登录后查看企业协议、订单和采购车"
+            ? "登录后查看企业协议、订单和购物车"
             : "请输入企业全称，注册后自动加入企业"}
         </p>
         {mode === "register" && (
@@ -596,10 +625,12 @@ function ProductDetail({
   product,
   back,
   add,
+  buyNow,
 }: {
   product: Row;
   back: () => void;
   add: (r: Row) => void;
+  buyNow: (r: Row) => void;
 }) {
   const favoriteKey = `favorite-${product.skuId}`;
   const [favorite, setFavorite] = useState(
@@ -741,8 +772,8 @@ function ProductDetail({
       </article>
       <footer className="buybar">
         <button onClick={toggleFavorite}>{favorite ? "已收藏" : "收藏"}</button>
-        <button onClick={() => void add(product)}>加入采购车</button>
-        <button onClick={() => void add(product)}>立即采购</button>
+        <button onClick={() => void add(product)}>加入购物车</button>
+        <button onClick={() => void buyNow(product)}>立即采购</button>
       </footer>
     </div>
   );
@@ -750,13 +781,12 @@ function ProductDetail({
 function Cart({
   rows,
   reload,
-  orders,
+  checkout,
 }: {
   rows: Row[];
   reload: () => Promise<void>;
-  orders: () => void;
+  checkout: () => void;
 }) {
-  const [submitting, setSubmitting] = useState(false);
   const selected = rows.filter((r) => Number(r.selected) === 1);
   const total = selected.reduce(
     (n, r) => n + Number(r.salePrice) * r.quantity,
@@ -783,37 +813,10 @@ function Cart({
       await reload();
     }
   };
-  const checkout = async () => {
-    setSubmitting(true);
-    try {
-      const result = await api<Row>("/api/client/orders", {
-        method: "POST",
-        body: JSON.stringify({ idempotencyKey: crypto.randomUUID() }),
-      });
-      await reload();
-      await Dialog.alert({
-        title: "订单提交成功",
-        content: (
-          <div className="success-dialog">
-            <i>✓</i>
-            <p>订单号：{result.orderNo}</p>
-            <strong>应付 {money(result.payableAmount)}</strong>
-            <small>请按照订单说明完成线下银行转账</small>
-          </div>
-        ),
-        confirmText: "查看订单",
-      });
-      orders();
-    } catch (e) {
-      Toast.show((e as Error).message);
-    } finally {
-      setSubmitting(false);
-    }
-  };
   return (
     <div className="subpage cart">
       <header>
-        <h1>采购车</h1>
+        <h1>购物车</h1>
         <button>管理</button>
       </header>
       <div className="agreement-tip">✓ 当前商品均已匹配企业协议最优价格</div>
@@ -855,7 +858,7 @@ function Cart({
       {!rows.length && (
         <div className="m-empty">
           <i>🛒</i>
-          <h2>采购车为空</h2>
+          <h2>购物车为空</h2>
           <p>选择协议商品后再来结算</p>
         </div>
       )}
@@ -866,15 +869,115 @@ function Cart({
           <small>已选择 {selected.length} 种商品</small>
         </div>
         <button
-          disabled={!selected.length || submitting}
-          onClick={() => void checkout()}
+          disabled={!selected.length}
+          onClick={checkout}
         >
-          {submitting ? "提交中…" : `结算 (${selected.length})`}
+          {`结算 (${selected.length})`}
         </button>
       </footer>
     </div>
   );
 }
+
+function Checkout({
+  rows,
+  reload,
+  back,
+  orders,
+}: {
+  rows: Row[];
+  reload: () => Promise<void>;
+  back: () => void;
+  orders: () => void;
+}) {
+  const selected = rows.filter((row) => Number(row.selected) === 1);
+  const total = selected.reduce(
+    (sum, row) => sum + Number(row.salePrice) * Number(row.quantity),
+    0,
+  );
+  const [addresses, setAddresses] = useState<Row[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    void api<Row[]>("/api/client/addresses")
+      .then(setAddresses)
+      .catch((error) => Toast.show((error as Error).message));
+  }, []);
+  const currentAddress = addresses[0];
+  const submit = async () => {
+    if (!currentAddress) {
+      Toast.show("请先在用户中心添加收货地址");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const result = await api<Row>("/api/client/orders", {
+        method: "POST",
+        body: JSON.stringify({ idempotencyKey: crypto.randomUUID() }),
+      });
+      await reload();
+      await Dialog.alert({
+        title: "订单提交成功",
+        content: (
+          <div className="success-dialog">
+            <i>✓</i>
+            <p>订单号：{result.orderNo}</p>
+            <strong>应付 {money(result.payableAmount)}</strong>
+            <small>请按照订单说明完成线下银行转账</small>
+          </div>
+        ),
+        confirmText: "查看订单",
+      });
+      orders();
+    } catch (error) {
+      Toast.show((error as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  if (!selected.length)
+    return (
+      <div className="subpage">
+        <header><button onClick={back}>‹</button><h1>确认订单</h1><span /></header>
+        <div className="m-empty"><h2>没有待结算商品</h2><button onClick={back}>返回购物车</button></div>
+      </div>
+    );
+  return (
+    <div className="subpage mobile-checkout">
+      <header><button onClick={back}>‹</button><h1>确认订单</h1><span /></header>
+      <section className="mobile-checkout-card">
+        <h2>收货信息</h2>
+        {currentAddress ? (
+          <div className="mobile-checkout-address">
+            <strong>{currentAddress.contactName}　{currentAddress.contactPhone}</strong>
+            <span>{currentAddress.province}{currentAddress.city}{currentAddress.district}{currentAddress.detail}</span>
+          </div>
+        ) : (
+          <p>尚未设置收货地址，请在“我的—地址管理”中新增地址</p>
+        )}
+      </section>
+      <section className="mobile-checkout-card">
+        <h2>商品清单</h2>
+        {selected.map((row) => (
+          <article className="mobile-checkout-product" key={row.id}>
+            {row.mainImage ? <img src={row.mainImage} alt={row.title} /> : <i>📦</i>}
+            <span><strong>{row.title}</strong><small>{row.skuCode}　×{row.quantity}</small><b>{money(row.salePrice)}</b></span>
+          </article>
+        ))}
+      </section>
+      <section className="mobile-checkout-card mobile-payment">
+        <span><strong>支付方式</strong><small>订单提交后线下完成付款</small></span>
+        <b>银行转账</b>
+      </section>
+      <footer className="mobile-checkout-submit">
+        <span>应付 <strong>{money(total)}</strong></span>
+        <button disabled={!currentAddress || submitting} onClick={() => void submit()}>
+          {submitting ? "提交中…" : "提交订单"}
+        </button>
+      </footer>
+    </div>
+  );
+}
+
 function Orders() {
   const [rows, setRows] = useState<Row[]>([]);
   const [tab, setTab] = useState(-1);
@@ -907,6 +1010,11 @@ function Orders() {
         <h3>商品明细</h3>
         {detail.items.map((x: Row) => (
           <article className="h5-manage-row" key={x.skuCode}>
+            {x.mainImage ? (
+              <img className="h5-order-cover" src={x.mainImage} alt={x.title} />
+            ) : (
+              <i className="h5-order-placeholder">📦</i>
+            )}
             <div>
               <strong>{x.title}</strong>
               <span>
@@ -946,7 +1054,11 @@ function Orders() {
           </header>
           <small>订单号 {r.orderNo}</small>
           <div>
-            <i>📦</i>
+            {r.mainImage ? (
+              <img className="h5-order-cover" src={r.mainImage} alt="订单商品" />
+            ) : (
+              <i>📦</i>
+            )}
             <span>
               <strong>
                 {r.itemKinds} 种商品，共 {r.itemCount} 件

@@ -14,6 +14,7 @@ type View =
   | "content"
   | "detail"
   | "cart"
+  | "checkout"
   | "orders"
   | "profile"
   | "addresses"
@@ -42,6 +43,7 @@ const routeViews: View[] = [
   "platform-products",
   "content",
   "cart",
+  "checkout",
   "orders",
   "profile",
   "addresses",
@@ -50,6 +52,7 @@ const routeViews: View[] = [
 ];
 const protectedViews = new Set<View>([
   "cart",
+  "checkout",
   "orders",
   "profile",
   "addresses",
@@ -229,7 +232,7 @@ function App() {
         body: JSON.stringify({ skuId: product.skuId, quantity }),
       });
       await loadCart();
-      notify("已加入采购车");
+      notify("已加入购物车");
     } catch (e) {
       notify((e as Error).message);
     }
@@ -241,6 +244,25 @@ function App() {
     }
     await addToCart(product, quantity);
   };
+  const buyNow = (product: Row, quantity = 1) =>
+    requireAuth(async () => {
+      await Promise.all(
+        cart
+          .filter(
+            (row) =>
+              Number(row.selected) === 1 &&
+              Number(row.skuId) !== Number(product.skuId),
+          )
+          .map((row) =>
+            api(`/api/client/cart/${row.id}`, {
+              method: "PUT",
+              body: JSON.stringify({ quantity: row.quantity, selected: 0 }),
+            }),
+          ),
+      );
+      await addToCart(product, quantity);
+      applyNavigation("checkout");
+    });
   const goProduct = (product: Row) => {
     setSelected(product);
     setView("detail");
@@ -287,7 +309,7 @@ function App() {
           <button onClick={() => setView("products")}>搜索</button>
         </label>
         <button className="cart-button" onClick={() => navigate("cart")}>
-          采购车 <b>{cart.reduce((n, r) => n + Number(r.quantity), 0)}</b>
+          购物车 <b>{cart.reduce((n, r) => n + Number(r.quantity), 0)}</b>
         </button>
       </header>
       <nav className="nav">
@@ -366,12 +388,27 @@ function App() {
         <PlatformProducts platformId={platformId} open={goProduct} />
       )}
       {displayView === "detail" && selected && (
-        <Detail product={selected} back={() => setView("products")} add={add} />
+        <Detail
+          product={selected}
+          back={() => setView("products")}
+          add={add}
+          buyNow={buyNow}
+        />
       )}
       {displayView === "cart" && (
         <Cart
           rows={cart}
           reload={loadCart}
+          checkout={() => navigate("checkout")}
+          notify={notify}
+        />
+      )}
+      {displayView === "checkout" && (
+        <Checkout
+          rows={cart}
+          reload={loadCart}
+          back={() => navigate("cart")}
+          address={() => navigate("addresses")}
           orders={() => navigate("orders")}
           notify={notify}
         />
@@ -1043,7 +1080,7 @@ function ProductCard({
               void add(product);
             }}
           >
-            加入采购车
+            加入购物车
           </button>
         </div>
       </div>
@@ -1055,10 +1092,12 @@ function Detail({
   product,
   back,
   add,
+  buyNow,
 }: {
   product: Row;
   back: () => void;
   add: (r: Row, n: number) => void;
+  buyNow: (r: Row, n: number) => void;
 }) {
   const [qty, setQty] = useState(1);
   const [detailTab, setDetailTab] = useState<
@@ -1156,8 +1195,8 @@ function Detail({
             </dd>
           </dl>
           <div className="buy">
-            <button onClick={() => void add(product, qty)}>加入采购车</button>
-            <button onClick={() => void add(product, qty)}>立即采购</button>
+            <button onClick={() => void add(product, qty)}>加入购物车</button>
+            <button onClick={() => void buyNow(product, qty)}>立即采购</button>
           </div>
         </div>
       </section>
@@ -1264,15 +1303,14 @@ function Detail({
 function Cart({
   rows,
   reload,
-  orders,
+  checkout,
   notify,
 }: {
   rows: Row[];
   reload: () => Promise<void>;
-  orders: () => void;
+  checkout: () => void;
   notify: (s: string) => void;
 }) {
-  const [submitting, setSubmitting] = useState(false);
   const selected = rows.filter((x) => Number(x.selected) === 1);
   const total = selected.reduce(
     (n, r) => n + Number(r.salePrice) * Number(r.quantity),
@@ -1296,32 +1334,16 @@ function Cart({
     try {
       await api(`/api/client/cart/${row.id}`, { method: "DELETE" });
       await reload();
-      notify("商品已移出采购车");
+      notify("商品已移出购物车");
     } catch (e) {
       notify((e as Error).message);
-    }
-  };
-  const checkout = async () => {
-    setSubmitting(true);
-    try {
-      const result = await api<Row>("/api/client/orders", {
-        method: "POST",
-        body: JSON.stringify({ idempotencyKey: crypto.randomUUID() }),
-      });
-      await reload();
-      notify(`订单 ${result.orderNo} 提交成功`);
-      setTimeout(orders, 900);
-    } catch (e) {
-      notify((e as Error).message);
-    } finally {
-      setSubmitting(false);
     }
   };
   return (
     <main className="page cart-page">
       <div className="step">
         <b>1</b>
-        <strong>确认采购车</strong>
+        <strong>确认购物车</strong>
         <i />
         <b>2</b>
         <span>填写订单</span>
@@ -1330,13 +1352,13 @@ function Cart({
         <span>银行转账</span>
       </div>
       <div className="cart-title">
-        <h1>采购车</h1>
+        <h1>购物车</h1>
         <p>所选商品已匹配企业协议最优价格</p>
       </div>
       {!rows.length ? (
         <div className="empty">
           <i>🛒</i>
-          <h2>采购车还是空的</h2>
+          <h2>购物车还是空的</h2>
           <p>去选择需要采购的商品吧</p>
           <button onClick={() => (location.href = "/web/")}>继续采购</button>
         </div>
@@ -1422,14 +1444,122 @@ function Cart({
               </small>
             </div>
             <button
-              disabled={!selected.length || submitting}
-              onClick={() => void checkout()}
+              disabled={!selected.length}
+              onClick={checkout}
             >
-              {submitting ? "正在提交…" : "提交订单"}
+              提交订单
             </button>
           </div>
         </>
       )}
+    </main>
+  );
+}
+
+function Checkout({
+  rows,
+  reload,
+  back,
+  address,
+  orders,
+  notify,
+}: {
+  rows: Row[];
+  reload: () => Promise<void>;
+  back: () => void;
+  address: () => void;
+  orders: () => void;
+  notify: (s: string) => void;
+}) {
+  const selected = rows.filter((row) => Number(row.selected) === 1);
+  const total = selected.reduce(
+    (sum, row) => sum + Number(row.salePrice) * Number(row.quantity),
+    0,
+  );
+  const [addresses, setAddresses] = useState<Row[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    void api<Row[]>("/api/client/addresses")
+      .then(setAddresses)
+      .catch((error) => notify(error.message));
+  }, []);
+  const currentAddress = addresses[0];
+  const submit = async () => {
+    if (!currentAddress) {
+      notify("请先添加收货地址");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const result = await api<Row>("/api/client/orders", {
+        method: "POST",
+        body: JSON.stringify({ idempotencyKey: crypto.randomUUID() }),
+      });
+      await reload();
+      notify(`订单 ${result.orderNo} 提交成功`);
+      setTimeout(orders, 700);
+    } catch (error) {
+      notify((error as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  if (!selected.length)
+    return (
+      <main className="page">
+        <div className="empty">
+          <h2>没有待结算商品</h2>
+          <button onClick={back}>返回购物车</button>
+        </div>
+      </main>
+    );
+  return (
+    <main className="page checkout-page">
+      <div className="step">
+        <b>1</b><span>确认购物车</span><i />
+        <b>2</b><strong>填写订单</strong><i />
+        <b>3</b><span>银行转账</span>
+      </div>
+      <div className="checkout-heading">
+        <button onClick={back}>‹ 返回购物车</button>
+        <h1>确认订单</h1>
+      </div>
+      <section className="checkout-card">
+        <header>
+          <h2>收货信息</h2>
+          <button onClick={address}>{currentAddress ? "管理地址" : "新增地址"}</button>
+        </header>
+        {currentAddress ? (
+          <div className="checkout-address">
+            <strong>{currentAddress.contactName}　{currentAddress.contactPhone}</strong>
+            <span>{currentAddress.province}{currentAddress.city}{currentAddress.district}{currentAddress.detail}</span>
+            {!!Number(currentAddress.isDefault) && <em>默认地址</em>}
+          </div>
+        ) : (
+          <div className="checkout-empty">尚未设置收货地址，请先新增地址</div>
+        )}
+      </section>
+      <section className="checkout-card">
+        <header><h2>商品清单</h2><span>共 {selected.length} 种商品</span></header>
+        {selected.map((row) => (
+          <article className="checkout-product" key={row.id}>
+            {row.mainImage ? <img src={row.mainImage} alt={row.title} /> : <i>📦</i>}
+            <span><strong>{row.title}</strong><small>{row.skuCode}</small></span>
+            <b>{money(row.salePrice)} × {row.quantity}</b>
+            <em>{money(Number(row.salePrice) * Number(row.quantity))}</em>
+          </article>
+        ))}
+      </section>
+      <section className="checkout-card checkout-payment">
+        <div><h2>支付方式</h2><p>线下银行转账，提交后请按照订单说明完成付款</p></div>
+        <strong>银行转账</strong>
+      </section>
+      <section className="checkout-submit">
+        <span>应付总额 <strong>{money(total)}</strong></span>
+        <button disabled={!currentAddress || submitting} onClick={() => void submit()}>
+          {submitting ? "正在提交…" : "提交订单"}
+        </button>
+      </section>
     </main>
   );
 }
@@ -1491,7 +1621,11 @@ function Orders({ go }: { go: (v: View) => void }) {
               <em>{orderStatus[row.orderStatus] || "处理中"}</em>
             </header>
             <div>
-              <i>📦</i>
+              {row.mainImage ? (
+                <img className="order-cover" src={row.mainImage} alt="订单商品" />
+              ) : (
+                <i>📦</i>
+              )}
               <span>
                 <strong>
                   {row.itemKinds} 种商品，共 {row.itemCount} 件
@@ -1545,6 +1679,11 @@ function Orders({ go }: { go: (v: View) => void }) {
               <h3>商品明细</h3>
               {detail.items.map((x: Row) => (
                 <article className="dialog-line" key={x.skuCode}>
+                  {x.mainImage ? (
+                    <img className="dialog-product-cover" src={x.mainImage} alt={x.title} />
+                  ) : (
+                    <i>📦</i>
+                  )}
                   <span>
                     <strong>{x.title}</strong>
                     <small>{x.skuCode}</small>
