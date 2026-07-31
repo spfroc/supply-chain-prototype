@@ -27,6 +27,21 @@ const createIdempotencyKey = () => {
   globalThis.crypto?.getRandomValues?.(random);
   return `order-${Date.now()}-${Array.from(random).join("-") || Math.random().toString(36).slice(2)}`;
 };
+const deliveryAddress = (value: any) => {
+  let address = value;
+  if (typeof address === "string") {
+    try {
+      address = JSON.parse(address);
+    } catch {
+      return address;
+    }
+  }
+  return address
+    ? [address.contactName, address.phone, address.address]
+        .filter(Boolean)
+        .join(" · ")
+    : "配送地址待确认";
+};
 const statuses = ["待付款", "待发货", "运输中", "已完成", "已取消"];
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const r = await fetch(path, {
@@ -1153,6 +1168,7 @@ function Orders() {
               <span>
                 {x.skuCode} · {x.subOrderNo} · ×{x.quantity}
               </span>
+              <address>{deliveryAddress(x.addressSnapshot)}</address>
             </div>
             <b>{money(x.totalPrice)}</b>
           </article>

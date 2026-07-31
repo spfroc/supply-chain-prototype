@@ -12,3 +12,9 @@
 .form-dialog{display:grid;grid-template-columns:1fr 1fr;gap:12px}.form-dialog h2,.form-dialog .dialog-close,.form-dialog .save-button,.form-dialog .check-line{grid-column:1/-1}
 .form-dialog label{display:grid;gap:6px;color:#56657a}.form-dialog input,.form-dialog select{border:1px solid #d8e0ea;border-radius:7px;padding:10px;background:white}
 .form-dialog .check-line{display:flex;align-items:center}.form-dialog .check-line input{width:auto}.form-dialog .save-button{margin-top:8px}
+.client-dialog{width:min(860px,100%)}
+.dialog-line{grid-template-columns:72px minmax(0,1fr) 80px 120px;gap:16px;padding:16px 12px}
+.dialog-line .dialog-product-cover,.dialog-line>i{width:64px;height:64px}
+.dialog-line span{min-width:0}.dialog-line span strong{font-size:16px;line-height:1.45}.dialog-line span small{white-space:normal;line-height:1.5}
+.dialog-line address{font-style:normal;color:#53657d;background:#f5f8fc;border-radius:6px;padding:7px 9px;margin-top:7px;line-height:1.5}
+.dialog-line>b{text-align:center;color:#344158}.dialog-line>em{font-size:16px;font-weight:700}

@@ -267,6 +267,7 @@ public class ClientController {
         if(orders.isEmpty())throw new IllegalArgumentException("订单不存在");
         var items=jdbc.sql("""
             SELECT p.title,p.main_image AS mainImage,s.sku_code AS skuCode,os.sub_order_no AS subOrderNo,
+              os.address_snapshot AS addressSnapshot,
               oi.quantity,oi.unit_price AS unitPrice,oi.total_price AS totalPrice
             FROM order_item oi JOIN product_sku s ON s.id=oi.sku_id JOIN product_spu p ON p.id=s.spu_id
             JOIN order_sub os ON os.id=oi.order_sub_id

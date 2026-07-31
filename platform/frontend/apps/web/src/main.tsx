@@ -41,6 +41,21 @@ const createIdempotencyKey = () => {
   globalThis.crypto?.getRandomValues?.(random);
   return `order-${Date.now()}-${Array.from(random).join("-") || Math.random().toString(36).slice(2)}`;
 };
+const deliveryAddress = (value: any) => {
+  let address = value;
+  if (typeof address === "string") {
+    try {
+      address = JSON.parse(address);
+    } catch {
+      return address;
+    }
+  }
+  return address
+    ? [address.contactName, address.phone, address.address]
+        .filter(Boolean)
+        .join(" · ")
+    : "配送地址待确认";
+};
 const orderStatus = ["待付款", "待发货", "运输中", "已完成", "已取消"];
 const routeViews: View[] = [
   "home",
@@ -1844,6 +1859,7 @@ function Orders({ go }: { go: (v: View) => void }) {
                   <span>
                     <strong>{x.title}</strong>
                     <small>{x.skuCode} · 配送单 {x.subOrderNo}</small>
+                    <address>{deliveryAddress(x.addressSnapshot)}</address>
                   </span>
                   <b>× {x.quantity}</b>
                   <em>{money(x.totalPrice)}</em>
