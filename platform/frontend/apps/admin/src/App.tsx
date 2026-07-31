@@ -61,6 +61,21 @@ const dateTime = (value?: string) =>
         hour12: false,
       }).format(new Date(value.replace(" ", "T")))
     : "—";
+const deliveryAddress = (value: any) => {
+  let address = value;
+  if (typeof address === "string") {
+    try {
+      address = JSON.parse(address);
+    } catch {
+      return address;
+    }
+  }
+  return address
+    ? [address.contactName, address.phone, address.address]
+        .filter(Boolean)
+        .join(" · ")
+    : "配送地址待确认";
+};
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/admin/system${path}`, {
@@ -1540,7 +1555,7 @@ function BusinessModule({ module }: { module: Module }) {
       <Modal
         open={!!detail}
         title="订单详情"
-        width={760}
+        width={1080}
         footer={null}
         onCancel={() => setDetail(undefined)}
       >
@@ -1566,24 +1581,67 @@ function BusinessModule({ module }: { module: Module }) {
                   label: "应付金额",
                   children: `¥${Number(detail.order.payableAmount).toFixed(2)}`,
                 },
+                {
+                  key: "createdAt",
+                  label: "下单时间",
+                  children: dateTime(detail.order.createdAt),
+                },
+                {
+                  key: "status",
+                  label: "付款状态",
+                  children:
+                    ["待付款", "待确认", "已确认"][
+                      Number(detail.order.paymentStatus)
+                    ] || "处理中",
+                },
               ]}
             />
             <Table
+              className="admin-order-detail-table"
               rowKey="id"
               pagination={false}
               dataSource={detail.items}
               columns={[
-                { title: "商品", dataIndex: "title" },
-                { title: "SKU", dataIndex: "skuCode" },
-                { title: "数量", dataIndex: "quantity" },
+                {
+                  title: "商品",
+                  dataIndex: "title",
+                  width: 250,
+                  render: (_: any, row: Row) => (
+                    <div className="admin-order-product">
+                      {row.mainImage ? (
+                        <img src={row.mainImage} alt={row.title} />
+                      ) : (
+                        <i>商</i>
+                      )}
+                      <span>
+                        <strong>{row.title}</strong>
+                        <small>{row.skuCode}</small>
+                        <small>配送单：{row.subOrderNo}</small>
+                      </span>
+                    </div>
+                  ),
+                },
+                {
+                  title: "配送地址",
+                  dataIndex: "addressSnapshot",
+                  width: 310,
+                  render: (value: any) => (
+                    <div className="admin-delivery-address">
+                      {deliveryAddress(value)}
+                    </div>
+                  ),
+                },
+                { title: "数量", dataIndex: "quantity", width: 70 },
                 {
                   title: "单价",
                   dataIndex: "unitPrice",
+                  width: 100,
                   render: (v) => `¥${Number(v).toFixed(2)}`,
                 },
                 {
                   title: "小计",
                   dataIndex: "totalPrice",
+                  width: 110,
                   render: (v) => `¥${Number(v).toFixed(2)}`,
                 },
               ]}

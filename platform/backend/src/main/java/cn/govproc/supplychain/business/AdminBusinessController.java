@@ -322,14 +322,20 @@ public class AdminBusinessController {
     @GetMapping("/orders/{id}")
     Map<String,Object> order(@PathVariable long id) {
         var order=jdbc.sql("""
-          SELECT o.*,e.name AS enterpriseName,u.real_name AS buyerName
+          SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,u.real_name AS buyerName,
+            o.item_amount AS itemAmount,o.freight_amount AS freightAmount,o.payable_amount AS payableAmount,
+            o.payment_status AS paymentStatus,o.order_status AS orderStatus,
+            DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
           FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id JOIN enterprise_user u ON u.id=o.user_id WHERE o.id=:id
           """)
           .param("id",id).query().singleRow();
         var items=jdbc.sql("""
-          SELECT oi.id,p.title,s.sku_code AS skuCode,oi.quantity,oi.unit_price AS unitPrice,
-          oi.total_price AS totalPrice FROM order_item oi JOIN product_sku s ON s.id=oi.sku_id
-          JOIN product_spu p ON p.id=s.spu_id WHERE oi.order_main_id=:id
+          SELECT oi.id,p.title,p.main_image AS mainImage,s.sku_code AS skuCode,
+            os.sub_order_no AS subOrderNo,os.address_snapshot AS addressSnapshot,
+            oi.quantity,oi.unit_price AS unitPrice,oi.total_price AS totalPrice
+          FROM order_item oi JOIN product_sku s ON s.id=oi.sku_id
+          JOIN product_spu p ON p.id=s.spu_id JOIN order_sub os ON os.id=oi.order_sub_id
+          WHERE oi.order_main_id=:id
           """).param("id",id).query().listOfRows();
         return Map.of("order",order,"items",items);
     }
