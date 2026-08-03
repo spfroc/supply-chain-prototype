@@ -7,6 +7,10 @@ import "./manage.css";
 import "./auth.css";
 import "./platform-tags.css";
 type Tab = "home" | "category" | "cart" | "checkout" | "orders" | "mine";
+const tabFromLocation=():Tab=>{
+  const value=new URLSearchParams(location.search).get("tab") as Tab|null;
+  return value&&["home","category","cart","checkout","orders","mine"].includes(value)?value:"home";
+};
 type Row = Record<string, any>;
 const structuredSpecs = (value: unknown): Row[] => {
   try {
@@ -102,13 +106,14 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 function App() {
-  const [tab, setTab] = useState<Tab>("home");
+  const [tab, setTab] = useState<Tab>(tabFromLocation);
   const [products, setProducts] = useState<Row[]>([]);
   const [categories, setCategories] = useState<Row[]>([]);
   const [portal, setPortal] = useState<Row>({});
   const [cart, setCart] = useState<Row[]>([]);
   const [profile, setProfile] = useState<Row>({});
   const [detail, setDetail] = useState<Row>();
+  const [categoryKeyword,setCategoryKeyword]=useState(()=>new URLSearchParams(location.search).get("q")||"");
   const [solutionId, setSolutionId] = useState<number | undefined>(() => Number(new URLSearchParams(location.search).get("solutionId")) || undefined);
   const [solutionsOpen, setSolutionsOpen] = useState(false);
   const [current, setCurrent] = useState<Row>();
@@ -164,6 +169,37 @@ function App() {
       .catch(() => {})
       .finally(() => setAuthReady(true));
   }, []);
+  useEffect(()=>{
+    const pop=()=>{
+      const params=new URLSearchParams(location.search);
+      setTab(tabFromLocation());
+      setSolutionId(Number(params.get("solutionId"))||undefined);
+      setCategoryKeyword(params.get("q")||"");
+      const productId=Number(params.get("productId"));
+      setDetail(productId?products.find(row=>Number(row.id)===productId):undefined);
+    };
+    addEventListener("popstate",pop);
+    return ()=>removeEventListener("popstate",pop);
+  },[products]);
+  useEffect(()=>{
+    if(detail||!products.length) return;
+    const productId=Number(new URLSearchParams(location.search).get("productId"));
+    if(productId) setDetail(products.find(row=>Number(row.id)===productId));
+  },[detail,products]);
+  const navigateTab=(target:Tab,q="")=>{
+    const url=new URL(location.href);
+    if(target==="home") url.searchParams.delete("tab"); else url.searchParams.set("tab",target);
+    if(q) url.searchParams.set("q",q); else url.searchParams.delete("q");
+    url.searchParams.delete("productId"); url.searchParams.delete("solutionId");
+    history.pushState({tab:target},"",url);
+    setCategoryKeyword(q); setDetail(undefined); setSolutionId(undefined); setTab(target);
+  };
+  const openProduct=(product:Row)=>{
+    const url=new URL(location.href);
+    url.searchParams.set("productId",String(product.id));
+    history.pushState({productId:product.id},"",url);
+    setDetail(product);
+  };
   const addToCart = async (p: Row) => {
     try {
       await api("/api/client/cart", {
@@ -204,14 +240,14 @@ function App() {
       setTab("checkout");
     });
   const openProtectedTab = (target: Tab) =>
-    requireAuth(() => setTab(target));
+    requireAuth(() => navigateTab(target));
   const logout = async () => {
     await api("/api/auth/logout", { method: "POST" });
     setCurrent(undefined);
     setProfile({});
     setCart([]);
     void loadProducts();
-    setTab("home");
+    navigateTab("home");
   };
   if (!authReady) return <div className="m-auth-loading">正在加载…</div>;
   if (solutionId)
@@ -242,7 +278,7 @@ function App() {
       <>
         <ProductDetail
           product={detail}
-          back={() => setDetail(undefined)}
+          back={() => history.back()}
           add={add}
           buyNow={buyNow}
         />
@@ -282,9 +318,9 @@ function App() {
           <Home
             products={products}
             solutions={portal.solution || []}
-            open={setDetail}
+            open={openProduct}
             add={add}
-            category={() => setTab("category")}
+            category={(keyword="") => navigateTab("category",keyword)}
             openSolution={(id) => {
               setSolutionId(id);
               history.pushState({}, "", `${location.pathname}?solutionId=${id}`);
@@ -296,7 +332,8 @@ function App() {
           <Category
             products={products}
             categories={categories}
-            open={setDetail}
+            keyword={categoryKeyword}
+            open={openProduct}
           />
         )}
         {tab === "cart" && (
@@ -341,7 +378,7 @@ function App() {
               const target = x[0] as Tab;
               if (["cart", "orders", "mine"].includes(target))
                 openProtectedTab(target);
-              else setTab(target);
+          else navigateTab(target);
             }}
           >
             <i>
@@ -596,15 +633,18 @@ function Home({
   solutions: Row[];
   open: (r: Row) => void;
   add: (r: Row) => void;
-  category: () => void;
+  category: (keyword?: string) => void;
   openSolution: (id: number) => void;
   allSolutions: () => void;
 }) {
+  const [keyword,setKeyword]=useState("");
   return (
     <div className="home">
       <label className="m-search">
-        ⌕<input placeholder="搜索商品、品牌、型号…" />
-        <button>搜索</button>
+        ⌕<input value={keyword} onChange={(e)=>setKeyword(e.target.value)}
+          onKeyDown={(e)=>{if(e.key==="Enter") category(keyword.trim());}}
+          placeholder="搜索商品、品牌、型号…" />
+        <button onClick={()=>category(keyword.trim())}>搜索</button>
       </label>
       <section className="m-hero">
         <span>2026 政企集采季</span>
@@ -614,7 +654,7 @@ function Home({
           <b>一站配齐</b>
         </h1>
         <p>协议专属价格 · 自营正品保障</p>
-        <button onClick={category}>立即选购　›</button>
+        <button onClick={()=>category()}>立即选购　›</button>
         <i>💻</i>
         <em>🖨️</em>
       </section>
@@ -629,7 +669,7 @@ function Home({
           ["案", "场景方案"],
           ["全", "全部分类"],
         ].map((x, i) => (
-          <button key={x[1]} onClick={category}>
+          <button key={x[1]} onClick={()=>x[1]==="场景方案"?allSolutions():category()}>
             <i className={`t${i}`}>{x[0]}</i>
             <span>{x[1]}</span>
           </button>
@@ -641,7 +681,7 @@ function Home({
             <span>AGREEMENT PICKS</span>
             <h2>协议精选</h2>
           </div>
-          <button onClick={category}>全部 ›</button>
+          <button onClick={()=>category()}>全部 ›</button>
         </header>
         <DragScroll className="product-scroll">
           {products.map((p, i) => (
@@ -727,10 +767,12 @@ function Product({
 function Category({
   products,
   categories,
+  keyword,
   open,
 }: {
   products: Row[];
   categories: Row[];
+  keyword: string;
   open: (r: Row) => void;
 }) {
   const roots = categories.filter((x) => Number(x.level) === 1);
@@ -750,7 +792,8 @@ function Category({
       ]
     : [];
   const visible = products.filter(
-    (p) => !active || ids.includes(Number(p.categoryId)),
+    (p) => (!active || ids.includes(Number(p.categoryId))) &&
+      `${p.title||""} ${p.summary||""} ${p.brandName||""} ${p.skuCode||""}`.toLowerCase().includes(keyword.toLowerCase()),
   );
   return (
     <div className="subpage">
@@ -788,7 +831,7 @@ function Category({
           <h2>下级分类</h2>
           <div className="category-grid">
             {children.map((x) => (
-              <button key={x.id}>
+              <button key={x.id} onClick={()=>setActive(Number(x.id))}>
                 <i>{x.name.slice(0, 1)}</i>
                 <span>{x.name}</span>
               </button>
@@ -801,7 +844,9 @@ function Category({
               onClick={() => open(p)}
               key={p.skuId}
             >
-              <i>{["💻", "📄", "🖨️", "📦"][i % 4]}</i>
+              <i className="category-product-image">
+                {p.mainImage?<img src={p.mainImage} alt={p.title}/>:(["💻", "📄", "🖨️", "📦"][i % 4])}
+              </i>
               <span>
                 <strong>{p.title}</strong>
                 <small>{money(p.agreementPrice || p.memberPrice)}</small>

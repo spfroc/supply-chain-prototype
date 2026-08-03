@@ -135,6 +135,9 @@ function App() {
   const [summary, setSummary] = useState<Row>({});
   const [cart, setCart] = useState<Row[]>([]);
   const [selected, setSelected] = useState<Row>();
+  const [searchKeyword, setSearchKeyword] = useState(
+    () => new URLSearchParams(location.search).get("q") || "",
+  );
   const [toast, setToast] = useState("");
   const [current, setCurrent] = useState<Row>();
   const [authReady, setAuthReady] = useState(false);
@@ -205,6 +208,8 @@ function App() {
       setCategoryId(Number(params.get("categoryId")) || undefined);
       setPlatformId(Number(params.get("platformId")) || undefined);
       setSolutionId(Number(params.get("solutionId")) || undefined);
+      setSearchKeyword(params.get("q") || "");
+      setSelected(undefined);
     };
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
@@ -228,6 +233,7 @@ function App() {
     else url.searchParams.delete("platformId");
     if (nextSolution) url.searchParams.set("solutionId", String(nextSolution));
     else url.searchParams.delete("solutionId");
+    url.searchParams.delete("productId");
     history.pushState({ view: target }, "", url);
   };
   const navigate = (
@@ -307,8 +313,29 @@ function App() {
     });
   const goProduct = (product: Row) => {
     setSelected(product);
+    const url = new URL(location.href);
+    url.searchParams.set("view", "detail");
+    url.searchParams.set("productId", String(product.id));
+    history.pushState({ view: "detail" }, "", url);
     setView("detail");
     scrollTo(0, 0);
+  };
+  useEffect(() => {
+    if (view !== "detail" || selected) return;
+    const id = Number(new URLSearchParams(location.search).get("productId"));
+    const product = products.find((row) => Number(row.id) === id);
+    if (product) setSelected(product);
+  }, [products, selected, view]);
+  const search = () => {
+    const keyword = searchKeyword.trim();
+    const url = new URL(location.href);
+    url.searchParams.set("view", "products");
+    if (keyword) url.searchParams.set("q", keyword);
+    else url.searchParams.delete("q");
+    url.searchParams.delete("categoryId");
+    history.pushState({ view: "products" }, "", url);
+    setCategoryId(undefined);
+    setView("products");
   };
   const logout = async () => {
     await api("/api/auth/logout", { method: "POST" });
@@ -340,7 +367,7 @@ function App() {
         </div>
       </div>
       <header className="header">
-        <button className="logo" onClick={() => setView("home")}>
+        <button className="logo" onClick={() => navigate("home")}>
           <i>政</i>
           <span>
             <strong>{siteName}</strong>
@@ -348,8 +375,10 @@ function App() {
           </span>
         </button>
         <label className="search">
-          ⌕<input placeholder="搜索商品、品牌、型号或方案" />
-          <button onClick={() => setView("products")}>搜索</button>
+          ⌕<input value={searchKeyword} onChange={(e) => setSearchKeyword(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") search(); }}
+            placeholder="搜索商品、品牌、型号或方案" />
+          <button onClick={search}>搜索</button>
         </label>
         <button className="cart-button" onClick={() => navigate("cart")}>
           购物车 <b>{cart.reduce((n, r) => n + Number(r.quantity), 0)}</b>
@@ -408,6 +437,16 @@ function App() {
           products={products}
           categories={categories}
           initialCategory={categoryId}
+          initialKeyword={searchKeyword}
+          routeChanged={(nextCategory,keyword) => {
+            setCategoryId(nextCategory);
+            setSearchKeyword(keyword);
+            const url=new URL(location.href);
+            if(nextCategory) url.searchParams.set("categoryId",String(nextCategory));
+            else url.searchParams.delete("categoryId");
+            if(keyword) url.searchParams.set("q",keyword); else url.searchParams.delete("q");
+            history.replaceState({view:"products"},"",url);
+          }}
           open={goProduct}
           add={add}
         />
@@ -800,17 +839,23 @@ function Products({
   products,
   categories,
   initialCategory,
+  initialKeyword,
+  routeChanged,
   open,
   add,
 }: {
   products: Row[];
   categories: Row[];
   initialCategory?: number;
+  initialKeyword?: string;
+  routeChanged: (categoryId: number | undefined, keyword: string) => void;
   open: (r: Row) => void;
   add: (r: Row) => void;
 }) {
-  const [keyword, setKeyword] = useState("");
+  const [keyword, setKeyword] = useState(initialKeyword || "");
   const [active, setActive] = useState<number | undefined>(initialCategory);
+  const [onlyStock,setOnlyStock]=useState(false);
+  const [onlyAgreement,setOnlyAgreement]=useState(false);
   const [hovered, setHovered] = useState<number>();
   const [sort, setSort] = useState<"default" | "price">("default");
   const ids = active
@@ -830,7 +875,10 @@ function Products({
     .filter(
       (p) =>
         (!active || ids.includes(Number(p.categoryId))) &&
-        (p.title.includes(keyword) || p.summary?.includes(keyword)),
+        (!onlyStock || Number(p.availableStock)>0) &&
+        (!onlyAgreement || p.agreementPrice != null) &&
+        (`${p.title || ""} ${p.summary || ""} ${p.brandName || ""} ${p.skuCode || ""}`
+          .toLowerCase().includes(keyword.toLowerCase())),
     )
     .sort((a, b) =>
       sort === "price"
@@ -847,7 +895,7 @@ function Products({
           <h3>商品分类</h3>
           <button
             className={!active ? "active" : ""}
-            onClick={() => setActive(undefined)}
+            onClick={() => { setActive(undefined); routeChanged(undefined,keyword); }}
           >
             全部商品<span>›</span>
           </button>
@@ -864,7 +912,7 @@ function Products({
               >
                 <button
                   className={active === Number(root.id) ? "active" : ""}
-                  onClick={() => setActive(Number(root.id))}
+                  onClick={() => { setActive(Number(root.id)); routeChanged(Number(root.id),keyword); }}
                 >
                   {root.name}
                   <span>›</span>
@@ -873,7 +921,7 @@ function Products({
                   <div className="category-flyout">
                     <header>
                       <strong>{root.name}</strong>
-                      <button onClick={() => setActive(Number(root.id))}>
+                      <button onClick={() => { setActive(Number(root.id)); routeChanged(Number(root.id),keyword); }}>
                         查看全部
                       </button>
                     </header>
@@ -887,7 +935,7 @@ function Products({
                             className={
                               active === Number(level2.id) ? "active" : ""
                             }
-                            onClick={() => setActive(Number(level2.id))}
+                            onClick={() => { setActive(Number(level2.id)); routeChanged(Number(level2.id),keyword); }}
                           >
                             {level2.name}
                           </button>
@@ -898,7 +946,7 @@ function Products({
                                   active === Number(item.id) ? "active" : ""
                                 }
                                 key={item.id}
-                                onClick={() => setActive(Number(item.id))}
+                                onClick={() => { setActive(Number(item.id)); routeChanged(Number(item.id),keyword); }}
                               >
                                 {item.name}
                               </button>
@@ -913,8 +961,8 @@ function Products({
             );
           })}
           <h3>商品状态</h3>
-          <p>☑ 仅看有货</p>
-          <p>☑ 企业协议商品</p>
+          <label><input type="checkbox" checked={onlyStock} onChange={(e)=>setOnlyStock(e.target.checked)}/> 仅看有货</label>
+          <label><input type="checkbox" checked={onlyAgreement} onChange={(e)=>setOnlyAgreement(e.target.checked)}/> 企业协议商品</label>
         </aside>
         <section className="listing">
           <div className="listing-head">
@@ -929,7 +977,7 @@ function Products({
               ⌕{" "}
               <input
                 value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
+                onChange={(e) => { setKeyword(e.target.value); routeChanged(active,e.target.value); }}
                 placeholder="在结果中搜索"
               />
             </label>
