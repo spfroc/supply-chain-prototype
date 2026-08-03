@@ -137,7 +137,8 @@ public class ContentAdminController {
         requireSolution(solutionId);
         return jdbc.sql("""
             SELECT si.id,si.solution_id AS solutionId,si.sku_id AS skuId,p.title,
-                   p.main_image AS mainImage,s.sku_code AS skuCode,s.member_price AS price,
+                   COALESCE(NULLIF(p.main_image,''),SUBSTRING_INDEX(JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')),'\n',1)) AS mainImage,
+                   s.sku_code AS skuCode,s.member_price AS price,
                    s.stock-s.reserved_stock AS availableStock,si.default_quantity AS defaultQuantity,
                    si.required_item AS requiredItem,si.sort_order AS sortOrder,si.updated_at AS updatedAt
             FROM solution_item si

@@ -15,6 +15,7 @@ import {
   Layout,
   Menu,
   Modal,
+  Radio,
   Select,
   Space,
   Statistic,
@@ -2681,7 +2682,10 @@ function PortalManager({ module }: { module: Module }) {
             <InputNumber min={1} max={9999} style={{ width: "100%" }} />
           </Form.Item>
           <Form.Item name="requiredItem" label="选择规则" rules={[{ required: true }]}>
-            <Select options={[{ value: 1, label: "必选商品" }, { value: 0, label: "可选商品" }]} />
+            <Radio.Group optionType="button" buttonStyle="solid">
+              <Radio.Button value={1}>必选商品</Radio.Button>
+              <Radio.Button value={0}>可选商品</Radio.Button>
+            </Radio.Group>
           </Form.Item>
           <Form.Item name="sortOrder" label="排序">
             <InputNumber min={0} style={{ width: "100%" }} />

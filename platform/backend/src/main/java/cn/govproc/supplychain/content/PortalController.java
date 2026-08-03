@@ -48,7 +48,9 @@ public class PortalController {
         if (solutions.isEmpty()) throw new org.springframework.web.server.ResponseStatusException(
             org.springframework.http.HttpStatus.NOT_FOUND, "方案不存在或未发布");
         var items = jdbc.sql("""
-            SELECT si.id AS relationId,si.sku_id AS skuId,p.title,p.main_image AS mainImage,p.summary,
+            SELECT si.id AS relationId,si.sku_id AS skuId,p.title,
+                   COALESCE(NULLIF(p.main_image,''),SUBSTRING_INDEX(JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')),'\n',1)) AS mainImage,
+                   p.summary,
                    s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
                    s.stock-s.reserved_stock AS availableStock,si.default_quantity AS defaultQuantity,
                    si.required_item AS requiredItem,si.sort_order AS sortOrder
