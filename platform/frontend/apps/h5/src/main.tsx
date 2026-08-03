@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { Dialog, Toast } from "antd-mobile";
 import "./style.css";
+import "./product-image.css";
 import "./manage.css";
 import "./auth.css";
 import "./platform-tags.css";
@@ -518,6 +519,16 @@ function Product({
   return (
     <article className="m-product" onClick={() => open(row)}>
       <div className={`m-image c${index % 4}`}>
+        {row.mainImage && (
+          <img
+            src={row.mainImage}
+            alt={row.title}
+            loading="lazy"
+            onError={(event) => {
+              event.currentTarget.style.display = "none";
+            }}
+          />
+        )}
         <span>协议价</span>
         <i>{["💻", "📄", "🖨️", "📦"][index % 4]}</i>
       </div>

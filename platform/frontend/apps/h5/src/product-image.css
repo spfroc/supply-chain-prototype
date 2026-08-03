@@ -1,0 +1,16 @@
+.m-image {
+  overflow: hidden;
+}
+
+.m-image > img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #fff;
+}
+
+.m-image > span {
+  z-index: 2;
+}
