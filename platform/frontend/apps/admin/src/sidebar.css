@@ -63,8 +63,11 @@
 }
 
 .menu-svg {
-  width: 19px;
-  height: 19px;
+  width: 19px !important;
+  height: 19px !important;
+  min-width: 19px;
+  max-width: 19px;
+  flex: 0 0 19px;
   display: block;
 }
 
