@@ -1039,7 +1039,19 @@ function BusinessModule({ module }: { module: Module }) {
         title: "商品信息",
         render: (_, r) => (
           <div className="user-cell">
-            <i>商</i>
+            <span className="solution-admin-cover">
+              <i>{r.title?.slice(0, 1) || "商"}</i>
+              {r.mainImage && (
+                <img
+                  src={r.mainImage}
+                  alt={r.title}
+                  loading="lazy"
+                  onError={(event) => {
+                    event.currentTarget.style.display = "none";
+                  }}
+                />
+              )}
+            </span>
             <span>
               <strong>{r.title}</strong>
               <small>{r.skuCode}</small>

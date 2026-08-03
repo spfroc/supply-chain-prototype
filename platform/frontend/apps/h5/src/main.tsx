@@ -543,7 +543,7 @@ function MobileSolutionDetail({ solutionId, back, requireAuth, reloadCart, check
           const checked = required || !!selectedItems[row.skuId];
           return <article key={row.relationId} className={!checked ? "off" : ""}>
             <label><input type="checkbox" checked={checked} disabled={required} onChange={(event) => setSelectedItems({ ...selectedItems, [row.skuId]: event.target.checked })} /><em>{required ? "必选" : "可选"}</em></label>
-            <div className="m-solution-image">{row.mainImage ? <img src={row.mainImage} alt={row.title} onError={(event) => { event.currentTarget.style.display = "none"; }} /> : null}<span>{row.title?.slice(0, 1) || "商"}</span></div>
+            <div className="m-solution-image">{row.mainImage ? <img src={row.mainImage} alt={row.title} loading="lazy" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : null}<span>{row.title?.slice(0, 1) || "商"}</span></div>
             <div className="m-solution-product"><strong>{row.title}</strong><small>{money(row.memberPrice)}</small><div><button disabled={!checked} onClick={() => setQuantities({ ...quantities, [row.skuId]: Math.max(1, (quantities[row.skuId] || 1) - 1) })}>−</button><b>{quantities[row.skuId] || 1}</b><button disabled={!checked} onClick={() => setQuantities({ ...quantities, [row.skuId]: Math.min(Number(row.availableStock), (quantities[row.skuId] || 1) + 1) })}>＋</button></div></div>
           </article>;
         })}

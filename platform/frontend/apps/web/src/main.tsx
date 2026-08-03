@@ -1066,7 +1066,7 @@ function SolutionDetail({
                 <input type="checkbox" checked={checked} disabled={required} onChange={(event) => setSelectedItems({ ...selectedItems, [row.skuId]: event.target.checked })} />
                 <em>{required ? "必选" : "可选"}</em>
               </label>
-              <div className="solution-product-image">{row.mainImage ? <img src={row.mainImage} alt={row.title} onError={(event) => { event.currentTarget.style.display = "none"; }} /> : null}<span>{row.title?.slice(0, 1) || "商"}<small>{row.mainImage ? "图片加载失败" : "暂无主图"}</small></span></div>
+              <div className="solution-product-image">{row.mainImage ? <img src={row.mainImage} alt={row.title} loading="lazy" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : null}<span>{row.title?.slice(0, 1) || "商"}<small>{row.mainImage ? "图片加载失败" : "暂无主图"}</small></span></div>
               <div><strong>{row.title}</strong><small>{row.skuCode}</small><p>{row.summary}</p></div>
               <b>{money(row.memberPrice)}</b>
               <div className="solution-counter">
