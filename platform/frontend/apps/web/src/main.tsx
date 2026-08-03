@@ -137,6 +137,8 @@ function App() {
   const [siteConfig, setSiteConfig] = useState<Row>({});
   const siteName = siteConfig["platform.name"] || "政企采购供应链";
   const servicePhone = siteConfig["platform.servicePhone"] || "400-800-2026";
+  const icpFiling = String(siteConfig["platform.icpFiling"] || "").trim();
+  const policeFiling = String(siteConfig["platform.policeFiling"] || "").trim();
   const notify = (text: string) => {
     setToast(text);
     setTimeout(() => setToast(""), 2200);
@@ -474,7 +476,15 @@ function App() {
           <strong>{siteName}</strong>
           <span>企业协议价 · 自营库存 · 银行转账 · 全国配送</span>
         </div>
-        <p>服务电话 {servicePhone}　工作日 09:00–18:00</p>
+        <div className="footer-meta">
+          <p>服务电话 {servicePhone}　工作日 09:00–18:00</p>
+          {(icpFiling || policeFiling) && (
+            <nav>
+              {icpFiling && <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">{icpFiling}</a>}
+              {policeFiling && <a href="https://www.beian.gov.cn/portal/registerSystemInfo" target="_blank" rel="noreferrer">{policeFiling}</a>}
+            </nav>
+          )}
+        </div>
       </footer>
       {toast && <div className="toast">✓ {toast}</div>}
       {authOpen && !current && (

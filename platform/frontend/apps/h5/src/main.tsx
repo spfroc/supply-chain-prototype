@@ -108,6 +108,8 @@ function App() {
   const [siteConfig, setSiteConfig] = useState<Row>({});
   const siteName = siteConfig["platform.name"] || "政企采购供应链";
   const servicePhone = siteConfig["platform.servicePhone"] || "400-800-2026";
+  const icpFiling = String(siteConfig["platform.icpFiling"] || "").trim();
+  const policeFiling = String(siteConfig["platform.policeFiling"] || "").trim();
   const loadCart = async () => {
     try {
       setCart(await api<Row[]>("/api/client/cart"));
@@ -304,6 +306,12 @@ function App() {
             orders={() => setTab("orders")}
             logout={logout}
           />
+        )}
+        {(icpFiling || policeFiling) && (
+          <footer className="m-filing">
+            {icpFiling && <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">{icpFiling}</a>}
+            {policeFiling && <a href="https://www.beian.gov.cn/portal/registerSystemInfo" target="_blank" rel="noreferrer">{policeFiling}</a>}
+          </footer>
         )}
       </section>
       <nav className="tabbar">
