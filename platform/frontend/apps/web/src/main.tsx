@@ -9,6 +9,7 @@ type View =
   | "home"
   | "products"
   | "solutions"
+  | "solution-detail"
   | "platforms"
   | "platform-products"
   | "content"
@@ -61,6 +62,7 @@ const routeViews: View[] = [
   "home",
   "products",
   "solutions",
+  "solution-detail",
   "platforms",
   "platform-products",
   "content",
@@ -117,6 +119,10 @@ function App() {
     const value = Number(
       new URLSearchParams(location.search).get("platformId"),
     );
+    return value || undefined;
+  });
+  const [solutionId, setSolutionId] = useState<number | undefined>(() => {
+    const value = Number(new URLSearchParams(location.search).get("solutionId"));
     return value || undefined;
   });
   const [profile, setProfile] = useState<Row>({});
@@ -190,6 +196,7 @@ function App() {
       setView(routeFromLocation());
       setCategoryId(Number(params.get("categoryId")) || undefined);
       setPlatformId(Number(params.get("platformId")) || undefined);
+      setSolutionId(Number(params.get("solutionId")) || undefined);
     };
     addEventListener("popstate", pop);
     return () => removeEventListener("popstate", pop);
@@ -198,10 +205,12 @@ function App() {
     target: View,
     nextCategory?: number,
     nextPlatform?: number,
+    nextSolution?: number,
   ) => {
     setView(target);
     setCategoryId(nextCategory);
     setPlatformId(nextPlatform);
+    setSolutionId(nextSolution);
     const url = new URL(location.href);
     if (target === "home") url.searchParams.delete("view");
     else url.searchParams.set("view", target);
@@ -209,18 +218,21 @@ function App() {
     else url.searchParams.delete("categoryId");
     if (nextPlatform) url.searchParams.set("platformId", String(nextPlatform));
     else url.searchParams.delete("platformId");
+    if (nextSolution) url.searchParams.set("solutionId", String(nextSolution));
+    else url.searchParams.delete("solutionId");
     history.pushState({ view: target }, "", url);
   };
   const navigate = (
     target: View,
     nextCategory?: number,
     nextPlatform?: number,
+    nextSolution?: number,
   ) => {
     if (protectedViews.has(target) && !current) {
-      requireAuth(() => applyNavigation(target, nextCategory, nextPlatform));
+      requireAuth(() => applyNavigation(target, nextCategory, nextPlatform, nextSolution));
       return;
     }
-    applyNavigation(target, nextCategory, nextPlatform);
+    applyNavigation(target, nextCategory, nextPlatform, nextSolution);
   };
   const openNavigation = (item: Row, index: number) => {
     const fallback: View =
@@ -404,6 +416,17 @@ function App() {
             ] || []
           }
           back={() => setView("home")}
+          openSolution={(id) => navigate("solution-detail", undefined, undefined, id)}
+        />
+      )}
+      {displayView === "solution-detail" && solutionId && (
+        <SolutionDetail
+          solutionId={solutionId}
+          back={() => navigate("solutions")}
+          requireAuth={requireAuth}
+          reloadCart={loadCart}
+          checkout={() => navigate("checkout")}
+          notify={notify}
         />
       )}
       {displayView === "platform-products" && platformId && (
@@ -922,10 +945,12 @@ function PortalList({
   type,
   rows,
   back,
+  openSolution,
 }: {
   type: "solutions" | "platforms" | "content";
   rows: Row[];
   back: () => void;
+  openSolution: (id: number) => void;
 }) {
   const title =
     type === "solutions"
@@ -948,20 +973,111 @@ function PortalList({
         </div>
         <div className="product-grid">
           {rows.map((row, index) => (
-            <article className="product-card" key={row.id}>
+            <article
+              className="product-card"
+              key={row.id}
+              onClick={() => type === "solutions" && openSolution(Number(row.id))}
+            >
               <div className={`product-image p${index % 5}`}>
-                <i>{row.title.slice(0, 1)}</i>
+                {row.imageUrl ? <img src={row.imageUrl} alt={row.title} /> : <i>{row.title.slice(0, 1)}</i>}
               </div>
               <div className="product-info">
                 <small>{title}</small>
                 <h3>{row.title}</h3>
                 <p>{row.subtitle || "暂无说明"}</p>
-                {row.linkUrl && <a href={row.linkUrl}>查看详情 ›</a>}
+                {type === "solutions" ? (
+                  <button className="solution-detail-link">查看方案并选购 ›</button>
+                ) : row.linkUrl ? <a href={row.linkUrl}>查看详情 ›</a> : null}
               </div>
             </article>
           ))}
         </div>
       </section>
+    </main>
+  );
+}
+
+function SolutionDetail({
+  solutionId,
+  back,
+  requireAuth,
+  reloadCart,
+  checkout,
+  notify,
+}: {
+  solutionId: number;
+  back: () => void;
+  requireAuth: (action: () => void) => void;
+  reloadCart: () => Promise<void> | void;
+  checkout: () => void;
+  notify: (text: string) => void;
+}) {
+  const [data, setData] = useState<Row>({ products: [] });
+  const [quantities, setQuantities] = useState<Record<number, number>>({});
+  const [selectedItems, setSelectedItems] = useState<Record<number, boolean>>({});
+  const [submitting, setSubmitting] = useState(false);
+  useEffect(() => {
+    void api<Row>(`/api/public/portal/solutions/${solutionId}`).then((value) => {
+      setData(value);
+      setQuantities(Object.fromEntries((value.products || []).map((row: Row) => [row.skuId, Number(row.defaultQuantity) || 1])));
+      setSelectedItems(Object.fromEntries((value.products || []).map((row: Row) => [row.skuId, Number(row.requiredItem) === 1])));
+    }).catch((error) => notify(error.message));
+  }, [solutionId]);
+  const chosen = (data.products || []).filter((row: Row) => Number(row.requiredItem) === 1 || selectedItems[row.skuId]);
+  const total = chosen.reduce((sum: number, row: Row) => sum + Number(row.memberPrice || 0) * Number(quantities[row.skuId] || 1), 0);
+  const submit = () => requireAuth(async () => {
+    if (!chosen.length) return notify("请至少选择一件方案商品");
+    setSubmitting(true);
+    try {
+      await Promise.all(chosen.map((row: Row) => api("/api/client/cart", {
+        method: "POST",
+        body: JSON.stringify({ skuId: row.skuId, solutionId, quantity: quantities[row.skuId] || 1 }),
+      })));
+      await reloadCart();
+      checkout();
+    } catch (error) {
+      notify((error as Error).message);
+    } finally {
+      setSubmitting(false);
+    }
+  });
+  return (
+    <main className="page solution-detail-page">
+      <div className="breadcrumb"><button onClick={back}>场景方案</button>　/　{data.solution?.title || "方案详情"}</div>
+      <section className="solution-hero">
+        <div>
+          <span>SCENE SOLUTION</span>
+          <h1>{data.solution?.title}</h1>
+          <h3>{data.solution?.subtitle}</h3>
+          <p>{data.solution?.description || "根据场景需求搭配设备组合，可按实际需要调整数量后直接下单。"}</p>
+        </div>
+        {data.solution?.imageUrl && <img src={data.solution.imageUrl} alt={data.solution.title} />}
+      </section>
+      <section className="solution-products">
+        <header><div><h2>设备组合</h2><p>必选商品不可取消；可选配件按实际需求勾选，数量可在下单前确认。</p></div><b>已选 {chosen.length} 项</b></header>
+        {(data.products || []).map((row: Row) => {
+          const required = Number(row.requiredItem) === 1;
+          const checked = required || !!selectedItems[row.skuId];
+          return (
+            <article key={row.relationId} className={!checked ? "optional-off" : ""}>
+              <label>
+                <input type="checkbox" checked={checked} disabled={required} onChange={(event) => setSelectedItems({ ...selectedItems, [row.skuId]: event.target.checked })} />
+                <em>{required ? "必选" : "可选"}</em>
+              </label>
+              <div className="solution-product-image">{row.mainImage ? <img src={row.mainImage} alt={row.title} /> : "商品"}</div>
+              <div><strong>{row.title}</strong><small>{row.skuCode}</small><p>{row.summary}</p></div>
+              <b>{money(row.memberPrice)}</b>
+              <div className="solution-counter">
+                <button disabled={!checked} onClick={() => setQuantities({ ...quantities, [row.skuId]: Math.max(1, (quantities[row.skuId] || 1) - 1) })}>−</button>
+                <input disabled={!checked} type="number" min="1" max={row.availableStock} value={quantities[row.skuId] || 1} onChange={(event) => setQuantities({ ...quantities, [row.skuId]: Math.max(1, Number(event.target.value) || 1) })} />
+                <button disabled={!checked} onClick={() => setQuantities({ ...quantities, [row.skuId]: Math.min(Number(row.availableStock), (quantities[row.skuId] || 1) + 1) })}>＋</button>
+              </div>
+            </article>
+          );
+        })}
+        {!data.products?.length && <div className="empty small">该方案尚未配置商品</div>}
+      </section>
+      <section className="solution-submit"><span>方案预估金额 <strong>{money(total)}</strong><small>最终金额以确认订单页为准</small></span><button disabled={submitting || !chosen.length} onClick={submit}>{submitting ? "正在处理…" : "确认配置并立即下单"}</button></section>
     </main>
   );
 }

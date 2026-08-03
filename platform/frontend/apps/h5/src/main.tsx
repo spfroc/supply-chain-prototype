@@ -66,6 +66,7 @@ function App() {
   const [cart, setCart] = useState<Row[]>([]);
   const [profile, setProfile] = useState<Row>({});
   const [detail, setDetail] = useState<Row>();
+  const [solutionId, setSolutionId] = useState<number | undefined>(() => Number(new URLSearchParams(location.search).get("solutionId")) || undefined);
   const [current, setCurrent] = useState<Row>();
   const [authReady, setAuthReady] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
@@ -166,6 +167,24 @@ function App() {
     setTab("home");
   };
   if (!authReady) return <div className="m-auth-loading">正在加载…</div>;
+  if (solutionId)
+    return (
+      <>
+        <MobileSolutionDetail
+          solutionId={solutionId}
+          back={() => {
+            setSolutionId(undefined);
+            history.pushState({}, "", location.pathname);
+          }}
+          requireAuth={requireAuth}
+          reloadCart={loadCart}
+          checkout={() => setTab("checkout")}
+        />
+        {authOpen && !current && (
+          <div className="m-auth-modal"><MobileAuth onSuccess={() => void authSuccess()} onCancel={() => setAuthOpen(false)} /></div>
+        )}
+      </>
+    );
   if (detail)
     return (
       <>
@@ -210,9 +229,14 @@ function App() {
         {tab === "home" && (
           <Home
             products={products}
+            solutions={portal.solution || []}
             open={setDetail}
             add={add}
             category={() => setTab("category")}
+            openSolution={(id) => {
+              setSolutionId(id);
+              history.pushState({}, "", `${location.pathname}?solutionId=${id}`);
+            }}
           />
         )}
         {tab === "category" && (
@@ -419,16 +443,70 @@ function MobileAuth({
   );
 }
 
+function MobileSolutionDetail({ solutionId, back, requireAuth, reloadCart, checkout }: {
+  solutionId: number;
+  back: () => void;
+  requireAuth: (action: () => void) => void;
+  reloadCart: () => Promise<void>;
+  checkout: () => void;
+}) {
+  const [data, setData] = useState<Row>({ products: [] });
+  const [quantities, setQuantities] = useState<Record<number, number>>({});
+  const [selectedItems, setSelectedItems] = useState<Record<number, boolean>>({});
+  useEffect(() => {
+    void api<Row>(`/api/public/portal/solutions/${solutionId}`).then((value) => {
+      setData(value);
+      setQuantities(Object.fromEntries((value.products || []).map((row: Row) => [row.skuId, Number(row.defaultQuantity) || 1])));
+      setSelectedItems(Object.fromEntries((value.products || []).map((row: Row) => [row.skuId, Number(row.requiredItem) === 1])));
+    }).catch((error) => Toast.show(error.message));
+  }, [solutionId]);
+  const chosen = (data.products || []).filter((row: Row) => Number(row.requiredItem) === 1 || selectedItems[row.skuId]);
+  const total = chosen.reduce((sum: number, row: Row) => sum + Number(row.memberPrice || 0) * Number(quantities[row.skuId] || 1), 0);
+  const submit = () => requireAuth(async () => {
+    try {
+      await Promise.all(chosen.map((row: Row) => api("/api/client/cart", { method: "POST", body: JSON.stringify({ skuId: row.skuId, solutionId, quantity: quantities[row.skuId] || 1 }) })));
+      await reloadCart();
+      checkout();
+      back();
+    } catch (error) { Toast.show((error as Error).message); }
+  });
+  return (
+    <div className="mobile-app m-solution-detail">
+      <header className="sub-header"><button onClick={back}>‹ 返回</button><h2>方案详情</h2><button onClick={() => navigator.clipboard?.writeText(location.href).then(() => Toast.show("分享链接已复制"))}>分享</button></header>
+      <section className="m-solution-hero" style={data.solution?.imageUrl ? { backgroundImage: `linear-gradient(135deg,#15365de8,#1f6ac9dd),url(${data.solution.imageUrl})` } : undefined}>
+        <span>SCENE SOLUTION</span><h1>{data.solution?.title}</h1><h3>{data.solution?.subtitle}</h3><p>{data.solution?.description}</p>
+      </section>
+      <section className="m-solution-items">
+        <header><h2>设备组合</h2><p>确认每件商品的数量，可选配件可按需勾选。</p></header>
+        {(data.products || []).map((row: Row) => {
+          const required = Number(row.requiredItem) === 1;
+          const checked = required || !!selectedItems[row.skuId];
+          return <article key={row.relationId} className={!checked ? "off" : ""}>
+            <label><input type="checkbox" checked={checked} disabled={required} onChange={(event) => setSelectedItems({ ...selectedItems, [row.skuId]: event.target.checked })} /><em>{required ? "必选" : "可选"}</em></label>
+            <div className="m-solution-image">{row.mainImage ? <img src={row.mainImage} alt={row.title} /> : "商品"}</div>
+            <div className="m-solution-product"><strong>{row.title}</strong><small>{money(row.memberPrice)}</small><div><button disabled={!checked} onClick={() => setQuantities({ ...quantities, [row.skuId]: Math.max(1, (quantities[row.skuId] || 1) - 1) })}>−</button><b>{quantities[row.skuId] || 1}</b><button disabled={!checked} onClick={() => setQuantities({ ...quantities, [row.skuId]: Math.min(Number(row.availableStock), (quantities[row.skuId] || 1) + 1) })}>＋</button></div></div>
+          </article>;
+        })}
+      </section>
+      <footer className="m-solution-submit"><span>预估金额<strong>{money(total)}</strong></span><button disabled={!chosen.length} onClick={submit}>确认配置并下单</button></footer>
+    </div>
+  );
+}
+
 function Home({
   products,
+  solutions,
   open,
   add,
   category,
+  openSolution,
 }: {
   products: Row[];
+  solutions: Row[];
   open: (r: Row) => void;
   add: (r: Row) => void;
   category: () => void;
+  openSolution: (id: number) => void;
 }) {
   return (
     <div className="home">
@@ -488,18 +566,14 @@ function Home({
           <button>全部 ›</button>
         </header>
         <div className="solution-scroll">
-          <article>
-            <span>SMART OFFICE</span>
-            <strong>智慧办公整体方案</strong>
-            <small>12件商品 · 含安装服务</small>
-            <b>方案价 ¥48,600</b>
-          </article>
-          <article>
-            <span>MEETING ROOM</span>
-            <strong>智能会议室改造</strong>
-            <small>8件商品 · 一站交付</small>
-            <b>方案价 ¥36,800</b>
-          </article>
+          {solutions.map((row) => (
+            <article key={row.id} onClick={() => openSolution(Number(row.id))} style={row.imageUrl ? { backgroundImage: `linear-gradient(135deg,#15365de8,#1f6ac9d9),url(${row.imageUrl})`, backgroundSize: "cover" } : undefined}>
+              <span>SCENE SOLUTION</span>
+              <strong>{row.title}</strong>
+              <small>{row.subtitle || "企业场景设备组合方案"}</small>
+              <b>查看配置并下单 ›</b>
+            </article>
+          ))}
         </div>
       </section>
     </div>

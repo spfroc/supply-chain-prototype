@@ -181,7 +181,7 @@ public class ClientController {
     @GetMapping("/cart")
     List<Map<String, Object>> cart() {
         return jdbc.sql("""
-            SELECT c.id, c.sku_id AS skuId, c.quantity, c.selected, p.title, p.main_image AS mainImage,
+            SELECT c.id, c.sku_id AS skuId, c.solution_id AS solutionId,c.quantity, c.selected, p.title, p.main_image AS mainImage,
               s.sku_code AS skuCode, s.spec_json AS specJson, s.stock-s.reserved_stock AS availableStock,
               s.market_price AS marketPrice, s.member_price AS memberPrice,
               COALESCE(ai.agreement_price,s.member_price) AS salePrice
@@ -206,15 +206,18 @@ public class ClientController {
             .optional().orElseThrow(() -> new IllegalArgumentException("商品不存在或已下架"));
         if (request.quantity() > stock) throw new IllegalArgumentException("加入数量不能超过可售库存");
         var existingId = jdbc.sql("""
-            SELECT id FROM cart_item WHERE user_id=:userId AND sku_id=:skuId AND solution_id IS NULL LIMIT 1
-            """).params(Map.of("userId", userId(), "skuId", request.skuId()))
+            SELECT id FROM cart_item WHERE user_id=:userId AND sku_id=:skuId
+              AND solution_id <=> :solutionId LIMIT 1
+            """).param("userId", userId()).param("skuId", request.skuId())
+            .param("solutionId", request.solutionId())
             .query(Long.class).optional();
         if (existingId.isPresent()) {
             jdbc.sql("UPDATE cart_item SET quantity=LEAST(quantity+:quantity,:stock),selected=1 WHERE id=:id")
                 .params(Map.of("quantity", request.quantity(), "stock", stock, "id", existingId.get())).update();
         } else {
-            jdbc.sql("INSERT INTO cart_item(user_id,sku_id,quantity,selected) VALUES(:userId,:skuId,:quantity,1)")
-                .params(Map.of("userId", userId(), "skuId", request.skuId(), "quantity", request.quantity())).update();
+            jdbc.sql("INSERT INTO cart_item(user_id,sku_id,solution_id,quantity,selected) VALUES(:userId,:skuId,:solutionId,:quantity,1)")
+                .param("userId", userId()).param("skuId", request.skuId())
+                .param("solutionId", request.solutionId()).param("quantity", request.quantity()).update();
         }
     }
 
@@ -416,7 +419,7 @@ public class ClientController {
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN,"仅企业管理员可管理成员");
     }
 
-    public record CartRequest(@NotNull Long skuId, @Min(1) @Max(9999) int quantity) {}
+    public record CartRequest(@NotNull Long skuId, Long solutionId, @Min(1) @Max(9999) int quantity) {}
     public record CartUpdateRequest(@Min(1) @Max(9999) int quantity, int selected) {}
     public record CheckoutRequest(String idempotencyKey,List<DeliveryAllocation> allocations) {}
     public record DeliveryAllocation(Long skuId,Long addressId,int quantity) {}

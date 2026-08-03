@@ -2151,6 +2151,12 @@ function PortalManager({ module }: { module: Module }) {
   const [productOpen, setProductOpen] = useState(false);
   const [relationEditing, setRelationEditing] = useState<Row>();
   const [relationEditorOpen, setRelationEditorOpen] = useState(false);
+  const [solution, setSolution] = useState<Row>();
+  const [solutionItems, setSolutionItems] = useState<Row[]>([]);
+  const [solutionItemsOpen, setSolutionItemsOpen] = useState(false);
+  const [solutionItemEditing, setSolutionItemEditing] = useState<Row>();
+  const [solutionItemEditorOpen, setSolutionItemEditorOpen] = useState(false);
+  const [solutionItemForm] = Form.useForm();
   const isBrand = module === "brands";
   const show = (row?: Row) => {
     setEditing(row);
@@ -2248,6 +2254,51 @@ function PortalManager({ module }: { module: Module }) {
         message.success("平台商品已移除");
       },
     });
+  const loadSolutionProducts = async (row: Row) => {
+    setSolution(row);
+    setSolutionItems(await rootApi(`/api/admin/content/solution/${row.id}/products`));
+    setSolutionItemsOpen(true);
+  };
+  const showSolutionItem = (row?: Row) => {
+    setSolutionItemEditing(row);
+    solutionItemForm.resetFields();
+    solutionItemForm.setFieldsValue(
+      row || { skuId: products.data?.[0]?.skuId, defaultQuantity: 1, requiredItem: 1, sortOrder: 0 },
+    );
+    setSolutionItemEditorOpen(true);
+  };
+  const saveSolutionItem = async () => {
+    try {
+      const values = await solutionItemForm.validateFields();
+      const url = `/api/admin/content/solution/${solution!.id}/products${solutionItemEditing ? `/${solutionItemEditing.id}` : ""}`;
+      const response = await fetch(url, {
+        method: solutionItemEditing ? "PUT" : "POST",
+        headers: apiHeaders(),
+        body: JSON.stringify(values),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data.detail || "方案商品保存失败");
+      }
+      setSolutionItems(await rootApi(`/api/admin/content/solution/${solution!.id}/products`));
+      setSolutionItemEditorOpen(false);
+      message.success("方案商品已保存");
+    } catch (error) {
+      message.error((error as Error).message);
+    }
+  };
+  const removeSolutionItem = (row: Row) =>
+    modal.confirm({
+      title: `确认从方案中移除“${row.title}”？`,
+      onOk: async () => {
+        await fetch(`/api/admin/content/solution/${solution!.id}/products/${row.id}`, {
+          method: "DELETE",
+          headers: apiHeaders(),
+        });
+        setSolutionItems(await rootApi(`/api/admin/content/solution/${solution!.id}/products`));
+        message.success("方案商品已移除");
+      },
+    });
   const columns: ColumnsType<Row> = [
     {
       title: current.name,
@@ -2288,11 +2339,16 @@ function PortalManager({ module }: { module: Module }) {
     },
     {
       title: "操作",
-      width: module === "platforms" ? 250 : 150,
+      width: ["platforms", "solutions"].includes(module) ? 250 : 150,
       render: (_, row) => (
         <Space>
           {module === "platforms" && (
             <Button type="link" onClick={() => void loadPlatformProducts(row)}>
+              商品管理
+            </Button>
+          )}
+          {module === "solutions" && (
+            <Button type="link" onClick={() => void loadSolutionProducts(row)}>
               商品管理
             </Button>
           )}
@@ -2344,11 +2400,16 @@ function PortalManager({ module }: { module: Module }) {
           </Form.Item>
           <Form.Item
             name={isBrand ? "description" : "subtitle"}
-            label="说明"
+            label={module === "solutions" ? "适用场景" : "说明"}
             className="full"
           >
             <Input.TextArea rows={3} />
           </Form.Item>
+          {module === "solutions" && (
+            <Form.Item name="description" label="方案说明" className="full">
+              <Input.TextArea rows={5} placeholder="说明方案目标、设备组合、实施建议等" />
+            </Form.Item>
+          )}
           <Form.Item
             name={isBrand ? "logo" : "imageUrl"}
             label={isBrand ? "品牌 Logo" : "展示图片"}
@@ -2492,6 +2553,85 @@ function PortalManager({ module }: { module: Module }) {
                 { value: 0, label: "下架" },
               ]}
             />
+          </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        open={solutionItemsOpen}
+        title={`${solution?.title || ""} · 方案商品`}
+        width={980}
+        footer={null}
+        onCancel={() => setSolutionItemsOpen(false)}
+      >
+        <Space style={{ marginBottom: 16 }}>
+          <Button type="primary" onClick={() => showSolutionItem()}>
+            ＋ 添加商品
+          </Button>
+          <Typography.Text copyable={{ text: `/web/?view=solution-detail&solutionId=${solution?.id}` }}>
+            分享入口：/web/?view=solution-detail&amp;solutionId={solution?.id}
+          </Typography.Text>
+        </Space>
+        <Table
+          rowKey="id"
+          dataSource={solutionItems}
+          pagination={false}
+          columns={[
+            {
+              title: "商品",
+              render: (_, row) => (
+                <div className="user-cell">
+                  {row.mainImage ? <img src={row.mainImage} alt="" /> : <i>商</i>}
+                  <span><strong>{row.title}</strong><small>{row.skuCode}</small></span>
+                </div>
+              ),
+            },
+            { title: "默认数量", dataIndex: "defaultQuantity", width: 110 },
+            {
+              title: "选择规则",
+              dataIndex: "requiredItem",
+              width: 110,
+              render: (value) => <Tag color={Number(value) === 1 ? "blue" : "orange"}>{Number(value) === 1 ? "必选" : "可选"}</Tag>,
+            },
+            { title: "排序", dataIndex: "sortOrder", width: 90 },
+            {
+              title: "操作",
+              width: 150,
+              render: (_, row) => (
+                <Space>
+                  <Button type="link" onClick={() => showSolutionItem(row)}>编辑</Button>
+                  <Button type="link" danger onClick={() => removeSolutionItem(row)}>移除</Button>
+                </Space>
+              ),
+            },
+          ]}
+        />
+      </Modal>
+      <Modal
+        open={solutionItemEditorOpen}
+        title={`${solutionItemEditing ? "编辑" : "添加"}方案商品`}
+        onCancel={() => setSolutionItemEditorOpen(false)}
+        onOk={() => void saveSolutionItem()}
+      >
+        <Form form={solutionItemForm} layout="vertical">
+          <Form.Item name="skuId" label="关联现有商品" rules={[{ required: true, message: "请选择商品" }]}>
+            <Select
+              showSearch
+              optionFilterProp="label"
+              disabled={!!solutionItemEditing}
+              options={(products.data || []).map((row) => ({
+                value: row.skuId,
+                label: `${row.title} · ${row.skuCode}`,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="defaultQuantity" label="默认数量" rules={[{ required: true, message: "请输入默认数量" }]}>
+            <InputNumber min={1} max={9999} style={{ width: "100%" }} />
+          </Form.Item>
+          <Form.Item name="requiredItem" label="选择规则" rules={[{ required: true }]}>
+            <Select options={[{ value: 1, label: "必选商品" }, { value: 0, label: "可选商品" }]} />
+          </Form.Item>
+          <Form.Item name="sortOrder" label="排序">
+            <InputNumber min={0} style={{ width: "100%" }} />
           </Form.Item>
         </Form>
       </Modal>

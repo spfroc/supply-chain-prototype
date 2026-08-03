@@ -4,6 +4,8 @@ import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.DecimalMin;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
@@ -35,7 +37,7 @@ public class ContentAdminController {
     @GetMapping("/{type}")
     List<Map<String, Object>> list(@PathVariable String type) {
         return jdbc.sql("""
-            SELECT id,title,subtitle,image_url AS imageUrl,link_url AS linkUrl,
+            SELECT id,title,subtitle,description,image_url AS imageUrl,link_url AS linkUrl,
                    sort_order AS sortOrder,status,created_at AS createdAt,updated_at AS updatedAt
             FROM portal_resource
             WHERE resource_type=:type AND deleted_at IS NULL
@@ -46,10 +48,10 @@ public class ContentAdminController {
     @PostMapping("/{type}") @ResponseStatus(HttpStatus.CREATED) @Transactional
     Map<String, Object> create(@PathVariable String type, @Valid @RequestBody ResourceRequest request) {
         jdbc.sql("""
-            INSERT INTO portal_resource(resource_type,title,subtitle,image_url,link_url,sort_order,status)
-            VALUES(:type,:title,:subtitle,:imageUrl,:linkUrl,:sortOrder,:status)
+            INSERT INTO portal_resource(resource_type,title,subtitle,description,image_url,link_url,sort_order,status)
+            VALUES(:type,:title,:subtitle,:description,:imageUrl,:linkUrl,:sortOrder,:status)
             """).param("type", normalize(type)).param("title", request.title())
-            .param("subtitle", request.subtitle()).param("imageUrl", request.imageUrl())
+            .param("subtitle", request.subtitle()).param("description", request.description()).param("imageUrl", request.imageUrl())
             .param("linkUrl", request.linkUrl()).param("sortOrder", request.sortOrder())
             .param("status", request.status()).update();
         long id = jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single();
@@ -59,11 +61,11 @@ public class ContentAdminController {
     @PutMapping("/{type}/{id}") @Transactional
     void update(@PathVariable String type, @PathVariable long id, @Valid @RequestBody ResourceRequest request) {
         int changed = jdbc.sql("""
-            UPDATE portal_resource SET title=:title,subtitle=:subtitle,image_url=:imageUrl,
+            UPDATE portal_resource SET title=:title,subtitle=:subtitle,description=:description,image_url=:imageUrl,
                 link_url=:linkUrl,sort_order=:sortOrder,status=:status
             WHERE id=:id AND resource_type=:type AND deleted_at IS NULL
             """).param("id", id).param("type", normalize(type)).param("title", request.title())
-            .param("subtitle", request.subtitle()).param("imageUrl", request.imageUrl())
+            .param("subtitle", request.subtitle()).param("description", request.description()).param("imageUrl", request.imageUrl())
             .param("linkUrl", request.linkUrl()).param("sortOrder", request.sortOrder())
             .param("status", request.status()).update();
         if (changed == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "记录不存在");
@@ -127,6 +129,59 @@ public class ContentAdminController {
         if(changed==0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "平台商品不存在");
     }
 
+    @GetMapping("/solution/{solutionId}/products")
+    List<Map<String, Object>> solutionProducts(@PathVariable long solutionId) {
+        requireSolution(solutionId);
+        return jdbc.sql("""
+            SELECT si.id,si.solution_id AS solutionId,si.sku_id AS skuId,p.title,
+                   p.main_image AS mainImage,s.sku_code AS skuCode,s.member_price AS price,
+                   s.stock-s.reserved_stock AS availableStock,si.default_quantity AS defaultQuantity,
+                   si.required_item AS requiredItem,si.sort_order AS sortOrder,si.updated_at AS updatedAt
+            FROM solution_item si
+            JOIN product_sku s ON s.id=si.sku_id AND s.deleted_at IS NULL
+            JOIN product_spu p ON p.id=s.spu_id AND p.deleted_at IS NULL
+            WHERE si.solution_id=:solutionId AND si.deleted_at IS NULL
+            ORDER BY si.sort_order,si.id
+            """).param("solutionId", solutionId).query().listOfRows();
+    }
+
+    @PostMapping("/solution/{solutionId}/products") @ResponseStatus(HttpStatus.CREATED) @Transactional
+    Map<String, Object> addSolutionProduct(@PathVariable long solutionId,
+                                           @Valid @RequestBody SolutionProductRequest request) {
+        requireSolution(solutionId);
+        jdbc.sql("""
+            INSERT INTO solution_item(solution_id,sku_id,default_quantity,required_item,sort_order)
+            VALUES(:solutionId,:skuId,:defaultQuantity,:requiredItem,:sortOrder)
+            ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id),default_quantity=VALUES(default_quantity),
+                required_item=VALUES(required_item),sort_order=VALUES(sort_order),deleted_at=NULL
+            """).param("solutionId", solutionId).param("skuId", request.skuId())
+            .param("defaultQuantity", request.defaultQuantity()).param("requiredItem", request.requiredItem())
+            .param("sortOrder", request.sortOrder()).update();
+        return Map.of("id", jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single());
+    }
+
+    @PutMapping("/solution/{solutionId}/products/{id}") @Transactional
+    void updateSolutionProduct(@PathVariable long solutionId, @PathVariable long id,
+                               @Valid @RequestBody SolutionProductRequest request) {
+        int changed = jdbc.sql("""
+            UPDATE solution_item SET default_quantity=:defaultQuantity,required_item=:requiredItem,
+                sort_order=:sortOrder
+            WHERE id=:id AND solution_id=:solutionId AND deleted_at IS NULL
+            """).param("id", id).param("solutionId", solutionId)
+            .param("defaultQuantity", request.defaultQuantity()).param("requiredItem", request.requiredItem())
+            .param("sortOrder", request.sortOrder()).update();
+        if (changed == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "方案商品不存在");
+    }
+
+    @DeleteMapping("/solution/{solutionId}/products/{id}") @ResponseStatus(HttpStatus.NO_CONTENT) @Transactional
+    void deleteSolutionProduct(@PathVariable long solutionId, @PathVariable long id) {
+        int changed = jdbc.sql("""
+            UPDATE solution_item SET deleted_at=NOW()
+            WHERE id=:id AND solution_id=:solutionId AND deleted_at IS NULL
+            """).param("id", id).param("solutionId", solutionId).update();
+        if (changed == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "方案商品不存在");
+    }
+
     @GetMapping("/brands/list")
     List<Map<String, Object>> brands() {
         return jdbc.sql("""
@@ -178,11 +233,22 @@ public class ContentAdminController {
         if(count==0) throw new ResponseStatusException(HttpStatus.NOT_FOUND,"平台不存在");
     }
 
-    public record ResourceRequest(@NotBlank String title, String subtitle, String imageUrl, String linkUrl,
+    private void requireSolution(long id) {
+        Integer count = jdbc.sql("""
+            SELECT COUNT(*) FROM portal_resource
+            WHERE id=:id AND resource_type='SOLUTION' AND deleted_at IS NULL
+            """).param("id", id).query(Integer.class).single();
+        if (count == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "方案不存在");
+    }
+
+    public record ResourceRequest(@NotBlank String title, String subtitle, String description, String imageUrl, String linkUrl,
                                   @NotNull Integer sortOrder, @NotNull Integer status) {}
     public record BrandRequest(@NotBlank String name, String logo, String description,
                                @NotNull Integer sortOrder, @NotNull Integer status) {}
     public record PlatformProductRequest(@NotNull Long skuId,
         @NotNull @DecimalMin("0") BigDecimal platformPrice,String productUrl,
         @NotNull Integer listingStatus) {}
+    public record SolutionProductRequest(@NotNull Long skuId,
+        @Min(1) @Max(9999) int defaultQuantity, @Min(0) @Max(1) int requiredItem,
+        @NotNull Integer sortOrder) {}
 }

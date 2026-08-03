@@ -23,7 +23,7 @@ public class PortalController {
         var result = new LinkedHashMap<String, Object>();
         for (String type : List.of("NAVIGATION", "BANNER", "PLATFORM", "SOLUTION", "CONTENT")) {
             result.put(type.toLowerCase(), jdbc.sql("""
-                SELECT id,title,subtitle,image_url AS imageUrl,link_url AS linkUrl,sort_order AS sortOrder
+                SELECT id,title,subtitle,description,image_url AS imageUrl,link_url AS linkUrl,sort_order AS sortOrder
                 FROM portal_resource
                 WHERE resource_type=:type AND status=1 AND deleted_at IS NULL
                 ORDER BY sort_order,id
@@ -34,6 +34,29 @@ public class PortalController {
             WHERE status=1 AND deleted_at IS NULL ORDER BY sort_order,id
             """).query().listOfRows());
         return result;
+    }
+
+    @GetMapping("/solutions/{solutionId}")
+    Map<String, Object> solution(@PathVariable long solutionId) {
+        var solutions = jdbc.sql("""
+            SELECT id,title,subtitle,description,image_url AS imageUrl,sort_order AS sortOrder
+            FROM portal_resource
+            WHERE id=:id AND resource_type='SOLUTION' AND status=1 AND deleted_at IS NULL
+            """).param("id", solutionId).query().listOfRows();
+        if (solutions.isEmpty()) throw new org.springframework.web.server.ResponseStatusException(
+            org.springframework.http.HttpStatus.NOT_FOUND, "方案不存在或未发布");
+        var items = jdbc.sql("""
+            SELECT si.id AS relationId,si.sku_id AS skuId,p.title,p.main_image AS mainImage,p.summary,
+                   s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
+                   s.stock-s.reserved_stock AS availableStock,si.default_quantity AS defaultQuantity,
+                   si.required_item AS requiredItem,si.sort_order AS sortOrder
+            FROM solution_item si
+            JOIN product_sku s ON s.id=si.sku_id AND s.status=1 AND s.deleted_at IS NULL
+            JOIN product_spu p ON p.id=s.spu_id AND p.status=1 AND p.deleted_at IS NULL
+            WHERE si.solution_id=:solutionId AND si.deleted_at IS NULL
+            ORDER BY si.sort_order,si.id
+            """).param("solutionId", solutionId).query().listOfRows();
+        return Map.of("solution", solutions.getFirst(), "products", items);
     }
 
     @GetMapping("/platforms/{platformId}/products")
