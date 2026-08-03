@@ -37,7 +37,7 @@ public class ContentAdminController {
     @GetMapping("/{type}")
     List<Map<String, Object>> list(@PathVariable String type) {
         return jdbc.sql("""
-            SELECT id,title,subtitle,description,image_url AS imageUrl,link_url AS linkUrl,
+            SELECT id,title,subtitle,description,image_url AS imageUrl,mobile_image_url AS mobileImageUrl,link_url AS linkUrl,
                    sort_order AS sortOrder,status,created_at AS createdAt,updated_at AS updatedAt
             FROM portal_resource
             WHERE resource_type=:type AND deleted_at IS NULL
@@ -48,10 +48,11 @@ public class ContentAdminController {
     @PostMapping("/{type}") @ResponseStatus(HttpStatus.CREATED) @Transactional
     Map<String, Object> create(@PathVariable String type, @Valid @RequestBody ResourceRequest request) {
         jdbc.sql("""
-            INSERT INTO portal_resource(resource_type,title,subtitle,description,image_url,link_url,sort_order,status)
-            VALUES(:type,:title,:subtitle,:description,:imageUrl,:linkUrl,:sortOrder,:status)
+            INSERT INTO portal_resource(resource_type,title,subtitle,description,image_url,mobile_image_url,link_url,sort_order,status)
+            VALUES(:type,:title,:subtitle,:description,:imageUrl,:mobileImageUrl,:linkUrl,:sortOrder,:status)
             """).param("type", normalize(type)).param("title", request.title())
             .param("subtitle", request.subtitle()).param("description", request.description()).param("imageUrl", request.imageUrl())
+            .param("mobileImageUrl", request.mobileImageUrl())
             .param("linkUrl", request.linkUrl()).param("sortOrder", request.sortOrder())
             .param("status", request.status()).update();
         long id = jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single();
@@ -62,10 +63,12 @@ public class ContentAdminController {
     void update(@PathVariable String type, @PathVariable long id, @Valid @RequestBody ResourceRequest request) {
         int changed = jdbc.sql("""
             UPDATE portal_resource SET title=:title,subtitle=:subtitle,description=:description,image_url=:imageUrl,
+                mobile_image_url=:mobileImageUrl,
                 link_url=:linkUrl,sort_order=:sortOrder,status=:status
             WHERE id=:id AND resource_type=:type AND deleted_at IS NULL
             """).param("id", id).param("type", normalize(type)).param("title", request.title())
             .param("subtitle", request.subtitle()).param("description", request.description()).param("imageUrl", request.imageUrl())
+            .param("mobileImageUrl", request.mobileImageUrl())
             .param("linkUrl", request.linkUrl()).param("sortOrder", request.sortOrder())
             .param("status", request.status()).update();
         if (changed == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "记录不存在");
@@ -241,7 +244,8 @@ public class ContentAdminController {
         if (count == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "方案不存在");
     }
 
-    public record ResourceRequest(@NotBlank String title, String subtitle, String description, String imageUrl, String linkUrl,
+    public record ResourceRequest(@NotBlank String title, String subtitle, String description, String imageUrl,
+                                  String mobileImageUrl, String linkUrl,
                                   @NotNull Integer sortOrder, @NotNull Integer status) {}
     public record BrandRequest(@NotBlank String name, String logo, String description,
                                @NotNull Integer sortOrder, @NotNull Integer status) {}

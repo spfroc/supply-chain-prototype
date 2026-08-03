@@ -473,7 +473,10 @@ function MobileSolutionDetail({ solutionId, back, requireAuth, reloadCart, check
   return (
     <div className="mobile-app m-solution-detail">
       <header className="sub-header"><button onClick={back}>‹ 返回</button><h2>方案详情</h2><button onClick={() => navigator.clipboard?.writeText(location.href).then(() => Toast.show("分享链接已复制"))}>分享</button></header>
-      <section className="m-solution-hero" style={data.solution?.imageUrl ? { backgroundImage: `linear-gradient(135deg,#15365de8,#1f6ac9dd),url(${data.solution.imageUrl})` } : undefined}>
+      <section className="m-solution-poster">
+        {data.solution?.mobileImageUrl || data.solution?.imageUrl ? <img src={data.solution.mobileImageUrl || data.solution.imageUrl} alt={`${data.solution.title}宣传海报`} /> : <div>请上传9:16方案宣传海报</div>}
+      </section>
+      <section className="m-solution-hero">
         <span>SCENE SOLUTION</span><h1>{data.solution?.title}</h1><h3>{data.solution?.subtitle}</h3><p>{data.solution?.description}</p>
       </section>
       <section className="m-solution-items">

@@ -43,6 +43,7 @@ public class ProductImageController {
             case "brand" -> new ImageProfile(300, 300, 2000, 2000, 1.0, 2);
             case "banner" -> new ImageProfile(1200, 400, 3840, 1280, 3.0, 5);
             case "portal" -> new ImageProfile(800, 450, 3840, 2160, 16.0 / 9.0, 5);
+            case "solutionMobile" -> new ImageProfile(720, 1280, 2160, 3840, 9.0 / 16.0, 5);
             case "rich" -> new ImageProfile(300, 200, 3840, 3840, 0, 8);
             default -> throw new IllegalArgumentException("未知图片用途");
         };
@@ -84,6 +85,7 @@ public class ProductImageController {
         if (Math.abs(ratio - 1) < 0.01) return "1:1";
         if (Math.abs(ratio - 3) < 0.01) return "3:1";
         if (Math.abs(ratio - 16.0 / 9.0) < 0.01) return "16:9";
+        if (Math.abs(ratio - 9.0 / 16.0) < 0.01) return "9:16";
         return String.format("%.2f:1", ratio);
     }
 

@@ -23,7 +23,8 @@ public class PortalController {
         var result = new LinkedHashMap<String, Object>();
         for (String type : List.of("NAVIGATION", "BANNER", "PLATFORM", "SOLUTION", "CONTENT")) {
             result.put(type.toLowerCase(), jdbc.sql("""
-                SELECT id,title,subtitle,description,image_url AS imageUrl,link_url AS linkUrl,sort_order AS sortOrder
+                SELECT id,title,subtitle,description,image_url AS imageUrl,mobile_image_url AS mobileImageUrl,
+                       link_url AS linkUrl,sort_order AS sortOrder
                 FROM portal_resource
                 WHERE resource_type=:type AND status=1 AND deleted_at IS NULL
                 ORDER BY sort_order,id
@@ -39,7 +40,8 @@ public class PortalController {
     @GetMapping("/solutions/{solutionId}")
     Map<String, Object> solution(@PathVariable long solutionId) {
         var solutions = jdbc.sql("""
-            SELECT id,title,subtitle,description,image_url AS imageUrl,sort_order AS sortOrder
+            SELECT id,title,subtitle,description,image_url AS imageUrl,mobile_image_url AS mobileImageUrl,
+                   sort_order AS sortOrder
             FROM portal_resource
             WHERE id=:id AND resource_type='SOLUTION' AND status=1 AND deleted_at IS NULL
             """).param("id", solutionId).query().listOfRows();

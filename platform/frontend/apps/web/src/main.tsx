@@ -1044,14 +1044,16 @@ function SolutionDetail({
   return (
     <main className="page solution-detail-page">
       <div className="breadcrumb"><button onClick={back}>场景方案</button>　/　{data.solution?.title || "方案详情"}</div>
-      <section className="solution-hero">
+      <section className="solution-poster">
+        {data.solution?.imageUrl ? <img src={data.solution.imageUrl} alt={`${data.solution.title}宣传海报`} /> : <div>请在管理后台上传16:9方案宣传海报</div>}
+      </section>
+      <section className="solution-summary">
         <div>
           <span>SCENE SOLUTION</span>
           <h1>{data.solution?.title}</h1>
           <h3>{data.solution?.subtitle}</h3>
           <p>{data.solution?.description || "根据场景需求搭配设备组合，可按实际需要调整数量后直接下单。"}</p>
         </div>
-        {data.solution?.imageUrl && <img src={data.solution.imageUrl} alt={data.solution.title} />}
       </section>
       <section className="solution-products">
         <header><div><h2>设备组合</h2><p>必选商品不可取消；可选配件按实际需求勾选，数量可在下单前确认。</p></div><b>已选 {chosen.length} 项</b></header>

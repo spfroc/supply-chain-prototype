@@ -148,7 +148,7 @@ function ProductImageUpload({
   value?: string;
   onChange?: (value: string) => void;
   multiple?: boolean;
-  kind?: "main" | "gallery" | "brand" | "banner" | "portal";
+  kind?: "main" | "gallery" | "brand" | "banner" | "portal" | "solutionMobile";
 }) {
   const { message } = AntApp.useApp();
   const [uploadError, setUploadError] = useState("");
@@ -159,6 +159,7 @@ function ProductImageUpload({
     brand: { minWidth: 300, minHeight: 300, maxWidth: 2000, maxHeight: 2000, ratio: 1, ratioLabel: "1:1", maxMb: 2, title: "Logo" },
     banner: { minWidth: 1200, minHeight: 400, maxWidth: 3840, maxHeight: 1280, ratio: 3, ratioLabel: "3:1", maxMb: 5, title: "轮播图" },
     portal: { minWidth: 800, minHeight: 450, maxWidth: 3840, maxHeight: 2160, ratio: 16 / 9, ratioLabel: "16:9", maxMb: 5, title: "展示图" },
+    solutionMobile: { minWidth: 720, minHeight: 1280, maxWidth: 2160, maxHeight: 3840, ratio: 9 / 16, ratioLabel: "9:16", maxMb: 5, title: "H5竖版海报" },
   };
   const profile = profiles[kind];
   const urls = String(value || "")
@@ -2454,11 +2455,11 @@ function PortalManager({ module }: { module: Module }) {
           )}
           <Form.Item
             name={isBrand ? "logo" : "imageUrl"}
-            label={isBrand ? "品牌 Logo" : "展示图片"}
+            label={isBrand ? "品牌 Logo" : module === "solutions" ? "Web端横版宣传海报（16:9）" : "展示图片"}
             className="full"
             rules={
-              module === "banners"
-                ? [{ required: true, message: "请上传轮播图片" }]
+              ["banners", "solutions"].includes(module)
+                ? [{ required: true, message: module === "solutions" ? "请上传Web端16:9横版宣传海报" : "请上传轮播图片" }]
                 : undefined
             }
           >
@@ -2472,6 +2473,16 @@ function PortalManager({ module }: { module: Module }) {
               }
             />
           </Form.Item>
+          {module === "solutions" && (
+            <Form.Item
+              name="mobileImageUrl"
+              label="H5端竖版宣传海报（9:16）"
+              className="full"
+              rules={[{ required: true, message: "请上传H5端9:16竖版宣传海报" }]}
+            >
+              <ProductImageUpload kind="solutionMobile" />
+            </Form.Item>
+          )}
           {!isBrand && (
             <Form.Item name="linkUrl" label="跳转链接" className="full">
               <Input placeholder="/web/?view=products 或 https://..." />
