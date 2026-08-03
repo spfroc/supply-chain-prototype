@@ -127,6 +127,7 @@ function App() {
       Toast.show((e as Error).message);
     }
   };
+  const loadProducts = () => api<Row[]>("/api/public/catalog/products").then(setProducts);
   const loadAccount = async () => {
     const session = await api<Row>("/api/auth/session");
     if (!session.authenticated) throw new Error("请先登录");
@@ -144,6 +145,7 @@ function App() {
   };
   const authSuccess = async () => {
     await loadAccount();
+    await loadProducts();
     setAuthOpen(false);
     const action = pendingAction.current;
     pendingAction.current = undefined;
@@ -157,9 +159,7 @@ function App() {
       .then(setPortal)
       .catch(() => {});
     void api<Row[]>("/api/public/catalog/categories").then(setCategories);
-    void api<Row[]>("/api/public/catalog/products?enterpriseId=1").then(
-      setProducts,
-    );
+    void loadProducts();
     void loadAccount()
       .catch(() => {})
       .finally(() => setAuthReady(true));
@@ -210,6 +210,7 @@ function App() {
     setCurrent(undefined);
     setProfile({});
     setCart([]);
+    void loadProducts();
     setTab("home");
   };
   if (!authReady) return <div className="m-auth-loading">正在加载…</div>;
@@ -397,10 +398,16 @@ function MobileAuth({
     }
     setSubmitting(true);
     try {
-      await api(`/api/auth/${mode}`, {
+      const result = (await api(`/api/auth/${mode}`, {
         method: "POST",
         body: JSON.stringify(form),
-      });
+      })) as Row;
+      if (mode === "register" && result.pendingApproval) {
+        Toast.show(String(result.message || "注册申请已提交，请等待管理员启用"));
+        setMode("login");
+        setForm({ enterpriseName: "", username: form.username || "" });
+        return;
+      }
       onSuccess();
     } catch (e) {
       Toast.show((e as Error).message);
@@ -441,7 +448,7 @@ function MobileAuth({
         <p>
           {mode === "login"
             ? "登录后查看企业协议、订单和购物车"
-            : "请输入企业全称，注册后自动加入企业"}
+            : "请输入企业全称，提交后由企业管理员启用账号"}
         </p>
         {mode === "register" && (
           <label>
@@ -498,7 +505,7 @@ function MobileAuth({
           disabled={submitting}
           onClick={() => void submit()}
         >
-          {submitting ? "提交中…" : mode === "login" ? "登录" : "注册并登录"}
+          {submitting ? "提交中…" : mode === "login" ? "登录" : "提交注册申请"}
         </button>
         {mode === "login" && <small>演示账号 demo / demo-password</small>}
       </main>

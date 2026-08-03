@@ -1,21 +1,23 @@
 package cn.govproc.supplychain.catalog;
 
+import cn.govproc.supplychain.auth.ClientAuthService;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @RequestMapping("/api/public/catalog")
 public class CatalogController {
     private final JdbcClient jdbc;
+    private final ClientAuthService auth;
 
-    public CatalogController(JdbcClient jdbc) {
+    public CatalogController(JdbcClient jdbc,ClientAuthService auth) {
         this.jdbc = jdbc;
+        this.auth = auth;
     }
 
     @GetMapping("/categories")
@@ -28,7 +30,8 @@ public class CatalogController {
     }
 
     @GetMapping("/products")
-    List<ProductSummary> products(@RequestParam(required = false) Long enterpriseId) {
+    List<ProductSummary> products() {
+        Long enterpriseId=auth.optionalCurrent().map(ClientAuthService.CurrentUser::enterpriseId).orElse(null);
         return jdbc.sql("""
             SELECT s.id AS sku_id, p.spu_code, s.sku_code, p.title, p.main_image,p.category_id,
                    JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')) AS gallery,

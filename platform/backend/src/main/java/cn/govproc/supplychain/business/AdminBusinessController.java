@@ -1,5 +1,6 @@
 package cn.govproc.supplychain.business;
 
+import cn.govproc.supplychain.order.OrderInventoryService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
@@ -24,9 +25,11 @@ public class AdminBusinessController {
     private static final SecureRandom CODE_RANDOM = new SecureRandom();
     private final JdbcClient jdbc;
     private final PasswordEncoder encoder;
-    public AdminBusinessController(JdbcClient jdbc,PasswordEncoder encoder) {
+    private final OrderInventoryService inventory;
+    public AdminBusinessController(JdbcClient jdbc,PasswordEncoder encoder,OrderInventoryService inventory) {
         this.jdbc = jdbc;
         this.encoder = encoder;
+        this.inventory = inventory;
     }
 
     @GetMapping("/products")
@@ -390,6 +393,10 @@ public class AdminBusinessController {
             throw new IllegalArgumentException("商品物流状态不能倒退");
         if(r.fulfillmentStatus()==4&&currentItemStatus!=0)
             throw new IllegalArgumentException("只有待发货商品可以取消发货");
+        if(currentItemStatus==0&&r.fulfillmentStatus()>0&&r.fulfillmentStatus()<4)
+            inventory.commitShipment(orderId,itemId);
+        if(currentItemStatus==0&&r.fulfillmentStatus()==4)
+            inventory.releaseItem(orderId,itemId);
         require(jdbc.sql("""
           UPDATE order_item SET fulfillment_status=:status,logistics_company=:company,
             logistics_no=:logisticsNo,logistics_status=:logisticsStatus,

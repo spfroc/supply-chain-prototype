@@ -149,6 +149,7 @@ function App() {
     setToast(text);
     setTimeout(() => setToast(""), 2200);
   };
+  const loadProducts = () => api<Row[]>("/api/public/catalog/products").then(setProducts);
   const loadCart = () =>
     api<Row[]>("/api/client/cart")
       .then(setCart)
@@ -175,6 +176,7 @@ function App() {
   };
   const authSuccess = async () => {
     await loadAccount();
+    await loadProducts();
     setAuthOpen(false);
     const action = pendingAction.current;
     pendingAction.current = undefined;
@@ -188,9 +190,7 @@ function App() {
       .then(setPortal)
       .catch(() => {});
     void api<Row[]>("/api/public/catalog/categories").then(setCategories);
-    void api<Row[]>("/api/public/catalog/products?enterpriseId=1").then(
-      setProducts,
-    );
+    void loadProducts();
     void loadAccount()
       .catch(() => {})
       .finally(() => setAuthReady(true));
@@ -315,6 +315,7 @@ function App() {
     setCurrent(undefined);
     setProfile({});
     setCart([]);
+    void loadProducts();
     navigate("home");
   };
   if (!authReady)
@@ -527,9 +528,11 @@ function AuthPage({
   const [mode, setMode] = useState<"login" | "register">("login");
   const [form, setForm] = useState<Row>({ enterpriseName: "" });
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const submit = async () => {
     setError("");
+    setNotice("");
     const required =
       mode === "login"
         ? ["username", "password"]
@@ -544,10 +547,16 @@ function AuthPage({
     }
     setSubmitting(true);
     try {
-      await api(`/api/auth/${mode}`, {
+      const result = (await api(`/api/auth/${mode}`, {
         method: "POST",
         body: JSON.stringify(form),
-      });
+      })) as Row;
+      if (mode === "register" && result.pendingApproval) {
+        setNotice(String(result.message || "注册申请已提交，请等待管理员启用"));
+        setMode("login");
+        setForm({ enterpriseName: "", username: form.username || "" });
+        return;
+      }
       onSuccess();
     } catch (e) {
       setError((e as Error).message);
@@ -663,6 +672,7 @@ function AuthPage({
           />
         </label>
         {error && <div className="auth-error">{error}</div>}
+        {notice && <div className="auth-notice">{notice}</div>}
         <button
           className="auth-submit"
           disabled={submitting}
@@ -672,7 +682,7 @@ function AuthPage({
             ? "正在提交…"
             : mode === "login"
               ? "登录企业采购平台"
-              : "注册并登录"}
+              : "提交注册申请"}
         </button>
         {mode === "login" && <small>演示账号：demo　密码：demo-password</small>}
       </section>

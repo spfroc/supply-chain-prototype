@@ -34,10 +34,13 @@ public class SystemAdminController {
     Map<String, Object> me(Principal principal) {
         return jdbc.sql("""
             SELECT u.id,u.username,u.real_name AS realName,
-                   GROUP_CONCAT(r.name ORDER BY r.id SEPARATOR '、') AS roleNames
+                   GROUP_CONCAT(DISTINCT r.name ORDER BY r.id SEPARATOR '、') AS roleNames,
+                   GROUP_CONCAT(DISTINCT p.permission_code ORDER BY p.permission_code) AS permissionCodes
             FROM sys_admin_user u
             LEFT JOIN sys_admin_user_role ur ON ur.user_id=u.id
             LEFT JOIN sys_role r ON r.id=ur.role_id
+            LEFT JOIN sys_role_permission rp ON rp.role_id=r.id
+            LEFT JOIN sys_permission p ON p.id=rp.permission_id
             WHERE u.username=:username AND u.status=1 AND u.deleted_at IS NULL
             GROUP BY u.id
             """).param("username", principal.getName()).query().singleRow();

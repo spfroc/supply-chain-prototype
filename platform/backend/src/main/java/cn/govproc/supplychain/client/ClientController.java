@@ -1,19 +1,19 @@
 package cn.govproc.supplychain.client;
 
 import cn.govproc.supplychain.auth.ClientAuthService;
+import cn.govproc.supplychain.order.OrderInventoryService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.NotBlank;
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,10 +33,12 @@ public class ClientController {
     private final ClientAuthService auth;
 
     private final JdbcClient jdbc;
+    private final OrderInventoryService inventory;
 
-    public ClientController(JdbcClient jdbc, ClientAuthService auth) {
+    public ClientController(JdbcClient jdbc, ClientAuthService auth, OrderInventoryService inventory) {
         this.jdbc = jdbc;
         this.auth = auth;
+        this.inventory = inventory;
     }
 
     @GetMapping("/profile")
@@ -369,7 +371,8 @@ public class ClientController {
                 }
             }
         }
-        String orderNo = "PO" + LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
+        String orderNo = "PO" + System.currentTimeMillis()
+            + String.format("%06d", ThreadLocalRandom.current().nextInt(1_000_000));
         jdbc.sql("""
             INSERT INTO order_main(order_no,enterprise_id,user_id,agreement_id,item_amount,freight_amount,
               payable_amount,payment_status,order_status,price_version,idempotency_key,payment_due_at)
@@ -410,6 +413,22 @@ public class ClientController {
         }
         jdbc.sql("DELETE FROM cart_item WHERE user_id=:userId AND selected=1").param("userId", userId()).update();
         return Map.of("id", orderId, "orderNo", orderNo, "payableAmount", amount, "paymentMethod", "银行转账");
+    }
+
+    @PostMapping("/orders/{id}/cancel")
+    @Transactional
+    void cancelOrder(@PathVariable long id) {
+        int changed=jdbc.sql("""
+            UPDATE order_main SET order_status=4
+            WHERE id=:id AND user_id=:userId AND enterprise_id=:enterpriseId
+              AND order_status=0 AND payment_status=0
+            """).params(Map.of("id",id,"userId",userId(),"enterpriseId",enterpriseId())).update();
+        if(changed!=1) throw new IllegalArgumentException("仅待付款订单可以取消");
+        inventory.releaseReserved(id);
+        jdbc.sql("""
+            INSERT INTO order_event(order_main_id,event_type,from_status,to_status,description,operator_type)
+            VALUES(:id,'ORDER_CANCELLED',0,4,'采购人主动取消订单','CLIENT')
+            """).param("id",id).update();
     }
 
     private long userId() { return auth.current().userId(); }

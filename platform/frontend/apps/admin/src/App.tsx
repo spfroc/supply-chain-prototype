@@ -513,6 +513,14 @@ const navItems = [
     ],
   },
 ];
+const modulePermission: Partial<Record<Module, string>> = {
+  overview: "dashboard:view", products: "product:manage", categories: "product:manage",
+  attributes: "product:manage", brands: "product:manage", platforms: "product:manage",
+  navigations: "product:manage", banners: "product:manage", solutions: "product:manage",
+  contents: "product:manage", enterprises: "enterprise:manage", agreements: "agreement:manage",
+  orders: "order:manage", users: "system:user", roles: "system:role",
+  permissions: "system:role", logs: "system:log", configs: "system:config",
+};
 
 export function App() {
   const [authenticated, setAuthenticated] = useState(!!adminCredential());
@@ -622,6 +630,19 @@ function AdminApp({ logout }: { logout: () => void }) {
   useEffect(() => {
     void api<Row>("/me").then(setAdmin);
   }, []);
+  const permissionSet = useMemo(
+    () => new Set(String(admin.permissionCodes || "").split(",").filter(Boolean)),
+    [admin.permissionCodes],
+  );
+  const allowed = (value: Module) => !modulePermission[value] || permissionSet.has(modulePermission[value]!);
+  const visibleNavItems = useMemo(() => navItems.map((item) => item.children
+    ? { ...item, children: item.children.filter((child) => allowed(child.key as Module)) }
+    : item).filter((item) => item.children ? item.children.length > 0 : allowed(item.key as Module)), [permissionSet]);
+  useEffect(() => {
+    if (!admin.username || allowed(module)) return;
+    const fallback = (Object.keys(modulePermission) as Module[]).find(allowed);
+    if (fallback) setModule(fallback);
+  }, [admin.username, admin.permissionCodes, module]);
   const titles: Record<Module, [string, string]> = {
     overview: ["经营概览", "掌握平台账户、权限与关键业务运行状态"],
     products: ["商品管理", "维护自营商品、SKU、协议价格与可售库存"],
@@ -661,7 +682,7 @@ function AdminApp({ logout }: { logout: () => void }) {
             theme="dark"
             defaultOpenKeys={["business"]}
             selectedKeys={[module]}
-            items={navItems}
+            items={visibleNavItems}
             onClick={({ key }) => setModule(key as Module)}
           />
         </div>

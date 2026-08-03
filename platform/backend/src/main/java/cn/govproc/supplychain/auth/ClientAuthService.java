@@ -6,6 +6,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.Map;
+import java.util.Optional;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
@@ -22,14 +23,18 @@ public class ClientAuthService {
     public ClientAuthService(JdbcClient jdbc) { this.jdbc=jdbc; }
 
     public CurrentUser current() {
+        return optionalCurrent().orElseThrow(ClientAuthService::unauthorized);
+    }
+
+    public Optional<CurrentUser> optionalCurrent() {
         var attributes=(ServletRequestAttributes)RequestContextHolder.currentRequestAttributes();
         HttpServletRequest request=attributes.getRequest();
         Object cached=request.getAttribute(REQUEST_KEY);
-        if(cached instanceof CurrentUser user) return user;
+        if(cached instanceof CurrentUser user) return Optional.of(user);
         String token=null;
         if(request.getCookies()!=null) for(Cookie cookie:request.getCookies())
             if(COOKIE_NAME.equals(cookie.getName())) token=cookie.getValue();
-        if(token==null||token.isBlank()) throw unauthorized();
+        if(token==null||token.isBlank()) return Optional.empty();
         var rows=jdbc.sql("""
           SELECT u.id AS userId,u.enterprise_id AS enterpriseId,u.username,u.real_name AS realName,
             u.phone,u.role_code AS roleCode,e.name AS enterpriseName
@@ -38,14 +43,14 @@ public class ClientAuthService {
           WHERE s.token_hash=:tokenHash AND s.expires_at>NOW() AND u.status=1
             AND u.deleted_at IS NULL AND e.status=1 AND e.deleted_at IS NULL
           """).param("tokenHash",hash(token)).query().listOfRows();
-        if(rows.isEmpty()) throw unauthorized();
+        if(rows.isEmpty()) return Optional.empty();
         Map<String,Object> row=rows.getFirst();
         CurrentUser user=new CurrentUser(((Number)row.get("userId")).longValue(),
           ((Number)row.get("enterpriseId")).longValue(),String.valueOf(row.get("username")),
           String.valueOf(row.get("realName")),String.valueOf(row.get("phone")),
           String.valueOf(row.get("roleCode")),String.valueOf(row.get("enterpriseName")));
         request.setAttribute(REQUEST_KEY,user);
-        return user;
+        return Optional.of(user);
     }
 
     public static String hash(String token) {

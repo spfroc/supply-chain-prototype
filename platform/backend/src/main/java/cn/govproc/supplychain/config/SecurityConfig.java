@@ -17,7 +17,19 @@ public class SecurityConfig {
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
                 .requestMatchers("/error", "/actuator/health/**", "/api/openapi/**", "/api/docs/**", "/api/public/**", "/api/auth/**", "/api/client/**").permitAll()
-                .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                .requestMatchers("/api/admin/system/me").authenticated()
+                .requestMatchers("/api/admin/system/summary").hasAuthority("dashboard:view")
+                .requestMatchers("/api/admin/system/users/**").hasAuthority("system:user")
+                .requestMatchers("/api/admin/system/roles/**","/api/admin/system/permissions/**").hasAuthority("system:role")
+                .requestMatchers("/api/admin/system/configs/**","/api/admin/system/options/**",
+                  "/api/admin/system/option-groups/**").hasAuthority("system:config")
+                .requestMatchers("/api/admin/system/logs/**").hasAuthority("system:log")
+                .requestMatchers("/api/admin/business/products/**","/api/admin/business/categories/**",
+                  "/api/admin/business/attributes/**","/api/admin/content/**","/api/admin/uploads/**").hasAuthority("product:manage")
+                .requestMatchers("/api/admin/business/enterprises/**").hasAuthority("enterprise:manage")
+                .requestMatchers("/api/admin/business/agreements/**","/api/admin/agreements/**").hasAuthority("agreement:manage")
+                .requestMatchers("/api/admin/business/orders/**").hasAuthority("order:manage")
+                .requestMatchers("/api/admin/**").denyAll()
                 .anyRequest().authenticated())
             .httpBasic(Customizer.withDefaults())
             .build();

@@ -48,13 +48,13 @@ public class ClientAuthController {
         if(usernameExists>0) throw new IllegalArgumentException("登录账号已存在，请更换账号");
         jdbc.sql("""
           INSERT INTO enterprise_user(enterprise_id,username,password_hash,real_name,phone,role_code,status)
-          VALUES(:enterpriseId,:username,:password,:realName,:phone,'BUYER',1)
+          VALUES(:enterpriseId,:username,:password,:realName,:phone,'BUYER',0)
           """).params(Map.of("enterpriseId",enterpriseId,"username",r.username(),
           "password",encoder.encode(r.password()),"realName",r.realName(),"phone",r.phone())).update();
         long userId=jdbc.sql("SELECT id FROM enterprise_user WHERE enterprise_id=:enterpriseId AND username=:username AND deleted_at IS NULL")
           .params(Map.of("enterpriseId",enterpriseId,"username",r.username())).query(Long.class).single();
-        issueSession(userId,response);
-        return Map.of("userId",userId);
+        return Map.of("userId",userId,"pendingApproval",true,
+          "message","注册申请已提交，请等待企业管理员启用账号");
     }
 
     @PostMapping("/login")
