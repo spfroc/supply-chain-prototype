@@ -1070,6 +1070,16 @@ function BusinessModule({ module }: { module: Module }) {
         render: (v) => `¥${Number(v).toFixed(2)}`,
       },
       {
+        title: "销量",
+        dataIndex: "soldCount",
+        render: (v) => `${Number(v || 0)} 件`,
+      },
+      {
+        title: "订单 / 销售额",
+        render: (_, r) =>
+          `${Number(r.orderCount || 0)} 单 / ¥${Number(r.salesAmount || 0).toFixed(2)}`,
+      },
+      {
         title: "库存",
         render: (_, r) => (
           <Tag color={r.stock - r.reservedStock > 10 ? "green" : "orange"}>

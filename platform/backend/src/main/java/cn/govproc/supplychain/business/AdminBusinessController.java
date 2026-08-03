@@ -36,8 +36,17 @@ public class AdminBusinessController {
             p.detail_html AS detailHtml,p.delivery_description AS deliveryDescription,
             p.after_sales_html AS afterSalesHtml,p.category_id AS categoryId,p.brand_id AS brandId,
             p.status,s.id AS skuId,s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
-            s.stock,s.reserved_stock AS reservedStock,DATE_FORMAT(p.updated_at,'%Y-%m-%d %H:%i:%s') AS updatedAt
+            s.stock,s.reserved_stock AS reservedStock,DATE_FORMAT(p.updated_at,'%Y-%m-%d %H:%i:%s') AS updatedAt,
+            COALESCE(sales.soldCount,0) AS soldCount,COALESCE(sales.orderCount,0) AS orderCount,
+            COALESCE(sales.salesAmount,0) AS salesAmount
           FROM product_spu p JOIN product_sku s ON s.spu_id=p.id AND s.deleted_at IS NULL
+          LEFT JOIN (
+            SELECT oi.sku_id,SUM(oi.quantity) AS soldCount,COUNT(DISTINCT oi.order_main_id) AS orderCount,
+              SUM(oi.total_price) AS salesAmount
+            FROM order_item oi JOIN order_main o ON o.id=oi.order_main_id
+            WHERE o.payment_status=2 AND o.order_status<>4 AND o.refund_status=0
+            GROUP BY oi.sku_id
+          ) sales ON sales.sku_id=s.id
           WHERE p.deleted_at IS NULL ORDER BY p.id DESC
           """).query().listOfRows();
     }

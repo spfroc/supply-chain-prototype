@@ -691,6 +691,7 @@ function Product({
               <span key={name}>{name}</span>
             ))}
       </div>
+      <small className="m-product-sales">已售 {row.soldCount || 0} 件</small>
       <div>
         <strong>{money(row.agreementPrice || row.memberPrice)}</strong>
         <del>{money(row.marketPrice)}</del>
@@ -903,6 +904,7 @@ function ProductDetail({
         </div>
         <h1>{product.title}</h1>
         <p>{product.summary}</p>
+        <small>已售 {product.soldCount || 0} 件</small>
         <section>
           <span>自营正品</span>
           <span>协议专价</span>

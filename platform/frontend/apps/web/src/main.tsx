@@ -1215,7 +1215,7 @@ function ProductCard({
           <del>{money(product.marketPrice)}</del>
         </div>
         <div className="stock">
-          <span>库存 {product.availableStock}{platformTitle ? ` · 浏览 ${product.clickCount || 0}` : ""}</span>
+          <span>库存 {product.availableStock} · 已售 {product.soldCount || 0}{platformTitle ? ` · 浏览 ${product.clickCount || 0}` : ""}</span>
           {platformTitle ? (
             product.productUrl && <a className="platform-card-link" href={product.productUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>平台链接</a>
           ) : (
@@ -1330,7 +1330,7 @@ function Detail({
               >
                 ＋
               </button>
-              <small>库存 {product.availableStock} 件</small>
+              <small>库存 {product.availableStock} 件 · 已售 {product.soldCount || 0} 件</small>
             </dd>
           </dl>
           <div className="buy">

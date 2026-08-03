@@ -35,7 +35,7 @@ public class CatalogController {
                    JSON_UNQUOTE(JSON_EXTRACT(p.attributes_json,'$.content')) AS attributes,
                    p.summary,p.detail_html,p.delivery_description,p.after_sales_html,
                    s.market_price, s.member_price, s.stock - s.reserved_stock AS available_stock,
-                   ai.agreement_price,
+                   ai.agreement_price,COALESCE(sales.sold_count,0) AS sold_count,
                    (SELECT GROUP_CONCAT(DISTINCT pr.title ORDER BY pr.sort_order,pr.id SEPARATOR '、')
                     FROM product_platform pp
                     JOIN portal_resource pr ON pr.id=pp.platform_id AND pr.resource_type='PLATFORM'
@@ -47,6 +47,12 @@ public class CatalogController {
                  AND CURRENT_DATE BETWEEN a.effective_date AND a.expiry_date AND a.deleted_at IS NULL
             LEFT JOIN agreement_item ai ON ai.agreement_id = a.id AND ai.sku_id = s.id
                  AND ai.status = 1 AND ai.deleted_at IS NULL
+            LEFT JOIN (
+                SELECT oi.sku_id,SUM(oi.quantity) AS sold_count
+                FROM order_item oi JOIN order_main o ON o.id=oi.order_main_id
+                WHERE o.payment_status=2 AND o.order_status<>4 AND o.refund_status=0
+                GROUP BY oi.sku_id
+            ) sales ON sales.sku_id=s.id
             WHERE p.status = 1 AND s.status = 1 AND s.deleted_at IS NULL
             ORDER BY p.id DESC
             """).param("enterpriseId", enterpriseId).query((rs, n) -> new ProductSummary(
@@ -55,13 +61,13 @@ public class CatalogController {
                 rs.getString("attributes"),rs.getString("summary"),rs.getString("detail_html"),
                 rs.getString("delivery_description"),rs.getString("after_sales_html"),rs.getLong("category_id"),
                 rs.getBigDecimal("market_price"), rs.getBigDecimal("member_price"),
-                rs.getBigDecimal("agreement_price"), rs.getInt("available_stock"),rs.getString("platform_names")
+                rs.getBigDecimal("agreement_price"), rs.getInt("available_stock"),rs.getLong("sold_count"),rs.getString("platform_names")
             )).list();
     }
 
     public record ProductSummary(
         long skuId, String spuCode, String skuCode, String title, String mainImage,String gallery,
         String attributes,String summary,String detailHtml,String deliveryDescription,String afterSalesHtml,long categoryId,
-        BigDecimal marketPrice, BigDecimal memberPrice, BigDecimal agreementPrice, int availableStock,String platformNames
+        BigDecimal marketPrice, BigDecimal memberPrice, BigDecimal agreementPrice, int availableStock,long soldCount,String platformNames
     ) {}
 }

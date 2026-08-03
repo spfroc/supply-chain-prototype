@@ -57,10 +57,17 @@ public class PortalController {
                    p.summary,
                    s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
                    s.stock-s.reserved_stock AS availableStock,si.default_quantity AS defaultQuantity,
-                   si.required_item AS requiredItem,si.sort_order AS sortOrder
+                   si.required_item AS requiredItem,si.sort_order AS sortOrder,
+                   COALESCE(sales.soldCount,0) AS soldCount
             FROM solution_item si
             JOIN product_sku s ON s.id=si.sku_id AND s.status=1 AND s.deleted_at IS NULL
             JOIN product_spu p ON p.id=s.spu_id AND p.status=1 AND p.deleted_at IS NULL
+            LEFT JOIN (
+                SELECT oi.sku_id,SUM(oi.quantity) AS soldCount
+                FROM order_item oi JOIN order_main o ON o.id=oi.order_main_id
+                WHERE o.payment_status=2 AND o.order_status<>4 AND o.refund_status=0
+                GROUP BY oi.sku_id
+            ) sales ON sales.sku_id=s.id
             WHERE si.solution_id=:solutionId AND si.deleted_at IS NULL
             ORDER BY si.sort_order,si.id
             """).param("solutionId", solutionId).query().listOfRows();
@@ -81,9 +88,16 @@ public class PortalController {
                    s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
                    s.stock-s.reserved_stock AS availableStock,pp.platform_price AS platformPrice,
                    pp.product_url AS productUrl,pp.click_count AS clickCount
+                   ,COALESCE(sales.soldCount,0) AS soldCount
             FROM product_platform pp
             JOIN product_sku s ON s.id=pp.sku_id AND s.status=1 AND s.deleted_at IS NULL
             JOIN product_spu p ON p.id=s.spu_id AND p.status=1 AND p.deleted_at IS NULL
+            LEFT JOIN (
+                SELECT oi.sku_id,SUM(oi.quantity) AS soldCount
+                FROM order_item oi JOIN order_main o ON o.id=oi.order_main_id
+                WHERE o.payment_status=2 AND o.order_status<>4 AND o.refund_status=0
+                GROUP BY oi.sku_id
+            ) sales ON sales.sku_id=s.id
             WHERE pp.platform_id=:platformId AND pp.listing_status=1 AND pp.deleted_at IS NULL
             ORDER BY pp.id DESC
             """).param("platformId",platformId).query().listOfRows();
