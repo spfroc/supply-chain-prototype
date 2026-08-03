@@ -1427,7 +1427,7 @@ function BusinessModule({ module }: { module: Module }) {
                 const name = ["attributeValues", String(attribute.id)];
                 const rules = Number(attribute.requiredFlag) === 1 ? [{ required: true, message: `请填写${attribute.name}` }] : [];
                 const options = (attribute.options || []).filter((x: Row) => Number(x.status) === 1).map((x: Row) => ({ label: x.optionLabel, value: x.optionLabel }));
-                const label = `${attribute.name}${attribute.unit ? `（${attribute.unit}）` : ""}${Number(attribute.inheritedLevel) > 0 ? " · 继承" : ""}`;
+                const label = `${attribute.name}${attribute.unit ? `（${attribute.unit}）` : ""}${Number(attribute.inheritedLevel) > 0 ? " · 继承自上级分类" : ""}`;
                 return <Form.Item key={attribute.id} name={name} label={label} rules={rules}>
                   {attribute.inputType === "NUMBER" ? <InputNumber style={{width:"100%"}} />
                     : attribute.inputType === "SELECT" ? <Select options={options} allowClear />

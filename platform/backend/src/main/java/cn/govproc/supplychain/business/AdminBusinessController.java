@@ -10,6 +10,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.security.SecureRandom;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/admin/business")
 public class AdminBusinessController {
+    private static final SecureRandom CODE_RANDOM = new SecureRandom();
     private final JdbcClient jdbc;
     private final PasswordEncoder encoder;
     public AdminBusinessController(JdbcClient jdbc,PasswordEncoder encoder) {
@@ -55,8 +57,7 @@ public class AdminBusinessController {
 
     @PostMapping("/products") @ResponseStatus(HttpStatus.CREATED) @Transactional
     Map<String,Object> createProduct(@Valid @RequestBody ProductRequest r) {
-        String suffix=LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"))
-          +"-"+UUID.randomUUID().toString().substring(0,8);
+        String suffix=uniqueProductCodeSuffix();
         String spuCode="SPU-"+suffix, skuCode="SKU-"+suffix;
         jdbc.sql("""
           INSERT INTO product_spu(spu_code,title,category_id,brand_id,main_image,gallery_json,attributes_json,
@@ -483,6 +484,17 @@ public class AdminBusinessController {
     }
 
     private static String value(String s){return s==null?"":s;}
+    private String uniqueProductCodeSuffix() {
+        for(int attempt=0;attempt<20;attempt++) {
+            String suffix=System.currentTimeMillis()+String.format("%06d",CODE_RANDOM.nextInt(1_000_000));
+            long existing=jdbc.sql("""
+              SELECT (SELECT COUNT(*) FROM product_spu WHERE spu_code=:spuCode)
+                   + (SELECT COUNT(*) FROM product_sku WHERE sku_code=:skuCode)
+              """).params(Map.of("spuCode","SPU-"+suffix,"skuCode","SKU-"+suffix)).query(Long.class).single();
+            if(existing==0) return suffix;
+        }
+        throw new IllegalStateException("商品编码生成失败，请重试");
+    }
     private void saveAttributeValues(long productId,Map<String,Object> values) {
         jdbc.sql("DELETE FROM product_attribute_value WHERE product_id=:id").param("id",productId).update();
         if(values==null) return;
