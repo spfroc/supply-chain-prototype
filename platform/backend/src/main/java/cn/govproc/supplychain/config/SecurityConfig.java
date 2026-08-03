@@ -6,11 +6,13 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.www.BasicAuthenticationFilter;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 @Configuration
 public class SecurityConfig {
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http, JdbcClient jdbc) throws Exception {
         return http
             .csrf(csrf -> csrf.disable())
             .cors(Customizer.withDefaults())
@@ -32,6 +34,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/admin/**").denyAll()
                 .anyRequest().authenticated())
             .httpBasic(Customizer.withDefaults())
+            .addFilterAfter(new AdminAuditFilter(jdbc), BasicAuthenticationFilter.class)
             .build();
     }
 }

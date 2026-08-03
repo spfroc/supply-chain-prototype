@@ -87,7 +87,6 @@ public class SystemAdminController {
         long id = jdbc.sql("SELECT id FROM sys_admin_user WHERE username=:username")
             .param("username", request.username()).query(Long.class).single();
         replaceUserRoles(id, request.roleIds());
-        log("系统管理", "新增用户", "SYS_ADMIN_USER", String.valueOf(id));
         return Map.of("id", id);
     }
 
@@ -106,7 +105,6 @@ public class SystemAdminController {
             )).update();
         requireChanged(changed, "用户不存在");
         replaceUserRoles(id, request.roleIds());
-        log("系统管理", "编辑用户", "SYS_ADMIN_USER", String.valueOf(id));
     }
 
     @DeleteMapping("/users/{id}")
@@ -115,7 +113,6 @@ public class SystemAdminController {
         if (id == 1) throw new IllegalArgumentException("超级管理员账号不能删除");
         requireChanged(jdbc.sql("UPDATE sys_admin_user SET deleted_at=NOW(), status=0 WHERE id=:id AND deleted_at IS NULL")
             .param("id", id).update(), "用户不存在");
-        log("系统管理", "删除用户", "SYS_ADMIN_USER", String.valueOf(id));
     }
 
     @GetMapping("/roles")
@@ -151,7 +148,6 @@ public class SystemAdminController {
         long id = jdbc.sql("SELECT id FROM sys_role WHERE role_code=:code")
             .param("code", request.roleCode()).query(Long.class).single();
         replaceRolePermissions(id, request.permissionIds());
-        log("系统管理", "新增角色", "SYS_ROLE", String.valueOf(id));
         return Map.of("id", id);
     }
 
@@ -163,7 +159,6 @@ public class SystemAdminController {
             """).params(Map.of("id", id, "roleCode", request.roleCode(), "name", request.name(),
                 "description", value(request.description()), "status", request.status())).update(), "角色不存在");
         replaceRolePermissions(id, request.permissionIds());
-        log("系统管理", "编辑角色", "SYS_ROLE", String.valueOf(id));
     }
 
     @DeleteMapping("/roles/{id}")
@@ -174,7 +169,6 @@ public class SystemAdminController {
             .param("id", id).query(Long.class).single();
         if (users > 0) throw new IllegalArgumentException("该角色仍有关联用户，不能删除");
         requireChanged(jdbc.sql("DELETE FROM sys_role WHERE id=:id").param("id", id).update(), "角色不存在");
-        log("系统管理", "删除角色", "SYS_ROLE", String.valueOf(id));
     }
 
     @GetMapping("/logs")
@@ -205,7 +199,6 @@ public class SystemAdminController {
               is_public=:isPublic, updated_by=1 WHERE id=:id
             """).params(Map.of("id", id, "configValue", request.configValue(),
                 "description", value(request.description()), "isPublic", request.isPublic())).update(), "配置不存在");
-        log("系统管理", "更新配置", "SYSTEM_CONFIG", String.valueOf(id));
     }
 
     @GetMapping("/options")
@@ -252,7 +245,6 @@ public class SystemAdminController {
                 "status", request.status()
             )).update();
         long id = jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single();
-        log("系统管理", "新增选项组", "SYSTEM_OPTION_GROUP", String.valueOf(id));
         return Map.of("id", id, "optionCode", code);
     }
 
@@ -267,7 +259,6 @@ public class SystemAdminController {
                 "controlType", request.controlType(), "sortOrder", request.sortOrder(),
                 "status", request.status()
             )).update(), "选项组不存在");
-        log("系统管理", "编辑选项组", "SYSTEM_OPTION_GROUP", String.valueOf(id));
     }
 
     @DeleteMapping("/option-groups/{id}")
@@ -279,7 +270,6 @@ public class SystemAdminController {
             .param("code", code).query(Long.class).single();
         if (count > 0) throw new IllegalArgumentException("请先删除该选项组中的全部选项");
         jdbc.sql("DELETE FROM system_option_group WHERE id=:id").param("id", id).update();
-        log("系统管理", "删除选项组", "SYSTEM_OPTION_GROUP", String.valueOf(id));
     }
 
     @PostMapping("/options")
@@ -295,7 +285,6 @@ public class SystemAdminController {
                 "status", request.status()
             )).update();
         long id = jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single();
-        log("系统管理", "新增选项", "SYSTEM_OPTION", String.valueOf(id));
         return Map.of("id", id);
     }
 
@@ -311,7 +300,6 @@ public class SystemAdminController {
                 "optionValue", request.optionValue(), "sortOrder", request.sortOrder(),
                 "status", request.status()
             )).update(), "选项不存在");
-        log("系统管理", "编辑选项", "SYSTEM_OPTION", String.valueOf(id));
     }
 
     @DeleteMapping("/options/{id}")
@@ -320,7 +308,6 @@ public class SystemAdminController {
         requireChanged(jdbc.sql("""
             DELETE FROM system_option WHERE id=:id
             """).param("id", id).update(), "选项不存在");
-        log("系统管理", "删除选项", "SYSTEM_OPTION", String.valueOf(id));
     }
 
     private long count(String sql) {
@@ -337,14 +324,6 @@ public class SystemAdminController {
         jdbc.sql("DELETE FROM sys_role_permission WHERE role_id=:id").param("id", roleId).update();
         permissionIds.forEach(permissionId -> jdbc.sql("INSERT INTO sys_role_permission(role_id,permission_id) VALUES(:r,:p)")
             .params(Map.of("r", roleId, "p", permissionId)).update());
-    }
-
-    private void log(String module, String action, String targetType, String targetId) {
-        jdbc.sql("""
-            INSERT INTO operation_log(operator_type,operator_id,module,action,target_type,target_id,ip,request_id,result)
-            VALUES('ADMIN',1,:module,:action,:targetType,:targetId,'127.0.0.1',:requestId,'SUCCESS')
-            """).params(Map.of("module", module, "action", action, "targetType", targetType,
-                "targetId", targetId, "requestId", UUID.randomUUID().toString())).update();
     }
 
     private static String value(String value) {
