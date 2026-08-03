@@ -309,8 +309,9 @@ function App() {
         )}
         {(icpFiling || policeFiling) && (
           <footer className="m-filing">
+            <span>备案号：</span>
+            {policeFiling && <a className="police-filing" href="https://www.beian.gov.cn/portal/registerSystemInfo" target="_blank" rel="noreferrer"><PoliceFilingIcon />{policeFiling}</a>}
             {icpFiling && <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">{icpFiling}</a>}
-            {policeFiling && <a href="https://www.beian.gov.cn/portal/registerSystemInfo" target="_blank" rel="noreferrer">{policeFiling}</a>}
           </footer>
         )}
       </section>
@@ -355,6 +356,10 @@ function App() {
       )}
     </div>
   );
+}
+
+function PoliceFilingIcon() {
+  return <svg viewBox="0 0 20 20" aria-hidden="true"><path fill="#2b65ad" d="M10 1.2c2.1 1.5 4.2 2.1 6.7 2.3v5.4c0 4.4-2.8 7.7-6.7 9.9-3.9-2.2-6.7-5.5-6.7-9.9V3.5C5.8 3.3 7.9 2.7 10 1.2Z"/><circle cx="10" cy="8.8" r="4.6" fill="#d63832"/><path fill="#ffd34f" d="m10 5 1 2.1 2.3.3-1.7 1.7.4 2.3-2-1.1-2 1.1.4-2.3-1.7-1.7L9 7.1Z"/><path fill="none" stroke="#f5c34b" strokeWidth=".8" d="M6.2 12.7c1.2 1 2.4 1.5 3.8 2.3 1.4-.8 2.6-1.3 3.8-2.3"/></svg>;
 }
 
 function MobileAuth({
