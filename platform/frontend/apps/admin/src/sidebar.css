@@ -113,3 +113,42 @@
     display: none;
   }
 }
+
+.order-timeline > div {
+  position: relative;
+  display: flex;
+  gap: 12px;
+  padding: 2px 0 18px;
+}
+
+.order-timeline > div:not(:last-child)::before {
+  content: "";
+  position: absolute;
+  left: 5px;
+  top: 13px;
+  bottom: 0;
+  width: 1px;
+  background: #d9e4f2;
+}
+
+.order-timeline i {
+  position: relative;
+  z-index: 1;
+  width: 11px;
+  height: 11px;
+  margin-top: 5px;
+  border-radius: 50%;
+  background: #2476df;
+  box-shadow: 0 0 0 4px #e9f2ff;
+}
+
+.order-timeline span,
+.order-timeline strong,
+.order-timeline small {
+  display: block;
+}
+
+.order-timeline small {
+  margin-top: 4px;
+  color: #7f8da1;
+}

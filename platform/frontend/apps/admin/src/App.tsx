@@ -1194,9 +1194,9 @@ function BusinessModule({ module }: { module: Module }) {
             <Button type="link" onClick={() => void orderDetail(r)}>
               详情
             </Button>
-            {Number(r.orderStatus) < 3 && (
+            {[0, 2].includes(Number(r.orderStatus)) && (
               <Button type="link" onClick={() => void advanceOrder(r)}>
-                {Number(r.orderStatus) === 0 ? "确认到账" : "推进状态"}
+                {Number(r.orderStatus) === 0 ? "确认到账" : "确认完成"}
               </Button>
             )}
             {Number(r.orderStatus) === 3 && Number(r.refundStatus || 0) === 0 && (
@@ -1815,14 +1815,32 @@ function BusinessModule({ module }: { module: Module }) {
                   width: 90,
                   fixed: "right",
                   render: (_: any, row: Row) => (
-                    <Button type="link" onClick={() => editLogistics(row)}>
-                      物流
-                    </Button>
+                    Number(detail.order.orderStatus) < 3 &&
+                    Number(detail.order.refundStatus || 0) === 0 ? (
+                      <Button type="link" onClick={() => editLogistics(row)}>
+                        物流
+                      </Button>
+                    ) : (
+                      <span className="subline">只读</span>
+                    )
                   ),
                 },
               ]}
               scroll={{ x: 1280 }}
             />
+            <Card title="订单操作时间线" size="small" style={{ marginTop: 16 }}>
+              <div className="order-timeline">
+                {(detail.timeline || []).map((event: Row, index: number) => (
+                  <div key={`${event.createdAt}-${index}`}>
+                    <i />
+                    <span>
+                      <strong>{event.description}</strong>
+                      <small>{dateTime(event.createdAt)} · {event.operatorType === "CLIENT" ? "客户端" : "管理后台"}</small>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </Card>
           </>
         )}
       </Modal>
