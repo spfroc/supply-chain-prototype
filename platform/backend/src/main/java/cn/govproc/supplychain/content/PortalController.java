@@ -8,6 +8,10 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
+import org.springframework.http.HttpStatus;
+import org.springframework.transaction.annotation.Transactional;
 
 @RestController
 @RequestMapping("/api/public/portal")
@@ -84,5 +88,21 @@ public class PortalController {
             ORDER BY pp.id DESC
             """).param("platformId",platformId).query().listOfRows();
         return Map.of("platform",platform,"products",products);
+    }
+
+    @PostMapping("/platforms/{platformId}/products/{relationId}/click")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Transactional
+    void recordPlatformProductClick(@PathVariable long platformId, @PathVariable long relationId) {
+        int changed = jdbc.sql("""
+            UPDATE product_platform pp
+            JOIN portal_resource pr ON pr.id=pp.platform_id
+              AND pr.resource_type='PLATFORM' AND pr.status=1 AND pr.deleted_at IS NULL
+            SET pp.click_count=pp.click_count+1
+            WHERE pp.id=:relationId AND pp.platform_id=:platformId
+              AND pp.listing_status=1 AND pp.deleted_at IS NULL
+            """).param("relationId", relationId).param("platformId", platformId).update();
+        if (changed == 0) throw new org.springframework.web.server.ResponseStatusException(
+            HttpStatus.NOT_FOUND, "平台商品不存在或已下架");
     }
 }

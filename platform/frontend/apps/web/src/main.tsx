@@ -1114,6 +1114,22 @@ function PlatformProducts({
       .then(setData)
       .finally(() => setLoading(false));
   }, [platformId]);
+  const openProduct = async (product: Row) => {
+    setData((current) => ({
+      ...current,
+      products: (current.products || []).map((row: Row) =>
+        Number(row.relationId) === Number(product.relationId)
+          ? { ...row, clickCount: Number(row.clickCount || 0) + 1 }
+          : row,
+      ),
+    }));
+    try {
+      await api(`/api/public/portal/platforms/${platformId}/products/${product.relationId}/click`, { method: "POST" });
+    } catch {
+      // 浏览统计失败不阻止用户查看商品详情。
+    }
+    open({ ...product, clickCount: Number(product.clickCount || 0) + 1 });
+  };
   return (
     <main className="page">
       <div className="breadcrumb">
@@ -1138,7 +1154,7 @@ function PlatformProducts({
                 key={product.relationId}
                 product={product}
                 index={index}
-                open={open}
+                open={(product) => void openProduct(product)}
                 platformTitle={data.platform?.title}
               />
             ))}
