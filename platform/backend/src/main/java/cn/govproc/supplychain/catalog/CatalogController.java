@@ -36,6 +36,10 @@ public class CatalogController {
                    p.summary,p.detail_html,p.delivery_description,p.after_sales_html,
                    s.market_price, s.member_price, s.stock - s.reserved_stock AS available_stock,
                    ai.agreement_price,COALESCE(sales.sold_count,0) AS sold_count,
+                   COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('name',ad.name,'groupName',ad.group_name,
+                     'value',pav.value_text,'unit',ad.unit,'sortOrder',ad.sort_order))
+                     FROM product_attribute_value pav JOIN attribute_definition ad ON ad.id=pav.attribute_id
+                     WHERE pav.product_id=p.id AND ad.visible_flag=1 AND ad.status=1 AND ad.deleted_at IS NULL),JSON_ARRAY()) AS structured_attributes,
                    (SELECT GROUP_CONCAT(DISTINCT pr.title ORDER BY pr.sort_order,pr.id SEPARATOR '、')
                     FROM product_platform pp
                     JOIN portal_resource pr ON pr.id=pp.platform_id AND pr.resource_type='PLATFORM'
@@ -61,13 +65,13 @@ public class CatalogController {
                 rs.getString("attributes"),rs.getString("summary"),rs.getString("detail_html"),
                 rs.getString("delivery_description"),rs.getString("after_sales_html"),rs.getLong("category_id"),
                 rs.getBigDecimal("market_price"), rs.getBigDecimal("member_price"),
-                rs.getBigDecimal("agreement_price"), rs.getInt("available_stock"),rs.getLong("sold_count"),rs.getString("platform_names")
+                rs.getBigDecimal("agreement_price"), rs.getInt("available_stock"),rs.getLong("sold_count"),rs.getString("structured_attributes"),rs.getString("platform_names")
             )).list();
     }
 
     public record ProductSummary(
         long skuId, String spuCode, String skuCode, String title, String mainImage,String gallery,
         String attributes,String summary,String detailHtml,String deliveryDescription,String afterSalesHtml,long categoryId,
-        BigDecimal marketPrice, BigDecimal memberPrice, BigDecimal agreementPrice, int availableStock,long soldCount,String platformNames
+        BigDecimal marketPrice, BigDecimal memberPrice, BigDecimal agreementPrice, int availableStock,long soldCount,String structuredAttributes,String platformNames
     ) {}
 }

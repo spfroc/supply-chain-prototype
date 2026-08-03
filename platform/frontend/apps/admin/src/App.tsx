@@ -35,6 +35,7 @@ type Module =
   | "overview"
   | "products"
   | "categories"
+  | "attributes"
   | "brands"
   | "platforms"
   | "navigations"
@@ -101,6 +102,13 @@ async function rootApi<T>(path: string): Promise<T> {
   const response = await fetch(path, { headers: apiHeaders() });
   if (!response.ok) throw new Error(`请求失败（${response.status}）`);
   return response.json();
+}
+async function rootMutation(path: string, init: RequestInit) {
+  const response = await fetch(path, { ...init, headers: { ...apiHeaders(), ...init.headers } });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.detail || payload.message || `请求失败（${response.status}）`);
+  }
 }
 
 function imageDimensions(file: File) {
@@ -475,6 +483,7 @@ const navItems = [
     children: [
       { key: "products", label: "商品管理", icon: <MenuIcon name="goods" /> },
       { key: "categories", label: "分类管理", icon: <MenuIcon name="category" /> },
+      { key: "attributes", label: "属性模板", icon: <MenuIcon name="config" /> },
       { key: "brands", label: "品牌管理", icon: <MenuIcon name="brand" /> },
       { key: "platforms", label: "平台管理", icon: <MenuIcon name="platform" /> },
       { key: "solutions", label: "方案管理", icon: <MenuIcon name="solution" /> },
@@ -617,6 +626,7 @@ function AdminApp({ logout }: { logout: () => void }) {
     overview: ["经营概览", "掌握平台账户、权限与关键业务运行状态"],
     products: ["商品管理", "维护自营商品、SKU、协议价格与可售库存"],
     categories: ["分类管理", "维护客户端使用的三级商品分类、排序与启停状态"],
+    attributes: ["分类属性模板", "按商品分类配置基础属性、销售规格、选项及前台展示规则"],
     brands: ["品牌管理", "维护商品品牌、品牌说明、排序与启停状态"],
     platforms: ["平台管理", "维护第三方平台资料、商品参考入口与展示状态"],
     navigations: [
@@ -702,6 +712,7 @@ function AdminApp({ logout }: { logout: () => void }) {
             ["products", "enterprises", "agreements", "orders"] as Module[]
           ).includes(module) && <BusinessModule module={module} />}
           {module === "categories" && <Categories />}
+          {module === "attributes" && <AttributeTemplates />}
           {(
             [
               "brands",
@@ -750,6 +761,13 @@ function BusinessModule({ module }: { module: Module }) {
     rootApi("/api/admin/system/options?type=LOGISTICS_COMPANY&enabled=true"),
   );
   const [form] = Form.useForm();
+  const selectedProductCategory = Form.useWatch("categoryId", form);
+  const [attributeTemplate, setAttributeTemplate] = useState<Row[]>([]);
+  useEffect(() => {
+    if (module !== "products" || !selectedProductCategory) { setAttributeTemplate([]); return; }
+    void rootApi<Row[]>(`/api/admin/business/attributes/category/${selectedProductCategory}`)
+      .then(setAttributeTemplate).catch(() => setAttributeTemplate([]));
+  }, [module, selectedProductCategory]);
   const [memberForm] = Form.useForm();
   const [logisticsForm] = Form.useForm();
   const [refundForm] = Form.useForm();
@@ -787,7 +805,7 @@ function BusinessModule({ module }: { module: Module }) {
     else if (module === "products")
       form.setFieldsValue(
         row
-          ? { ...row, status: Number(row.status), spec: "标准规格" }
+          ? { ...row, status: Number(row.status), spec: "标准规格", attributeValues: typeof row.attributeValues === "string" ? JSON.parse(row.attributeValues || "{}") : (row.attributeValues || {}) }
           : {
               categoryId: (categories.data || []).find(
                 (x) => Number(x.level) === 3,
@@ -1398,12 +1416,28 @@ function BusinessModule({ module }: { module: Module }) {
               <Form.Item name="gallery" label="商品配图" className="full">
                 <ProductImageUpload multiple />
               </Form.Item>
-              <Form.Item name="attributes" label="商品属性" className="full">
+              <Form.Item name="attributes" label="历史字符串属性（兼容）" className="full">
                 <Input.TextArea
                   rows={2}
-                  placeholder="例如：颜色：黑色；保修：三年"
+                  placeholder="旧商品兼容字段，新商品请使用下方分类属性"
                 />
               </Form.Item>
+              <div className="full"><Typography.Title level={5}>分类属性</Typography.Title>{attributeTemplate.length === 0 && <Alert type="info" showIcon message="当前分类尚未配置属性模板，可在“属性模板”页面添加。" />}</div>
+              {attributeTemplate.map((attribute) => {
+                const name = ["attributeValues", String(attribute.id)];
+                const rules = Number(attribute.requiredFlag) === 1 ? [{ required: true, message: `请填写${attribute.name}` }] : [];
+                const options = (attribute.options || []).filter((x: Row) => Number(x.status) === 1).map((x: Row) => ({ label: x.optionLabel, value: x.optionLabel }));
+                const label = `${attribute.name}${attribute.unit ? `（${attribute.unit}）` : ""}${Number(attribute.inheritedLevel) > 0 ? " · 继承" : ""}`;
+                return <Form.Item key={attribute.id} name={name} label={label} rules={rules}>
+                  {attribute.inputType === "NUMBER" ? <InputNumber style={{width:"100%"}} />
+                    : attribute.inputType === "SELECT" ? <Select options={options} allowClear />
+                    : attribute.inputType === "RADIO" ? <Radio.Group options={options} />
+                    : attribute.inputType === "CHECKBOX" ? <Checkbox.Group options={options} />
+                    : attribute.inputType === "SWITCH" ? <Select options={[{label:"是",value:"是"},{label:"否",value:"否"}]} />
+                    : attribute.inputType === "DATE" ? <Input type="date" />
+                    : <Input />}
+                </Form.Item>;
+              })}
               <Form.Item name="summary" label="商品摘要" className="full">
                 <Input.TextArea rows={2} />
               </Form.Item>
@@ -1989,6 +2023,76 @@ function BusinessModule({ module }: { module: Module }) {
       </Modal>
     </>
   );
+}
+
+function AttributeTemplates() {
+  const { message, modal } = AntApp.useApp();
+  const rows = useLoad<Row[]>(() => rootApi("/api/admin/business/attributes"));
+  const categories = useLoad<Row[]>(() => rootApi("/api/admin/business/categories"));
+  const [form] = Form.useForm();
+  const [optionForm] = Form.useForm();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Row>();
+  const [optionOwner, setOptionOwner] = useState<Row>();
+  const [optionEditing, setOptionEditing] = useState<Row>();
+  const save = async () => {
+    try {
+      const values = await form.validateFields();
+      await rootMutation(`/api/admin/business/attributes${editing ? `/${editing.id}` : ""}`, {
+        method: editing ? "PUT" : "POST",
+        body: JSON.stringify(values),
+      });
+      message.success("属性模板已保存"); setOpen(false); void rows.refresh();
+    } catch (error) { if (error instanceof Error) message.error(error.message); }
+  };
+  const saveOption = async () => {
+    try {
+      const values = await optionForm.validateFields();
+      await rootMutation(`/api/admin/business/attributes/${optionOwner!.id}/options${optionEditing ? `/${optionEditing.id}` : ""}`, {
+        method: optionEditing ? "PUT" : "POST", body: JSON.stringify(values),
+      });
+      message.success("选项已保存"); setOptionEditing(undefined); optionForm.resetFields(); void rows.refresh();
+    } catch (error) { if (error instanceof Error) message.error(error.message); }
+  };
+  const columns: ColumnsType<Row> = [
+    { title: "属性", render: (_, row) => <><strong>{row.name}</strong><br/><small>{row.code}</small></> },
+    { title: "分组", dataIndex: "groupName" },
+    { title: "用途", dataIndex: "attributeType", render: (v) => ({ BASIC:"基础属性",SPEC:"销售规格",EXTENDED:"扩展属性" }[v as string] || v) },
+    { title: "输入方式", dataIndex: "inputType", render: (v) => ({ TEXT:"文本",NUMBER:"数字",SELECT:"下拉单选",RADIO:"单选",CHECKBOX:"多选",SWITCH:"开关",DATE:"日期" }[v as string] || v) },
+    { title: "规则", render: (_,r) => <Space wrap>{Number(r.requiredFlag)===1&&<Tag color="red">必填</Tag>}{Number(r.filterable)===1&&<Tag color="blue">可筛选</Tag>}{Number(r.visibleFlag)===1&&<Tag color="green">前台展示</Tag>}</Space> },
+    { title: "关联分类", render: (_,r) => `${r.categoryIds?.length || 0} 个` },
+    { title: "操作", render: (_,r) => <Space><Button type="link" onClick={()=>{setEditing(r);form.setFieldsValue({...r,categoryIds:(r.categoryIds||[]).map(Number)});setOpen(true);}}>编辑</Button>{["SELECT","RADIO","CHECKBOX"].includes(r.inputType)&&<Button type="link" onClick={()=>{setOptionOwner(r);setOptionEditing(undefined);optionForm.resetFields();}}>管理选项</Button>}<Button danger type="link" onClick={()=>modal.confirm({title:`删除属性“${r.name}”？`,onOk:async()=>{await rootMutation(`/api/admin/business/attributes/${r.id}`,{method:"DELETE"});void rows.refresh();}})}>删除</Button></Space> },
+  ];
+  return <>
+    <Card title="属性模板列表" extra={<Button type="primary" onClick={()=>{setEditing(undefined);form.resetFields();form.setFieldsValue({groupName:"规格参数",attributeType:"BASIC",inputType:"TEXT",requiredFlag:0,filterable:0,searchable:0,visibleFlag:1,allowCustom:0,sortOrder:0,status:1});setOpen(true);}}>新增属性</Button>}>
+      <Alert type="info" showIcon message="属性会从一级分类向下继承；下级分类可以追加自己的属性。已被商品使用的属性只能停用。" style={{marginBottom:16}} />
+      <Table rowKey="id" dataSource={rows.data || []} columns={columns} pagination={{pageSize:10}} />
+    </Card>
+    <Modal open={open} title={`${editing?"编辑":"新增"}属性`} onCancel={()=>setOpen(false)} onOk={save} width={760}>
+      <Form form={form} layout="vertical" className="two-column-form">
+        <Form.Item name="name" label="属性名称" rules={[{required:true}]}><Input placeholder="例如：内存容量" /></Form.Item>
+        <Form.Item name="code" label="属性编码" rules={[{required:true,pattern:/^[A-Za-z][A-Za-z0-9_]*$/,message:"使用字母、数字和下划线"}]}><Input placeholder="MEMORY_SIZE" disabled={Boolean(editing)} /></Form.Item>
+        <Form.Item name="groupName" label="属性分组" rules={[{required:true}]}><Input placeholder="规格参数" /></Form.Item>
+        <Form.Item name="attributeType" label="属性用途" rules={[{required:true}]}><Radio.Group options={[{label:"基础属性",value:"BASIC"},{label:"销售规格",value:"SPEC"},{label:"扩展属性",value:"EXTENDED"}]} /></Form.Item>
+        <Form.Item name="inputType" label="输入组件" rules={[{required:true}]}><Select options={[{label:"文本",value:"TEXT"},{label:"数字",value:"NUMBER"},{label:"下拉单选",value:"SELECT"},{label:"Radio单选",value:"RADIO"},{label:"Checkbox多选",value:"CHECKBOX"},{label:"开关",value:"SWITCH"},{label:"日期",value:"DATE"}]} /></Form.Item>
+        <Form.Item name="unit" label="单位"><Input placeholder="GB、W、米、个月" /></Form.Item>
+        <Form.Item name="categoryIds" label="适用分类" className="full" rules={[{required:true,message:"至少选择一个分类"}]}><Select mode="multiple" showSearch optionFilterProp="label" options={(categories.data||[]).map(c=>({value:Number(c.id),label:`${"　".repeat(Number(c.level)-1)}${c.name}（${c.level}级）`}))} /></Form.Item>
+        <Form.Item name="requiredFlag" label="是否必填"><Radio.Group options={[{label:"必填",value:1},{label:"选填",value:0}]} /></Form.Item>
+        <Form.Item name="visibleFlag" label="前台展示"><Radio.Group options={[{label:"展示",value:1},{label:"隐藏",value:0}]} /></Form.Item>
+        <Form.Item name="filterable" label="参与筛选"><Radio.Group options={[{label:"是",value:1},{label:"否",value:0}]} /></Form.Item>
+        <Form.Item name="searchable" label="参与搜索"><Radio.Group options={[{label:"是",value:1},{label:"否",value:0}]} /></Form.Item>
+        <Form.Item name="allowCustom" label="允许自定义值"><Radio.Group options={[{label:"是",value:1},{label:"否",value:0}]} /></Form.Item>
+        <Form.Item name="sortOrder" label="排序"><InputNumber min={0} style={{width:"100%"}} /></Form.Item>
+        <Form.Item name="status" label="状态"><Select options={[{label:"启用",value:1},{label:"停用",value:0}]} /></Form.Item>
+      </Form>
+    </Modal>
+    <Modal open={Boolean(optionOwner)} title={`${optionOwner?.name || ""} · 选项管理`} onCancel={()=>setOptionOwner(undefined)} footer={null} width={720}>
+      <Form form={optionForm} layout="inline" initialValues={{sortOrder:0,status:1}} style={{marginBottom:16}}>
+        <Form.Item name="optionLabel" rules={[{required:true}]}><Input placeholder="选项名称" /></Form.Item><Form.Item name="optionCode" rules={[{required:true}]}><Input placeholder="选项编码" /></Form.Item><Form.Item name="sortOrder"><InputNumber min={0} placeholder="排序" /></Form.Item><Form.Item name="status"><Select style={{width:90}} options={[{label:"启用",value:1},{label:"停用",value:0}]} /></Form.Item><Button type="primary" onClick={saveOption}>{optionEditing?"保存":"添加"}</Button>
+      </Form>
+      <Table<Row> rowKey="id" dataSource={(rows.data||[]).find(r=>r.id===optionOwner?.id)?.options || optionOwner?.options || []} pagination={{pageSize:8}} columns={[{title:"选项",dataIndex:"optionLabel"},{title:"编码",dataIndex:"optionCode"},{title:"排序",dataIndex:"sortOrder"},{title:"状态",dataIndex:"status",render:v=>Number(v)===1?<Tag color="green">启用</Tag>:<Tag>停用</Tag>},{title:"操作",render:(_,r)=><Space><Button type="link" onClick={()=>{setOptionEditing(r);optionForm.setFieldsValue(r);}}>编辑</Button><Button danger type="link" onClick={async()=>{await rootMutation(`/api/admin/business/attributes/${optionOwner!.id}/options/${r.id}`,{method:"DELETE"});void rows.refresh();}}>删除</Button></Space>}]}/>
+    </Modal>
+  </>;
 }
 
 function Categories() {

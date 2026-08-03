@@ -22,6 +22,12 @@ type View =
   | "invoices"
   | "members";
 type Row = Record<string, any>;
+const structuredSpecs = (value: unknown): Row[] => {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value || "[]") : value;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+};
 const money = (value: any) =>
   `¥${Number(value || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const dateTime = (value: string) =>
@@ -1253,7 +1259,11 @@ function Detail({
   useEffect(() => {
     setActiveImage(galleryImages[0] || "");
   }, [product.skuId, product.mainImage, product.gallery]);
-  const specifications = String(product.attributes || "")
+  const configuredSpecifications = structuredSpecs(product.structuredAttributes).map((item) => [
+    item.name,
+    `${item.value}${item.unit || ""}`,
+  ]);
+  const legacySpecifications = String(product.attributes || "")
     .split(/[；;\n]/)
     .map((item) => item.trim())
     .filter(Boolean)
@@ -1263,6 +1273,7 @@ function Detail({
         ? [item.slice(0, separator), item.slice(separator + 1)]
         : ["规格", item];
     });
+  const specifications = configuredSpecifications.length ? configuredSpecifications : legacySpecifications;
   return (
     <main className="page">
       <div className="breadcrumb">

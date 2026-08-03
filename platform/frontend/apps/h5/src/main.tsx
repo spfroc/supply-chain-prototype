@@ -8,6 +8,12 @@ import "./auth.css";
 import "./platform-tags.css";
 type Tab = "home" | "category" | "cart" | "checkout" | "orders" | "mine";
 type Row = Record<string, any>;
+const structuredSpecs = (value: unknown): Row[] => {
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value || "[]") : value;
+    return Array.isArray(parsed) ? parsed : [];
+  } catch { return []; }
+};
 function DragScroll({ className, children }: { className: string; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const drag = useRef({ active: false, moved: false, x: 0, left: 0 });
@@ -841,7 +847,11 @@ function ProductDetail({
       if ((e as Error).name !== "AbortError") Toast.show("暂时无法分享");
     }
   };
-  const specifications = String(product.attributes || "")
+  const configuredSpecifications = structuredSpecs(product.structuredAttributes).map((item) => [
+    item.name,
+    `${item.value}${item.unit || ""}`,
+  ]);
+  const legacySpecifications = String(product.attributes || "")
     .split(/[；;\n]/)
     .map((item) => item.trim())
     .filter(Boolean)
@@ -851,6 +861,7 @@ function ProductDetail({
         ? [item.slice(0, separator), item.slice(separator + 1)]
         : ["规格", item];
     });
+  const specifications = configuredSpecifications.length ? configuredSpecifications : legacySpecifications;
   const galleryImages = Array.from(
     new Set(
       [product.mainImage, ...String(product.gallery || "").split("\n")]

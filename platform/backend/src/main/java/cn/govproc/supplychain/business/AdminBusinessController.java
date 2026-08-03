@@ -38,7 +38,9 @@ public class AdminBusinessController {
             p.status,s.id AS skuId,s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
             s.stock,s.reserved_stock AS reservedStock,DATE_FORMAT(p.updated_at,'%Y-%m-%d %H:%i:%s') AS updatedAt,
             COALESCE(sales.soldCount,0) AS soldCount,COALESCE(sales.orderCount,0) AS orderCount,
-            COALESCE(sales.salesAmount,0) AS salesAmount
+            COALESCE(sales.salesAmount,0) AS salesAmount,
+            COALESCE((SELECT JSON_OBJECTAGG(CAST(pav.attribute_id AS CHAR),pav.value_text)
+              FROM product_attribute_value pav WHERE pav.product_id=p.id),JSON_OBJECT()) AS attributeValues
           FROM product_spu p JOIN product_sku s ON s.spu_id=p.id AND s.deleted_at IS NULL
           LEFT JOIN (
             SELECT oi.sku_id,SUM(oi.quantity) AS soldCount,COUNT(DISTINCT oi.order_main_id) AS orderCount,
@@ -74,6 +76,7 @@ public class AdminBusinessController {
           """)
           .params(Map.of("spuId",id,"skuCode",skuCode,"spec",value(r.spec()),"marketPrice",r.marketPrice(),
             "memberPrice",r.memberPrice(),"stock",r.stock(),"status",r.status()==1?1:0)).update();
+        saveAttributeValues(id,r.attributeValues());
         return Map.of("id",id,"spuCode",spuCode);
     }
 
@@ -97,6 +100,7 @@ public class AdminBusinessController {
           """)
           .params(Map.of("id",id,"spec",value(r.spec()),"marketPrice",r.marketPrice(),"memberPrice",r.memberPrice(),
             "stock",r.stock(),"status",r.status()==1?1:0)).update();
+        saveAttributeValues(id,r.attributeValues());
     }
 
     @PutMapping("/products/{id}/status") @Transactional
@@ -479,6 +483,15 @@ public class AdminBusinessController {
     }
 
     private static String value(String s){return s==null?"":s;}
+    private void saveAttributeValues(long productId,Map<String,Object> values) {
+        jdbc.sql("DELETE FROM product_attribute_value WHERE product_id=:id").param("id",productId).update();
+        if(values==null) return;
+        values.forEach((attributeId,value)->{
+            String text=value instanceof List<?> list?list.stream().map(String::valueOf).reduce((a,b)->a+"、"+b).orElse(""):String.valueOf(value==null?"":value);
+            if(!text.isBlank()) jdbc.sql("INSERT INTO product_attribute_value(product_id,attribute_id,value_text) VALUES(:productId,:attributeId,:value)")
+              .params(Map.of("productId",productId,"attributeId",Long.parseLong(attributeId),"value",text)).update();
+        });
+    }
     private static void require(int n,String message){if(n==0)throw new IllegalArgumentException(message);}
     private void validateCategoryParent(Long id,Long parentId,int level) {
         if(level<1||level>3) throw new IllegalArgumentException("分类级别必须为1至3级");
@@ -501,7 +514,8 @@ public class AdminBusinessController {
     public record ProductRequest(@NotBlank String title,@NotNull Long categoryId,@NotNull Long brandId,
         @NotBlank String mainImage,String gallery,String attributes,String summary,String detailHtml,
         String deliveryDescription,String afterSalesHtml,String spec,
-      @NotNull @DecimalMin("0") BigDecimal marketPrice,@NotNull @DecimalMin("0") BigDecimal memberPrice,@Min(0) int stock,int status){
+      @NotNull @DecimalMin("0") BigDecimal marketPrice,@NotNull @DecimalMin("0") BigDecimal memberPrice,@Min(0) int stock,int status,
+      Map<String,Object> attributeValues){
         public ProductRequest {
             long galleryCount=gallery==null?0:gallery.lines().filter(line->!line.isBlank()).count();
             if(galleryCount>6) throw new IllegalArgumentException("商品配图最多上传6张");
