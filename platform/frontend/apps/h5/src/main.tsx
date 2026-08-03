@@ -534,15 +534,14 @@ function Product({
       </div>
       <h3>{row.title}</h3>
       <p>{row.summary}</p>
-      {row.platformNames && (
-        <div className="m-platform-tags">
-          {String(row.platformNames)
+      <div className="m-platform-tags">
+        {row.platformNames &&
+          String(row.platformNames)
             .split("、")
             .map((name: string) => (
               <span key={name}>{name}</span>
             ))}
-        </div>
-      )}
+      </div>
       <div>
         <strong>{money(row.agreementPrice || row.memberPrice)}</strong>
         <del>{money(row.marketPrice)}</del>
