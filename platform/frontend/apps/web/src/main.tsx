@@ -1322,12 +1322,18 @@ function Detail({
   buyNow: (r: Row, n: number) => void;
 }) {
   const [qty, setQty] = useState(1);
+  const variants:Row[]=typeof product.variants==="string"?JSON.parse(product.variants||"[]"):(product.variants||[]);
+  const [selectedSku,setSelectedSku]=useState(Number(product.skuId));
+  const variant=variants.find((item)=>Number(item.skuId)===selectedSku)||variants[0];
+  const current:Row=variant?{...product,...variant,mainImage:variant.skuImage||product.mainImage}:product;
+  const variantLabel=(item:Row)=>Object.entries(typeof item.specValues==="string"?JSON.parse(item.specValues||"{}"):item.specValues||{})
+    .map(([key,value])=>`${key}：${value}`).join(" / ")||item.skuCode;
   const [detailTab, setDetailTab] = useState<
     "detail" | "specification" | "service"
   >("detail");
   const galleryImages = Array.from(
     new Set(
-      [product.mainImage, ...String(product.gallery || "").split("\n")]
+      [current.mainImage, ...String(product.gallery || "").split("\n")]
         .map((url) => String(url || "").trim())
         .filter(Boolean),
     ),
@@ -1335,7 +1341,7 @@ function Detail({
   const [activeImage, setActiveImage] = useState(galleryImages[0] || "");
   useEffect(() => {
     setActiveImage(galleryImages[0] || "");
-  }, [product.skuId, product.mainImage, product.gallery]);
+  }, [current.skuId, current.mainImage, product.gallery]);
   const configuredSpecifications = structuredSpecs(product.structuredAttributes).map((item) => [
     item.name,
     `${item.value}${item.unit || ""}`,
@@ -1350,7 +1356,8 @@ function Detail({
         ? [item.slice(0, separator), item.slice(separator + 1)]
         : ["规格", item];
     });
-  const specifications = configuredSpecifications.length ? configuredSpecifications : legacySpecifications;
+  const skuSpecifications=Object.entries(typeof current.specValues==="string"?JSON.parse(current.specValues||"{}"):current.specValues||{});
+  const specifications = [...skuSpecifications,...(configuredSpecifications.length ? configuredSpecifications : legacySpecifications)];
   return (
     <main className="page">
       <div className="breadcrumb">
@@ -1388,14 +1395,18 @@ function Detail({
           <div className="agreement-price">
             <label>企业协议价</label>
             <strong>
-              {money(product.agreementPrice || product.memberPrice)}
+              {money(current.agreementPrice || current.memberPrice)}
             </strong>
-            <del>市场价 {money(product.marketPrice)}</del>
+            <del>市场价 {money(current.marketPrice)}</del>
             <em>已为山东高速数字科技匹配有效协议</em>
           </div>
+          {variants.length>1&&<div className="sku-selector"><strong>选择规格</strong><div>
+            {variants.map((item)=><button key={item.skuId} className={Number(item.skuId)===Number(current.skuId)?"active":""}
+              disabled={Number(item.availableStock)<=0} onClick={()=>{setSelectedSku(Number(item.skuId));setQty(1);}}>{variantLabel(item)}</button>)}
+          </div></div>}
           <dl>
             <dt>商品编码</dt>
-            <dd>{product.skuCode}</dd>
+            <dd>{current.skuCode}</dd>
             <dt>配送</dt>
             <dd>
               {product.deliveryDescription ||
@@ -1413,17 +1424,17 @@ function Detail({
               <b>{qty}</b>
               <button
                 onClick={() =>
-                  setQty(Math.min(product.availableStock, qty + 1))
+                  setQty(Math.min(current.availableStock, qty + 1))
                 }
               >
                 ＋
               </button>
-              <small>库存 {product.availableStock} 件 · 已售 {product.soldCount || 0} 件</small>
+              <small>库存 {current.availableStock} 件 · 已售 {product.soldCount || 0} 件</small>
             </dd>
           </dl>
           <div className="buy">
-            <button onClick={() => void add(product, qty)}>加入购物车</button>
-            <button onClick={() => void buyNow(product, qty)}>立即采购</button>
+            <button disabled={Number(current.availableStock)<=0} onClick={() => void add(current, qty)}>加入购物车</button>
+            <button disabled={Number(current.availableStock)<=0} onClick={() => void buyNow(current, qty)}>立即采购</button>
           </div>
         </div>
       </section>
@@ -1482,7 +1493,7 @@ function Detail({
             <h2>规格参数</h2>
             <dl>
               <dt>商品编码</dt>
-              <dd>{product.skuCode}</dd>
+              <dd>{current.skuCode}</dd>
               {specifications.length ? (
                 specifications.map(([name, value], index) => (
                   <React.Fragment key={`${name}-${index}`}>

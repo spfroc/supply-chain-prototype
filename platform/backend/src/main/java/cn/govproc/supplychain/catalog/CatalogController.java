@@ -33,7 +33,7 @@ public class CatalogController {
     List<ProductSummary> products() {
         Long enterpriseId=auth.optionalCurrent().map(ClientAuthService.CurrentUser::enterpriseId).orElse(null);
         return jdbc.sql("""
-            SELECT s.id AS sku_id, p.spu_code, s.sku_code, p.title, p.main_image,p.category_id,
+            SELECT s.id AS sku_id, p.spu_code, s.sku_code, p.title, COALESCE(NULLIF(s.sku_image,''),p.main_image) AS main_image,p.category_id,
                    JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')) AS gallery,
                    JSON_UNQUOTE(JSON_EXTRACT(p.attributes_json,'$.content')) AS attributes,
                    p.summary,p.detail_html,p.delivery_description,p.after_sales_html,
@@ -43,6 +43,13 @@ public class CatalogController {
                      'value',pav.value_text,'unit',ad.unit,'filterable',ad.filterable,'searchable',ad.searchable,'sortOrder',ad.sort_order))
                      FROM product_attribute_value pav JOIN attribute_definition ad ON ad.id=pav.attribute_id
                      WHERE pav.product_id=p.id AND ad.visible_flag=1 AND ad.status=1 AND ad.deleted_at IS NULL),JSON_ARRAY()) AS structured_attributes,
+                   COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('skuId',sx.id,'skuCode',sx.sku_code,
+                     'specValues',sx.spec_json,'skuImage',COALESCE(NULLIF(sx.sku_image,''),p.main_image),
+                     'marketPrice',sx.market_price,'memberPrice',sx.member_price,
+                     'agreementPrice',(SELECT aix.agreement_price FROM agreement_item aix
+                       WHERE aix.agreement_id=a.id AND aix.sku_id=sx.id AND aix.status=1 AND aix.deleted_at IS NULL LIMIT 1),
+                     'availableStock',sx.stock-sx.reserved_stock,'status',sx.status))
+                     FROM product_sku sx WHERE sx.spu_id=p.id AND sx.status=1 AND sx.deleted_at IS NULL),JSON_ARRAY()) AS variants,
                    (SELECT GROUP_CONCAT(DISTINCT pr.title ORDER BY pr.sort_order,pr.id SEPARATOR '、')
                     FROM product_platform pp
                     JOIN portal_resource pr ON pr.id=pp.platform_id AND pr.resource_type='PLATFORM'
@@ -55,12 +62,13 @@ public class CatalogController {
             LEFT JOIN agreement_item ai ON ai.agreement_id = a.id AND ai.sku_id = s.id
                  AND ai.status = 1 AND ai.deleted_at IS NULL
             LEFT JOIN (
-                SELECT oi.sku_id,SUM(oi.quantity) AS sold_count
-                FROM order_item oi JOIN order_main o ON o.id=oi.order_main_id
+                SELECT soldsku.spu_id,SUM(oi.quantity) AS sold_count
+                FROM order_item oi JOIN product_sku soldsku ON soldsku.id=oi.sku_id JOIN order_main o ON o.id=oi.order_main_id
                 WHERE o.payment_status=2 AND o.order_status<>4 AND o.refund_status=0
-                GROUP BY oi.sku_id
-            ) sales ON sales.sku_id=s.id
+                GROUP BY soldsku.spu_id
+            ) sales ON sales.spu_id=p.id
             WHERE p.status = 1 AND s.status = 1 AND s.deleted_at IS NULL
+              AND s.id=(SELECT MIN(s0.id) FROM product_sku s0 WHERE s0.spu_id=p.id AND s0.status=1 AND s0.deleted_at IS NULL)
             ORDER BY p.id DESC
             """).param("enterpriseId", enterpriseId).query((rs, n) -> new ProductSummary(
                 rs.getLong("sku_id"), rs.getString("spu_code"), rs.getString("sku_code"),
@@ -68,13 +76,13 @@ public class CatalogController {
                 rs.getString("attributes"),rs.getString("summary"),rs.getString("detail_html"),
                 rs.getString("delivery_description"),rs.getString("after_sales_html"),rs.getLong("category_id"),
                 rs.getBigDecimal("market_price"), rs.getBigDecimal("member_price"),
-                rs.getBigDecimal("agreement_price"), rs.getInt("available_stock"),rs.getLong("sold_count"),rs.getString("structured_attributes"),rs.getString("platform_names")
+                rs.getBigDecimal("agreement_price"), rs.getInt("available_stock"),rs.getLong("sold_count"),rs.getString("structured_attributes"),rs.getString("platform_names"),rs.getString("variants")
             )).list();
     }
 
     public record ProductSummary(
         long skuId, String spuCode, String skuCode, String title, String mainImage,String gallery,
         String attributes,String summary,String detailHtml,String deliveryDescription,String afterSalesHtml,long categoryId,
-        BigDecimal marketPrice, BigDecimal memberPrice, BigDecimal agreementPrice, int availableStock,long soldCount,String structuredAttributes,String platformNames
+        BigDecimal marketPrice, BigDecimal memberPrice, BigDecimal agreementPrice, int availableStock,long soldCount,String structuredAttributes,String platformNames,String variants
     ) {}
 }

@@ -51,6 +51,10 @@ type Module =
   | "logs"
   | "configs";
 const adminCredential = () => sessionStorage.getItem("adminCredential") || "";
+const expandProductSkus=(products:Row[])=>products.flatMap((product)=>{
+  const skus:Row[]=typeof product.skus==="string"?JSON.parse(product.skus||"[]"):(product.skus||[]);
+  return skus.length?skus.map((sku)=>({...sku,title:product.title,mainImage:sku.skuImage||product.mainImage,spuId:product.id})):[product];
+});
 const apiHeaders = () => ({
   "Content-Type": "application/json",
   Authorization: `Basic ${adminCredential()}`,
@@ -788,6 +792,7 @@ function BusinessModule({ module }: { module: Module }) {
   const products = useLoad<Row[]>(() =>
     rootApi("/api/admin/business/products"),
   );
+  const selectableSkus=expandProductSkus(products.data||[]).filter((sku)=>Number(sku.status)===1);
   const categories = useLoad<Row[]>(() =>
     rootApi("/api/admin/business/categories"),
   );
@@ -844,7 +849,12 @@ function BusinessModule({ module }: { module: Module }) {
     else if (module === "products")
       form.setFieldsValue(
         row
-          ? { ...row, status: Number(row.status), spec: "标准规格", attributeValues: typeof row.attributeValues === "string" ? JSON.parse(row.attributeValues || "{}") : (row.attributeValues || {}) }
+          ? { ...row, status: Number(row.status), spec: "标准规格",
+              skus:(typeof row.skus==="string"?JSON.parse(row.skus||"[]"):row.skus||[]).map((sku:Row)=>({
+                ...sku,status:Number(sku.status),specification:Object.entries(typeof sku.specValues==="string"?JSON.parse(sku.specValues||"{}"):sku.specValues||{})
+                  .map(([key,value])=>`${key}=${value}`).join("；")
+              })),
+              attributeValues: typeof row.attributeValues === "string" ? JSON.parse(row.attributeValues || "{}") : (row.attributeValues || {}) }
           : {
               categoryId: (categories.data || []).find(
                 (x) => Number(x.level) === 3,
@@ -852,6 +862,7 @@ function BusinessModule({ module }: { module: Module }) {
               brandId: (brands.data || []).find((x)=>Number(x.status)===1)?.id,
               status: 1,
               stock: 0,
+              skus:[{skuCode:"",specification:"规格=标准",skuImage:"",marketPrice:0,memberPrice:0,stock:0,status:1}],
             },
       );
     else if (module === "enterprises")
@@ -871,6 +882,16 @@ function BusinessModule({ module }: { module: Module }) {
   const save = async () => {
     try {
       const values = await form.validateFields();
+      if(module==="products"&&Array.isArray(values.skus)){
+        values.skus=values.skus.map((sku:Row)=>({
+          ...sku,
+          specValues:Object.fromEntries(String(sku.specification||"").split(/[；;]/).map((part)=>part.trim()).filter(Boolean)
+            .map((part)=>{const index=part.search(/[=＝:：]/);return index>0?[part.slice(0,index).trim(),part.slice(index+1).trim()]:["规格",part];})),
+        }));
+        const first=values.skus[0];
+        values.marketPrice=first.marketPrice;values.memberPrice=first.memberPrice;values.stock=first.stock;
+        values.spec=first.specification;
+      }
       if (mode === "stock")
         await business(`/products/${editing!.id}/stock`, {
           method: "PUT",
@@ -890,7 +911,7 @@ function BusinessModule({ module }: { module: Module }) {
       const error=e as Row;
       const first=error.errorFields?.[0]?.name?.[0];
       if(module==="products"&&first){
-        const tab=first==="stock"||first==="marketPrice"||first==="memberPrice"||first==="spec"
+        const tab=first==="skus"||first==="stock"||first==="marketPrice"||first==="memberPrice"||first==="spec"
           ?"sales":first==="mainImage"||first==="gallery"?"images"
           :first==="attributeValues"||first==="attributes"?"attributes"
           :first==="detailHtml"||first==="deliveryDescription"||first==="afterSalesHtml"?"detail":"basic";
@@ -1120,7 +1141,7 @@ function BusinessModule({ module }: { module: Module }) {
             </span>
             <span>
               <strong>{r.title}</strong>
-              <small>{r.skuCode}</small>
+              <small>{r.spuCode} · {Number(r.skuCount||1)} 个 SKU</small>
             </span>
           </div>
         ),
@@ -1169,9 +1190,7 @@ function BusinessModule({ module }: { module: Module }) {
             <Button type="link" onClick={() => show(r)}>
               编辑
             </Button>
-            <Button type="link" onClick={() => show(r, "stock")}>
-              库存
-            </Button>
+            {Number(r.skuCount||1)===1&&<Button type="link" onClick={() => show(r, "stock")}>库存</Button>}
             <Button type="link" onClick={() => void toggle(r)}>
               {Number(r.status) === 1 ? "下架" : "上架"}
             </Button>
@@ -1400,12 +1419,27 @@ function BusinessModule({ module }: { module: Module }) {
                 <Form.Item name="status" label="状态"><Select options={[{ value: 1, label: "在售" },{ value: 0, label: "草稿" },{ value: 2, label: "下架" }]} /></Form.Item>
                 <Form.Item name="summary" label="商品摘要" className="full"><Input.TextArea rows={3} /></Form.Item>
               </div> },
-              { key: "sales", label: "销售与库存", children: <div className="two-column-form">
-                <Form.Item name="spec" label="SKU规格"><Input placeholder="例如：黑色 / 标准版" /></Form.Item>
-                <Form.Item name="stock" label="库存" rules={[{ required: true }]}><InputNumber min={0} style={{ width: "100%" }} /></Form.Item>
-                <Form.Item name="marketPrice" label="市场价" rules={[{ required: true }]}><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item>
-                <Form.Item name="memberPrice" label="会员价" rules={[{ required: true }]}><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item>
-                <Alert className="full" type="info" showIcon message="当前为单SKU商品；多规格SKU组合将在下一版规格组合功能中统一管理。" />
+              { key: "sales", label: "规格与 SKU", children: <div className="full">
+                <Alert type="info" showIcon message="每行代表一个可独立销售的 SKU。规格格式示例：颜色=黑色；容量=256GB。SKU 编码留空时由系统自动生成。" />
+                <Form.List name="skus" rules={[{validator:async(_,items)=>{if(!items?.length)throw new Error("至少添加一个 SKU");}}]}>
+                  {(fields,{add,remove},{errors})=><>
+                    {fields.map(({key,name})=><Card size="small" key={key} title={`SKU ${name+1}`} style={{marginTop:12}}
+                      extra={fields.length>1?<Button type="link" danger onClick={()=>remove(name)}>移除</Button>:null}>
+                      <div className="two-column-form">
+                        <Form.Item name={[name,"id"]} hidden><Input /></Form.Item>
+                        <Form.Item name={[name,"skuCode"]} label="SKU 编码"><Input placeholder="留空自动生成" /></Form.Item>
+                        <Form.Item name={[name,"specification"]} label="销售规格" rules={[{required:true,message:"请填写销售规格"}]}><Input placeholder="颜色=黑色；容量=256GB" /></Form.Item>
+                        <Form.Item name={[name,"marketPrice"]} label="市场价" rules={[{required:true}]}><InputNumber min={0} precision={2} style={{width:"100%"}} /></Form.Item>
+                        <Form.Item name={[name,"memberPrice"]} label="会员价" rules={[{required:true}]}><InputNumber min={0} precision={2} style={{width:"100%"}} /></Form.Item>
+                        <Form.Item name={[name,"stock"]} label="库存" rules={[{required:true}]}><InputNumber min={0} style={{width:"100%"}} /></Form.Item>
+                        <Form.Item name={[name,"status"]} label="状态" rules={[{required:true}]}><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]} /></Form.Item>
+                        <Form.Item name={[name,"skuImage"]} label="SKU 图片" className="full"><ProductImageUpload /></Form.Item>
+                      </div>
+                    </Card>)}
+                    <Button block type="dashed" style={{marginTop:12}} onClick={()=>add({skuCode:"",specification:"",skuImage:"",marketPrice:0,memberPrice:0,stock:0,status:1})}>＋ 添加 SKU</Button>
+                    <Form.ErrorList errors={errors}/>
+                  </>}
+                </Form.List>
               </div> },
               { key: "images", label: "图片素材", children: <div className="two-column-form">
                 <Form.Item name="mainImage" label="商品主图" className="full" rules={[{ required: true, message: "请上传商品主图" }]}><ProductImageUpload /></Form.Item>
@@ -1539,7 +1573,7 @@ function BusinessModule({ module }: { module: Module }) {
             onClick={() => {
               setEditing(undefined);
               setMode("item");
-              form.setFieldsValue({ skuId: products.data?.[0]?.skuId });
+              form.setFieldsValue({ skuId: selectableSkus[0]?.id||selectableSkus[0]?.skuId });
             }}
           >
             ＋ 添加现有商品
@@ -1551,9 +1585,9 @@ function BusinessModule({ module }: { module: Module }) {
               <Select
                 style={{ width: 280 }}
                 disabled={!!editing}
-                options={(products.data || []).map((x) => ({
-                  value: x.skuId,
-                  label: x.title,
+                options={selectableSkus.map((x) => ({
+                  value: x.id||x.skuId,
+                  label: `${x.title} · ${x.skuCode}`,
                 }))}
               />
             </Form.Item>
@@ -2284,6 +2318,7 @@ function PortalManager({ module }: { module: Module }) {
   const products = useLoad<Row[]>(() =>
     rootApi("/api/admin/business/products"),
   );
+  const selectableSkus=expandProductSkus(products.data||[]).filter((sku)=>Number(sku.status)===1);
   const [form] = Form.useForm();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Row>();
@@ -2356,7 +2391,7 @@ function PortalManager({ module }: { module: Module }) {
     setRelationEditing(row);
     relationForm.resetFields();
     relationForm.setFieldsValue(
-      row || { skuId: products.data?.[0]?.skuId, listingStatus: 1 },
+      row || { skuId: selectableSkus[0]?.id||selectableSkus[0]?.skuId, listingStatus: 1 },
     );
     setRelationEditorOpen(true);
   };
@@ -2405,7 +2440,7 @@ function PortalManager({ module }: { module: Module }) {
     setSolutionItemEditing(row);
     solutionItemForm.resetFields();
     solutionItemForm.setFieldsValue(
-      row || { skuId: products.data?.[0]?.skuId, defaultQuantity: 1, requiredItem: 1, sortOrder: 0 },
+      row || { skuId: selectableSkus[0]?.id||selectableSkus[0]?.skuId, defaultQuantity: 1, requiredItem: 1, sortOrder: 0 },
     );
     setSolutionItemEditorOpen(true);
   };
@@ -2678,8 +2713,8 @@ function PortalManager({ module }: { module: Module }) {
               showSearch
               optionFilterProp="label"
               disabled={!!relationEditing}
-              options={(products.data || []).map((row) => ({
-                value: row.skuId,
+              options={selectableSkus.map((row) => ({
+                value: row.id||row.skuId,
                 label: `${row.title} · ${row.skuCode}`,
               }))}
             />
@@ -2770,8 +2805,8 @@ function PortalManager({ module }: { module: Module }) {
               showSearch
               optionFilterProp="label"
               disabled={!!solutionItemEditing}
-              options={(products.data || []).map((row) => ({
-                value: row.skuId,
+              options={selectableSkus.map((row) => ({
+                value: row.id||row.skuId,
                 label: `${row.title} · ${row.skuCode}`,
               }))}
             />

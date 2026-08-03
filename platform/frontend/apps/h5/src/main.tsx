@@ -893,7 +893,13 @@ function ProductDetail({
   add: (r: Row) => void;
   buyNow: (r: Row) => void;
 }) {
-  const favoriteKey = `favorite-${product.skuId}`;
+  const variants:Row[]=typeof product.variants==="string"?JSON.parse(product.variants||"[]"):(product.variants||[]);
+  const [selectedSku,setSelectedSku]=useState(Number(product.skuId));
+  const variant=variants.find((item)=>Number(item.skuId)===selectedSku)||variants[0];
+  const current:Row=variant?{...product,...variant,mainImage:variant.skuImage||product.mainImage}:product;
+  const variantLabel=(item:Row)=>Object.entries(typeof item.specValues==="string"?JSON.parse(item.specValues||"{}"):item.specValues||{})
+    .map(([key,value])=>`${key}：${value}`).join(" / ")||item.skuCode;
+  const favoriteKey = `favorite-${current.skuId}`;
   const [favorite, setFavorite] = useState(
     () => localStorage.getItem(favoriteKey) === "1",
   );
@@ -907,7 +913,7 @@ function ProductDetail({
   const share = async () => {
     const data = {
       title: product.title,
-      text: `${product.title} ${money(product.agreementPrice || product.memberPrice)}`,
+      text: `${product.title} ${money(current.agreementPrice || current.memberPrice)}`,
       url: location.href,
     };
     try {
@@ -934,10 +940,11 @@ function ProductDetail({
         ? [item.slice(0, separator), item.slice(separator + 1)]
         : ["规格", item];
     });
-  const specifications = configuredSpecifications.length ? configuredSpecifications : legacySpecifications;
+  const skuSpecifications=Object.entries(typeof current.specValues==="string"?JSON.parse(current.specValues||"{}"):current.specValues||{});
+  const specifications = [...skuSpecifications,...(configuredSpecifications.length ? configuredSpecifications : legacySpecifications)];
   const galleryImages = Array.from(
     new Set(
-      [product.mainImage, ...String(product.gallery || "").split("\n")]
+      [current.mainImage, ...String(product.gallery || "").split("\n")]
         .map((url) => String(url || "").trim())
         .filter(Boolean),
     ),
@@ -945,7 +952,7 @@ function ProductDetail({
   const [activeImage, setActiveImage] = useState(galleryImages[0] || "");
   useEffect(() => {
     setActiveImage(galleryImages[0] || "");
-  }, [product.skuId, product.mainImage, product.gallery]);
+  }, [current.skuId, current.mainImage, product.gallery]);
   return (
     <div className="mobile-app detail-page">
       <header className="sub-header">
@@ -981,9 +988,9 @@ function ProductDetail({
       <article className="detail-info">
         <div>
           <strong>
-            {money(product.agreementPrice || product.memberPrice)}
+            {money(current.agreementPrice || current.memberPrice)}
           </strong>
-          <del>{money(product.marketPrice)}</del>
+          <del>{money(current.marketPrice)}</del>
           <em>企业协议价</em>
         </div>
         <h1>{product.title}</h1>
@@ -995,6 +1002,10 @@ function ProductDetail({
           <span>全国配送</span>
         </section>
       </article>
+      {variants.length>1&&<article className="info-row m-sku-selector"><strong>规格</strong><div>
+        {variants.map((item)=><button key={item.skuId} className={Number(item.skuId)===Number(current.skuId)?"active":""}
+          disabled={Number(item.availableStock)<=0} onClick={()=>setSelectedSku(Number(item.skuId))}>{variantLabel(item)}</button>)}
+      </div></article>}
       <article className="info-row">
         <strong>配送</strong>
         <span>{product.deliveryDescription || "自营库存 · 全国配送"}</span>
@@ -1012,7 +1023,7 @@ function ProductDetail({
         <h2>规格参数</h2>
         <dl className="mobile-specifications">
           <dt>商品编码</dt>
-          <dd>{product.skuCode}</dd>
+          <dd>{current.skuCode}</dd>
           {specifications.map(([name, value], index) => (
             <React.Fragment key={`${name}-${index}`}>
               <dt>{name}</dt>
@@ -1035,8 +1046,8 @@ function ProductDetail({
       </article>
       <footer className="buybar">
         <button onClick={toggleFavorite}>{favorite ? "已收藏" : "收藏"}</button>
-        <button onClick={() => void add(product)}>加入购物车</button>
-        <button onClick={() => void buyNow(product)}>立即采购</button>
+        <button disabled={Number(current.availableStock)<=0} onClick={() => void add(current)}>加入购物车</button>
+        <button disabled={Number(current.availableStock)<=0} onClick={() => void buyNow(current)}>立即采购</button>
       </footer>
     </div>
   );

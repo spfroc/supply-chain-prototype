@@ -41,19 +41,27 @@ public class AdminBusinessController {
             p.detail_html AS detailHtml,p.delivery_description AS deliveryDescription,
             p.after_sales_html AS afterSalesHtml,p.category_id AS categoryId,p.brand_id AS brandId,
             p.status,s.id AS skuId,s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
-            s.stock,s.reserved_stock AS reservedStock,DATE_FORMAT(p.updated_at,'%Y-%m-%d %H:%i:%s') AS updatedAt,
+            (SELECT SUM(st.stock) FROM product_sku st WHERE st.spu_id=p.id AND st.deleted_at IS NULL) AS stock,
+            (SELECT SUM(st.reserved_stock) FROM product_sku st WHERE st.spu_id=p.id AND st.deleted_at IS NULL) AS reservedStock,
+            DATE_FORMAT(p.updated_at,'%Y-%m-%d %H:%i:%s') AS updatedAt,
             COALESCE(sales.soldCount,0) AS soldCount,COALESCE(sales.orderCount,0) AS orderCount,
             COALESCE(sales.salesAmount,0) AS salesAmount,
             COALESCE((SELECT JSON_OBJECTAGG(CAST(pav.attribute_id AS CHAR),pav.value_text)
-              FROM product_attribute_value pav WHERE pav.product_id=p.id),JSON_OBJECT()) AS attributeValues
+              FROM product_attribute_value pav WHERE pav.product_id=p.id),JSON_OBJECT()) AS attributeValues,
+            (SELECT COUNT(*) FROM product_sku sx WHERE sx.spu_id=p.id AND sx.deleted_at IS NULL) AS skuCount,
+            COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('id',sx.id,'skuCode',sx.sku_code,
+              'specValues',sx.spec_json,'skuImage',sx.sku_image,'marketPrice',sx.market_price,
+              'memberPrice',sx.member_price,'stock',sx.stock,'reservedStock',sx.reserved_stock,'status',sx.status))
+              FROM product_sku sx WHERE sx.spu_id=p.id AND sx.deleted_at IS NULL),JSON_ARRAY()) AS skus
           FROM product_spu p JOIN product_sku s ON s.spu_id=p.id AND s.deleted_at IS NULL
+            AND s.id=(SELECT MIN(s0.id) FROM product_sku s0 WHERE s0.spu_id=p.id AND s0.deleted_at IS NULL)
           LEFT JOIN (
-            SELECT oi.sku_id,SUM(oi.quantity) AS soldCount,COUNT(DISTINCT oi.order_main_id) AS orderCount,
+            SELECT sku.spu_id,SUM(oi.quantity) AS soldCount,COUNT(DISTINCT oi.order_main_id) AS orderCount,
               SUM(oi.total_price) AS salesAmount
-            FROM order_item oi JOIN order_main o ON o.id=oi.order_main_id
+            FROM order_item oi JOIN product_sku sku ON sku.id=oi.sku_id JOIN order_main o ON o.id=oi.order_main_id
             WHERE o.payment_status=2 AND o.order_status<>4 AND o.refund_status=0
-            GROUP BY oi.sku_id
-          ) sales ON sales.sku_id=s.id
+            GROUP BY sku.spu_id
+          ) sales ON sales.spu_id=p.id
           WHERE p.deleted_at IS NULL ORDER BY p.id DESC
           """).query().listOfRows();
     }
@@ -74,12 +82,7 @@ public class AdminBusinessController {
           .param("deliveryDescription",value(r.deliveryDescription())).param("afterSalesHtml",value(r.afterSalesHtml()))
           .param("status",r.status()).update();
         long id=jdbc.sql("SELECT id FROM product_spu WHERE spu_code=:code").param("code",spuCode).query(Long.class).single();
-        jdbc.sql("""
-          INSERT INTO product_sku(spu_id,sku_code,spec_json,market_price,member_price,stock,status)
-          VALUES(:spuId,:skuCode,JSON_OBJECT('规格',:spec),:marketPrice,:memberPrice,:stock,:status)
-          """)
-          .params(Map.of("spuId",id,"skuCode",skuCode,"spec",value(r.spec()),"marketPrice",r.marketPrice(),
-            "memberPrice",r.memberPrice(),"stock",r.stock(),"status",r.status()==1?1:0)).update();
+        saveSkus(id,r,skuCode);
         saveAttributeValues(id,r.attributeValues());
         return Map.of("id",id,"spuCode",spuCode);
     }
@@ -98,12 +101,7 @@ public class AdminBusinessController {
           .param("attributes",value(r.attributes())).param("summary",value(r.summary()))
           .param("detailHtml",value(r.detailHtml())).param("deliveryDescription",value(r.deliveryDescription()))
           .param("afterSalesHtml",value(r.afterSalesHtml())).param("status",r.status()).update(),"商品不存在");
-        jdbc.sql("""
-          UPDATE product_sku SET spec_json=JSON_OBJECT('规格',:spec),market_price=:marketPrice,
-          member_price=:memberPrice,stock=:stock,status=:status WHERE spu_id=:id AND deleted_at IS NULL
-          """)
-          .params(Map.of("id",id,"spec",value(r.spec()),"marketPrice",r.marketPrice(),"memberPrice",r.memberPrice(),
-            "stock",r.stock(),"status",r.status()==1?1:0)).update();
+        saveSkus(id,r,null);
         saveAttributeValues(id,r.attributeValues());
     }
 
@@ -524,6 +522,52 @@ public class AdminBusinessController {
             if(parentLevel!=level-1) throw new IllegalArgumentException("上级分类级别不正确");
         }
     }
+    private void saveSkus(long productId,ProductRequest r,String createCode) {
+        List<SkuRequest> requested=r.skus();
+        if(requested==null||requested.isEmpty()) {
+            Long existingId=jdbc.sql("SELECT MIN(id) FROM product_sku WHERE spu_id=:id AND deleted_at IS NULL")
+              .param("id",productId).query(Long.class).optional().orElse(null);
+            String existingCode=existingId==null?createCode:jdbc.sql("SELECT sku_code FROM product_sku WHERE id=:id")
+              .param("id",existingId).query(String.class).single();
+            requested=List.of(new SkuRequest(existingId,existingCode,Map.of("规格",value(r.spec())),value(r.mainImage()),
+              r.marketPrice(),r.memberPrice(),r.stock(),r.status()==1?1:0));
+        }
+        var retained=new java.util.HashSet<Long>();
+        for(SkuRequest sku:requested) {
+            if(sku.marketPrice()==null||sku.memberPrice()==null||sku.stock()<0)
+                throw new IllegalArgumentException("SKU价格和库存不能为空或小于0");
+            String code=value(sku.skuCode()).isBlank()?"SKU-"+uniqueProductCodeSuffix():sku.skuCode().trim();
+            String specs=toJson(sku.specValues()==null?Map.of():sku.specValues());
+            if(sku.id()==null) {
+                jdbc.sql("""
+                  INSERT INTO product_sku(spu_id,sku_code,spec_json,sku_image,market_price,member_price,stock,status)
+                  VALUES(:spuId,:code,CAST(:specs AS JSON),:image,:marketPrice,:memberPrice,:stock,:status)
+                  """).params(Map.of("spuId",productId,"code",code,"specs",specs,"image",value(sku.skuImage()),
+                    "marketPrice",sku.marketPrice(),"memberPrice",sku.memberPrice(),"stock",sku.stock(),"status",sku.status())).update();
+                retained.add(jdbc.sql("SELECT id FROM product_sku WHERE sku_code=:code").param("code",code).query(Long.class).single());
+            } else {
+                int reserved=jdbc.sql("SELECT reserved_stock FROM product_sku WHERE id=:id AND spu_id=:spuId")
+                  .params(Map.of("id",sku.id(),"spuId",productId)).query(Integer.class).optional()
+                  .orElseThrow(()->new IllegalArgumentException("SKU不存在"));
+                if(sku.stock()<reserved) throw new IllegalArgumentException("SKU库存不能小于已占用库存 "+reserved);
+                jdbc.sql("""
+                  UPDATE product_sku SET sku_code=:code,spec_json=CAST(:specs AS JSON),sku_image=:image,
+                    market_price=:marketPrice,member_price=:memberPrice,stock=:stock,status=:status
+                  WHERE id=:id AND spu_id=:spuId AND deleted_at IS NULL
+                  """).params(Map.of("id",sku.id(),"spuId",productId,"code",code,"specs",specs,
+                    "image",value(sku.skuImage()),"marketPrice",sku.marketPrice(),"memberPrice",sku.memberPrice(),
+                    "stock",sku.stock(),"status",sku.status())).update();
+                retained.add(sku.id());
+            }
+        }
+        for(long id:jdbc.sql("SELECT id FROM product_sku WHERE spu_id=:id AND deleted_at IS NULL")
+          .param("id",productId).query(Long.class).list()) if(!retained.contains(id))
+            jdbc.sql("UPDATE product_sku SET status=0 WHERE id=:id").param("id",id).update();
+    }
+    private static String toJson(Object value) {
+        try{return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(value);}
+        catch(Exception e){throw new IllegalArgumentException("SKU规格格式错误");}
+    }
     private static void validatePassword(String password,boolean required) {
         if(required&&(password==null||password.isBlank()))
             throw new IllegalArgumentException("初始密码不能为空");
@@ -534,12 +578,14 @@ public class AdminBusinessController {
         @NotBlank String mainImage,String gallery,String attributes,String summary,String detailHtml,
         String deliveryDescription,String afterSalesHtml,String spec,
       @NotNull @DecimalMin("0") BigDecimal marketPrice,@NotNull @DecimalMin("0") BigDecimal memberPrice,@Min(0) int stock,int status,
-      Map<String,Object> attributeValues){
+      Map<String,Object> attributeValues,List<SkuRequest> skus){
         public ProductRequest {
             long galleryCount=gallery==null?0:gallery.lines().filter(line->!line.isBlank()).count();
             if(galleryCount>6) throw new IllegalArgumentException("商品配图最多上传6张");
         }
     }
+    public record SkuRequest(Long id,String skuCode,Map<String,Object> specValues,String skuImage,
+      BigDecimal marketPrice,BigDecimal memberPrice,int stock,int status){}
     public record CategoryRequest(@NotBlank String name,Long parentId,@Min(1) int level,
       @Min(0) int sortOrder,String icon,int status){}
     public record EnterpriseRequest(@NotBlank String name,@NotBlank String creditCode,@NotBlank String contactName,

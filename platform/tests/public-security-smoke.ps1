@@ -46,6 +46,15 @@ Case "CAT-004 三级分类接口可用" {
   $r=Json "/api/public/catalog/categories"
   if($r.Status-ne 200-or @($r.Data|Where-Object{[int]$_.level-eq 3}).Count-lt 1){throw "三级分类缺失"}
 }
+Case "SKU-001 商品返回可销售 SKU 列表" {
+  $r=Json "/api/public/catalog/products"
+  $duplicate=@($r.Data|Group-Object spuCode|Where-Object Count -gt 1)
+  if($duplicate.Count-ne 0){throw "商品列表按 SKU 重复展示 SPU"}
+  foreach($product in @($r.Data)){
+    $variants=@($product.variants|ConvertFrom-Json)
+    if($variants.Count-lt 1-or !$variants[0].skuId-or !$variants[0].skuCode){throw "SKU 数据不完整"}
+  }
+}
 Case "PORTAL-001 门户配置可用" {
   $r=Json "/api/public/portal";if($r.Status-ne 200-or $null-eq $r.Data.navigation){throw "门户数据缺失"}
 }
