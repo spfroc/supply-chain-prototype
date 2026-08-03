@@ -7,6 +7,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
@@ -28,6 +29,14 @@ public class ApiExceptionHandler {
     ProblemDetail businessRule(IllegalArgumentException exception) {
         var detail = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, exception.getMessage());
         detail.setTitle("业务操作无法完成");
+        return detail;
+    }
+
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    ProblemDetail uploadTooLarge(MaxUploadSizeExceededException exception) {
+        var detail = ProblemDetail.forStatusAndDetail(HttpStatus.PAYLOAD_TOO_LARGE,
+            "上传文件超过服务器10MB上限，请压缩图片后重试");
+        detail.setTitle("上传文件过大");
         return detail;
     }
 }

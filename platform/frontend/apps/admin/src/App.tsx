@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import {
   App as AntApp,
+  Alert,
   Button,
   Card,
   Checkbox,
@@ -117,6 +118,27 @@ function imageDimensions(file: File) {
   });
 }
 
+async function uploadFailure(response: Response, fallback = "图片上传失败") {
+  const contentType = response.headers.get("content-type") || "";
+  let detail = "";
+  if (contentType.includes("json")) {
+    const data = await response.json().catch(() => ({}));
+    detail = data.detail || data.message || data.error || data.title || "";
+  } else {
+    detail = (await response.text().catch(() => "")).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+  }
+  if (!detail) {
+    detail = response.status === 401 || response.status === 403
+      ? "登录状态已失效或没有上传权限，请重新登录管理后台"
+      : response.status === 413
+        ? "文件超过服务器上传上限，请压缩后重试"
+        : response.status >= 500
+          ? "图片存储服务异常，请稍后重试或联系管理员检查存储空间"
+          : `${fallback}（HTTP ${response.status}）`;
+  }
+  return detail;
+}
+
 function ProductImageUpload({
   value,
   onChange,
@@ -129,6 +151,7 @@ function ProductImageUpload({
   kind?: "main" | "gallery" | "brand" | "banner" | "portal";
 }) {
   const { message } = AntApp.useApp();
+  const [uploadError, setUploadError] = useState("");
   const limit = multiple ? 6 : 1;
   const profiles = {
     main: { minWidth: 600, minHeight: 600, maxWidth: 3000, maxHeight: 3000, ratio: 1, ratioLabel: "1:1", maxMb: 5, title: "主图" },
@@ -151,6 +174,7 @@ function ProductImageUpload({
   const upload = async (options: any) => {
     const file = options.file as File;
     try {
+      setUploadError("");
       if (!["image/jpeg", "image/png"].includes(file.type))
         throw new Error("仅支持 JPG、PNG 图片");
       if (file.size > profile.maxMb * 1024 * 1024)
@@ -175,15 +199,19 @@ function ProductImageUpload({
         headers: { Authorization: `Basic ${adminCredential()}` },
         body,
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.detail || "图片上传失败");
+      if (!response.ok) throw new Error(await uploadFailure(response));
+      const result = await response.json();
       const next = multiple ? [...urls, result.url].slice(0, limit) : [result.url];
       onChange?.(next.join("\n"));
       options.onSuccess(result);
       message.success("图片上传成功");
     } catch (error) {
       options.onError(error);
-      message.error((error as Error).message);
+      const detail = error instanceof TypeError
+        ? "无法连接图片上传服务，请检查网络或服务器状态"
+        : (error as Error).message || "未知上传错误";
+      setUploadError(`${file.name}：${detail}`);
+      message.error({ content: detail, duration: 6 });
     }
   };
   return (
@@ -254,6 +282,17 @@ function ProductImageUpload({
         {profile.maxWidth}×{profile.maxHeight}，单张不超过{profile.maxMb}MB
         {multiple ? "，最多6张，可拖动调整顺序" : ""}
       </small>
+      {uploadError && (
+        <Alert
+          className="upload-error-detail"
+          type="error"
+          showIcon
+          closable
+          message="图片上传失败"
+          description={uploadError}
+          onClose={() => setUploadError("")}
+        />
+      )}
     </div>
   );
 }
@@ -299,8 +338,8 @@ function RichTextEditor({
         headers: { Authorization: `Basic ${adminCredential()}` },
         body,
       });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(result.detail || "图片上传失败");
+      if (!response.ok) throw new Error(await uploadFailure(response));
+      const result = await response.json();
       const image = document.createElement("img");
       image.src = result.url;
       image.alt = file.name.replace(/\.[^.]+$/, "");
@@ -308,7 +347,10 @@ function RichTextEditor({
       insertElement(image);
       message.success("图片已插入详情");
     } catch (error) {
-      message.error((error as Error).message);
+      message.error({
+        content: error instanceof TypeError ? "无法连接图片上传服务，请检查网络或服务器状态" : (error as Error).message,
+        duration: 6,
+      });
     } finally {
       if (localImageInput.current) localImageInput.current.value = "";
     }

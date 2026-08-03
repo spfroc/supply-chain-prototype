@@ -55,10 +55,13 @@ public class ProductImageController {
         int width = image.getWidth(), height = image.getHeight();
         if (width < profile.minWidth() || height < profile.minHeight()
             || width > profile.maxWidth() || height > profile.maxHeight())
-            throw new IllegalArgumentException("图片尺寸不符合当前用途要求");
+            throw new IllegalArgumentException("当前图片为" + width + "×" + height
+                + "像素；要求宽高在" + profile.minWidth() + "×" + profile.minHeight()
+                + "至" + profile.maxWidth() + "×" + profile.maxHeight() + "像素之间");
         double ratio = (double) width / height;
         if (profile.ratio() > 0 && Math.abs(ratio - profile.ratio()) / profile.ratio() > 0.03)
-            throw new IllegalArgumentException("图片宽高比例不符合当前用途要求");
+            throw new IllegalArgumentException("当前图片比例为" + String.format("%.2f:1", ratio)
+                + "；要求比例为" + ratioLabel(profile.ratio()) + "，允许3%误差");
 
         String extension = "image/png".equals(file.getContentType()) ? ".png" : ".jpg";
         String filename = UUID.randomUUID() + extension;
@@ -76,6 +79,13 @@ public class ProductImageController {
     private record ImageProfile(
         int minWidth, int minHeight, int maxWidth, int maxHeight, double ratio, int maxMegabytes
     ) {}
+
+    private String ratioLabel(double ratio) {
+        if (Math.abs(ratio - 1) < 0.01) return "1:1";
+        if (Math.abs(ratio - 3) < 0.01) return "3:1";
+        if (Math.abs(ratio - 16.0 / 9.0) < 0.01) return "16:9";
+        return String.format("%.2f:1", ratio);
+    }
 
     @GetMapping("/public/uploads/images/{filename:.+}")
     ResponseEntity<Resource> image(@PathVariable String filename) throws IOException {
