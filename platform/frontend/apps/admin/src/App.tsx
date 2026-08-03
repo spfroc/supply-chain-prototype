@@ -1336,7 +1336,7 @@ function BusinessModule({ module }: { module: Module }) {
         }
         onCancel={() => setOpen(false)}
         onOk={save}
-        width={760}
+        width={module === "products" && mode !== "stock" ? 920 : 760}
       >
         <Form form={form} layout="vertical" className="two-column-form">
           {mode === "stock" ? (
@@ -1344,119 +1344,43 @@ function BusinessModule({ module }: { module: Module }) {
               <InputNumber min={0} style={{ width: "100%" }} />
             </Form.Item>
           ) : module === "products" ? (
-            <>
-              <Form.Item
-                name="title"
-                label="商品标题"
-                rules={[{ required: true }]}
-              >
-                <Input />
-              </Form.Item>
-              <Form.Item name="spec" label="SKU规格">
-                <Input placeholder="例如：黑色 / 标准版" />
-              </Form.Item>
-              <Form.Item
-                name="categoryId"
-                label="三级分类"
-                rules={[{ required: true, message: "请选择三级分类" }]}
-              >
-                <Select
-                  options={(categories.data || [])
-                    .filter(
-                      (x) => Number(x.level) === 3 && Number(x.status) === 1,
-                    )
-                    .map((x) => ({
-                      value: x.id,
-                      label: `${x.parentName || ""} / ${x.name}`,
-                    }))}
-                />
-              </Form.Item>
-              <Form.Item name="brandId" label="品牌">
-                <Select
-                  options={[
-                    { value: 1, label: "联想" },
-                    { value: 2, label: "得力" },
-                  ]}
-                />
-              </Form.Item>
-              <Form.Item
-                name="marketPrice"
-                label="市场价"
-                rules={[{ required: true }]}
-              >
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-              <Form.Item
-                name="memberPrice"
-                label="会员价"
-                rules={[{ required: true }]}
-              >
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-              <Form.Item name="stock" label="库存" rules={[{ required: true }]}>
-                <InputNumber min={0} style={{ width: "100%" }} />
-              </Form.Item>
-              <Form.Item name="status" label="状态">
-                <Select
-                  options={[
-                    { value: 1, label: "在售" },
-                    { value: 0, label: "草稿" },
-                    { value: 2, label: "下架" },
-                  ]}
-                />
-              </Form.Item>
-              <Form.Item
-                name="mainImage"
-                label="商品主图"
-                className="full"
-                rules={[{ required: true, message: "请上传商品主图" }]}
-              >
-                <ProductImageUpload />
-              </Form.Item>
-              <Form.Item name="gallery" label="商品配图" className="full">
-                <ProductImageUpload multiple />
-              </Form.Item>
-              <Form.Item name="attributes" label="历史字符串属性（兼容）" className="full">
-                <Input.TextArea
-                  rows={2}
-                  placeholder="旧商品兼容字段，新商品请使用下方分类属性"
-                />
-              </Form.Item>
-              <div className="full"><Typography.Title level={5}>分类属性</Typography.Title>{attributeTemplate.length === 0 && <Alert type="info" showIcon message="当前分类尚未配置属性模板，可在“属性模板”页面添加。" />}</div>
-              {attributeTemplate.map((attribute) => {
-                const name = ["attributeValues", String(attribute.id)];
-                const rules = Number(attribute.requiredFlag) === 1 ? [{ required: true, message: `请填写${attribute.name}` }] : [];
-                const options = (attribute.options || []).filter((x: Row) => Number(x.status) === 1).map((x: Row) => ({ label: x.optionLabel, value: x.optionLabel }));
-                const label = `${attribute.name}${attribute.unit ? `（${attribute.unit}）` : ""}${Number(attribute.inheritedLevel) > 0 ? " · 继承自上级分类" : ""}`;
-                return <Form.Item key={attribute.id} name={name} label={label} rules={rules}>
-                  {attribute.inputType === "NUMBER" ? <InputNumber style={{width:"100%"}} />
-                    : attribute.inputType === "SELECT" ? <Select options={options} allowClear />
-                    : attribute.inputType === "RADIO" ? <Radio.Group options={options} />
-                    : attribute.inputType === "CHECKBOX" ? <Checkbox.Group options={options} />
-                    : attribute.inputType === "SWITCH" ? <Select options={[{label:"是",value:"是"},{label:"否",value:"否"}]} />
-                    : attribute.inputType === "DATE" ? <Input type="date" />
-                    : <Input />}
-                </Form.Item>;
-              })}
-              <Form.Item name="summary" label="商品摘要" className="full">
-                <Input.TextArea rows={2} />
-              </Form.Item>
-              <Form.Item name="detailHtml" label="富文本详情" className="full">
-                <RichTextEditor />
-              </Form.Item>
-              <Form.Item name="deliveryDescription" label="配送说明" className="full">
-                <Input.TextArea
-                  rows={3}
-                  placeholder="填写配送范围、预计时效、运费及安装等说明"
-                />
-              </Form.Item>
-              <Form.Item name="afterSalesHtml" label="售后政策" className="full">
-                <Input.TextArea
-                  rows={4}
-                  placeholder="填写退换货、质保、维修及售后联系方式，支持 HTML"
-                />
-              </Form.Item>
-            </>
+            <Tabs className="full" destroyOnHidden={false} items={[
+              { key: "basic", label: "基本信息", children: <div className="two-column-form">
+                <Form.Item name="title" label="商品标题" className="full" rules={[{ required: true }]}><Input /></Form.Item>
+                <Form.Item name="categoryId" label="三级分类" rules={[{ required: true, message: "请选择三级分类" }]}><Select options={(categories.data || []).filter((x) => Number(x.level) === 3 && Number(x.status) === 1).map((x) => ({ value: x.id, label: `${x.parentName || ""} / ${x.name}` }))} /></Form.Item>
+                <Form.Item name="brandId" label="品牌"><Select options={[{ value: 1, label: "联想" },{ value: 2, label: "得力" }]} /></Form.Item>
+                <Form.Item name="status" label="状态"><Select options={[{ value: 1, label: "在售" },{ value: 0, label: "草稿" },{ value: 2, label: "下架" }]} /></Form.Item>
+                <Form.Item name="summary" label="商品摘要" className="full"><Input.TextArea rows={3} /></Form.Item>
+              </div> },
+              { key: "sales", label: "销售与库存", children: <div className="two-column-form">
+                <Form.Item name="spec" label="SKU规格"><Input placeholder="例如：黑色 / 标准版" /></Form.Item>
+                <Form.Item name="stock" label="库存" rules={[{ required: true }]}><InputNumber min={0} style={{ width: "100%" }} /></Form.Item>
+                <Form.Item name="marketPrice" label="市场价" rules={[{ required: true }]}><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item>
+                <Form.Item name="memberPrice" label="会员价" rules={[{ required: true }]}><InputNumber min={0} precision={2} style={{ width: "100%" }} /></Form.Item>
+                <Alert className="full" type="info" showIcon message="当前为单SKU商品；多规格SKU组合将在下一版规格组合功能中统一管理。" />
+              </div> },
+              { key: "images", label: "图片素材", children: <div className="two-column-form">
+                <Form.Item name="mainImage" label="商品主图" className="full" rules={[{ required: true, message: "请上传商品主图" }]}><ProductImageUpload /></Form.Item>
+                <Form.Item name="gallery" label="商品配图" className="full"><ProductImageUpload multiple /></Form.Item>
+              </div> },
+              { key: "attributes", label: `规格属性${attributeTemplate.length ? `（${attributeTemplate.length}）` : ""}`, children: <div className="two-column-form">
+                <div className="full"><Alert type="info" showIcon message="以下字段根据所选三级分类生成；标有“继承自上级分类”的属性由一级或二级分类自动提供。" /></div>
+                {attributeTemplate.length === 0 && <div className="full"><Alert type="warning" showIcon message="当前分类尚未配置属性模板，可在“属性模板”页面添加。" /></div>}
+                {attributeTemplate.map((attribute) => {
+                  const name = ["attributeValues", String(attribute.id)];
+                  const rules = Number(attribute.requiredFlag) === 1 ? [{ required: true, message: `请填写${attribute.name}` }] : [];
+                  const options = (attribute.options || []).filter((x: Row) => Number(x.status) === 1).map((x: Row) => ({ label: x.optionLabel, value: x.optionLabel }));
+                  const label = `${attribute.name}${attribute.unit ? `（${attribute.unit}）` : ""}${Number(attribute.inheritedLevel) > 0 ? " · 继承自上级分类" : ""}`;
+                  return <Form.Item key={attribute.id} name={name} label={label} rules={rules}>{attribute.inputType === "NUMBER" ? <InputNumber style={{width:"100%"}} /> : attribute.inputType === "SELECT" ? <Select options={options} allowClear /> : attribute.inputType === "RADIO" ? <Radio.Group options={options} /> : attribute.inputType === "CHECKBOX" ? <Checkbox.Group options={options} /> : attribute.inputType === "SWITCH" ? <Select options={[{label:"是",value:"是"},{label:"否",value:"否"}]} /> : attribute.inputType === "DATE" ? <Input type="date" /> : <Input />}</Form.Item>;
+                })}
+                <Form.Item name="attributes" label="历史字符串属性（兼容）" className="full"><Input.TextArea rows={2} placeholder="仅用于旧商品兼容，新商品请使用结构化属性" /></Form.Item>
+              </div> },
+              { key: "detail", label: "详情与服务", children: <div className="two-column-form">
+                <Form.Item name="detailHtml" label="富文本详情" className="full"><RichTextEditor /></Form.Item>
+                <Form.Item name="deliveryDescription" label="配送说明" className="full"><Input.TextArea rows={3} placeholder="填写配送范围、预计时效、运费及安装等说明" /></Form.Item>
+                <Form.Item name="afterSalesHtml" label="售后政策" className="full"><Input.TextArea rows={4} placeholder="填写退换货、质保、维修及售后联系方式，支持 HTML" /></Form.Item>
+              </div> },
+            ]} />
           ) : module === "enterprises" ? (
             <>
               <Form.Item
