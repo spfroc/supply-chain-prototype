@@ -814,6 +814,8 @@ function BusinessModule({ module }: { module: Module }) {
   const [logisticsForm] = Form.useForm();
   const [refundForm] = Form.useForm();
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [productTab,setProductTab]=useState("basic");
   const [editing, setEditing] = useState<Row>();
   const [mode, setMode] = useState<"entity" | "stock" | "item">("entity");
@@ -880,6 +882,9 @@ function BusinessModule({ module }: { module: Module }) {
     setOpen(true);
   };
   const save = async () => {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSaving(true);
     try {
       const values = await form.validateFields();
       if(module==="products"&&Array.isArray(values.skus)){
@@ -918,7 +923,25 @@ function BusinessModule({ module }: { module: Module }) {
         setProductTab(tab);
         message.error(error.errorFields[0].errors?.[0]||"请检查表单必填项");
       } else if (e instanceof Error) message.error(e.message);
+    } finally {
+      savingRef.current = false;
+      setSaving(false);
     }
+  };
+  const closeEditor = () => {
+    if (savingRef.current) return;
+    if (!form.isFieldsTouched()) {
+      setOpen(false);
+      return;
+    }
+    modal.confirm({
+      title: "放弃未保存的修改？",
+      content: "关闭后，本次填写或修改的内容不会保留。",
+      okText: "放弃修改",
+      cancelText: "继续编辑",
+      okButtonProps: { danger: true },
+      onOk: () => setOpen(false),
+    });
   };
   const remove = (row: Row) =>
     modal.confirm({
@@ -1401,8 +1424,11 @@ function BusinessModule({ module }: { module: Module }) {
             ? "调整库存"
             : `${editing ? "编辑" : "新增"}${module === "products" ? "商品" : module === "enterprises" ? "企业" : "协议"}`
         }
-        onCancel={() => setOpen(false)}
+        onCancel={closeEditor}
         onOk={save}
+        confirmLoading={saving}
+        maskClosable={!saving}
+        keyboard={!saving}
         width={module === "products" && mode !== "stock" ? 920 : 760}
       >
         <Form form={form} layout="vertical" className="two-column-form">
