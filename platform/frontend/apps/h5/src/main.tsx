@@ -8,6 +8,39 @@ import "./auth.css";
 import "./platform-tags.css";
 type Tab = "home" | "category" | "cart" | "checkout" | "orders" | "mine";
 type Row = Record<string, any>;
+function DragScroll({ className, children }: { className: string; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const drag = useRef({ active: false, moved: false, x: 0, left: 0 });
+  return (
+    <div
+      ref={ref}
+      className={`${className} drag-scroll`}
+      onPointerDown={(event) => {
+        if (event.pointerType === "mouse" && event.button !== 0) return;
+        drag.current = { active: true, moved: false, x: event.clientX, left: ref.current?.scrollLeft || 0 };
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }}
+      onPointerMove={(event) => {
+        if (!drag.current.active || !ref.current) return;
+        const distance = event.clientX - drag.current.x;
+        if (Math.abs(distance) > 4) drag.current.moved = true;
+        ref.current.scrollLeft = drag.current.left - distance;
+      }}
+      onPointerUp={(event) => {
+        drag.current.active = false;
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }}
+      onPointerCancel={() => { drag.current.active = false; }}
+      onClickCapture={(event) => {
+        if (drag.current.moved) {
+          event.preventDefault();
+          event.stopPropagation();
+          drag.current.moved = false;
+        }
+      }}
+    >{children}</div>
+  );
+}
 const money = (v: any) =>
   `¥${Number(v || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const dateTime = (value: string) =>
@@ -67,6 +100,7 @@ function App() {
   const [profile, setProfile] = useState<Row>({});
   const [detail, setDetail] = useState<Row>();
   const [solutionId, setSolutionId] = useState<number | undefined>(() => Number(new URLSearchParams(location.search).get("solutionId")) || undefined);
+  const [solutionsOpen, setSolutionsOpen] = useState(false);
   const [current, setCurrent] = useState<Row>();
   const [authReady, setAuthReady] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
@@ -185,6 +219,11 @@ function App() {
         )}
       </>
     );
+  if (solutionsOpen)
+    return <MobileSolutionList solutions={portal.solution || []} back={() => setSolutionsOpen(false)} open={(id) => {
+      setSolutionId(id);
+      history.pushState({}, "", `${location.pathname}?solutionId=${id}`);
+    }} />;
   if (detail)
     return (
       <>
@@ -237,6 +276,7 @@ function App() {
               setSolutionId(id);
               history.pushState({}, "", `${location.pathname}?solutionId=${id}`);
             }}
+            allSolutions={() => setSolutionsOpen(true)}
           />
         )}
         {tab === "category" && (
@@ -443,6 +483,23 @@ function MobileAuth({
   );
 }
 
+function MobileSolutionList({ solutions, back, open }: { solutions: Row[]; back: () => void; open: (id: number) => void }) {
+  return (
+    <div className="mobile-app m-solution-list">
+      <header className="sub-header"><button onClick={back}>‹ 返回</button><h2>场景方案</h2><span>{solutions.length}个方案</span></header>
+      <main>
+        {solutions.map((row) => (
+          <article key={row.id} onClick={() => open(Number(row.id))}>
+            <div>{row.mobileImageUrl || row.imageUrl ? <img src={row.mobileImageUrl || row.imageUrl} alt={row.title} /> : <span>方案海报</span>}</div>
+            <section><small>SCENE SOLUTION</small><h2>{row.title}</h2><p>{row.subtitle || "企业场景设备组合方案"}</p><button>查看方案配置 ›</button></section>
+          </article>
+        ))}
+        {!solutions.length && <div className="m-empty">暂无已发布方案</div>}
+      </main>
+    </div>
+  );
+}
+
 function MobileSolutionDetail({ solutionId, back, requireAuth, reloadCart, checkout }: {
   solutionId: number;
   back: () => void;
@@ -486,7 +543,7 @@ function MobileSolutionDetail({ solutionId, back, requireAuth, reloadCart, check
           const checked = required || !!selectedItems[row.skuId];
           return <article key={row.relationId} className={!checked ? "off" : ""}>
             <label><input type="checkbox" checked={checked} disabled={required} onChange={(event) => setSelectedItems({ ...selectedItems, [row.skuId]: event.target.checked })} /><em>{required ? "必选" : "可选"}</em></label>
-            <div className="m-solution-image">{row.mainImage ? <img src={row.mainImage} alt={row.title} /> : "商品"}</div>
+            <div className="m-solution-image">{row.mainImage ? <img src={row.mainImage} alt={row.title} onError={(event) => { event.currentTarget.style.display = "none"; }} /> : null}<span>{row.title?.slice(0, 1) || "商"}</span></div>
             <div className="m-solution-product"><strong>{row.title}</strong><small>{money(row.memberPrice)}</small><div><button disabled={!checked} onClick={() => setQuantities({ ...quantities, [row.skuId]: Math.max(1, (quantities[row.skuId] || 1) - 1) })}>−</button><b>{quantities[row.skuId] || 1}</b><button disabled={!checked} onClick={() => setQuantities({ ...quantities, [row.skuId]: Math.min(Number(row.availableStock), (quantities[row.skuId] || 1) + 1) })}>＋</button></div></div>
           </article>;
         })}
@@ -503,6 +560,7 @@ function Home({
   add,
   category,
   openSolution,
+  allSolutions,
 }: {
   products: Row[];
   solutions: Row[];
@@ -510,6 +568,7 @@ function Home({
   add: (r: Row) => void;
   category: () => void;
   openSolution: (id: number) => void;
+  allSolutions: () => void;
 }) {
   return (
     <div className="home">
@@ -554,11 +613,11 @@ function Home({
           </div>
           <button onClick={category}>全部 ›</button>
         </header>
-        <div className="product-scroll">
+        <DragScroll className="product-scroll">
           {products.map((p, i) => (
             <Product key={p.skuId} row={p} index={i} open={open} add={add} />
           ))}
-        </div>
+        </DragScroll>
       </section>
       <section className="m-section">
         <header>
@@ -566,9 +625,9 @@ function Home({
             <span>SCENE SOLUTION</span>
             <h2>方案推荐</h2>
           </div>
-          <button>全部 ›</button>
+          <button onClick={allSolutions}>全部 ›</button>
         </header>
-        <div className="solution-scroll">
+        <DragScroll className="solution-scroll">
           {solutions.map((row) => (
             <article key={row.id} onClick={() => openSolution(Number(row.id))} style={row.imageUrl ? { backgroundImage: `linear-gradient(135deg,#15365de8,#1f6ac9d9),url(${row.imageUrl})`, backgroundSize: "cover" } : undefined}>
               <span>SCENE SOLUTION</span>
@@ -577,7 +636,7 @@ function Home({
               <b>查看配置并下单 ›</b>
             </article>
           ))}
-        </div>
+        </DragScroll>
       </section>
     </div>
   );

@@ -2634,7 +2634,7 @@ function PortalManager({ module }: { module: Module }) {
               title: "商品",
               render: (_, row) => (
                 <div className="user-cell">
-                  {row.mainImage ? <img src={row.mainImage} alt="" /> : <i>商</i>}
+                  <span className="solution-admin-cover"><i>{row.title?.slice(0, 1) || "商"}</i>{row.mainImage && <img src={row.mainImage} alt={row.title} onError={(event) => { event.currentTarget.style.display = "none"; }} />}</span>
                   <span><strong>{row.title}</strong><small>{row.skuCode}</small></span>
                 </div>
               ),
