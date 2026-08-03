@@ -35,11 +35,13 @@ public class SystemController {
 
     @GetMapping("/status")
     Map<String, Object> status() {
+        Integer database = jdbc.sql("SELECT 1").query(Integer.class).single();
         return Map.of(
             "service", "政企采购供应链平台",
             "status", "UP",
             "version", "0.1.0",
-            "time", OffsetDateTime.now(ZoneId.of("Asia/Shanghai")).toString()
+            "time", OffsetDateTime.now(ZoneId.of("Asia/Shanghai")).toString(),
+            "components", Map.of("api", "UP", "database", database == 1 ? "UP" : "DOWN")
         );
     }
 }

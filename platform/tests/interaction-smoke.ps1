@@ -1,4 +1,4 @@
-param(
+﻿param(
   [string]$BaseUrl = "http://supply.comp",
   [string]$AdminUser = "admin",
   [string]$AdminPassword = "change-me-before-production"

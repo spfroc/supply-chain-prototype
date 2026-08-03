@@ -1,7 +1,9 @@
-param(
+﻿param(
   [string]$BaseUrl = "http://supply.comp",
   [string]$AdminUser = "admin",
-  [string]$AdminPassword = "change-me-before-production"
+  [string]$AdminPassword = "change-me-before-production",
+  [string]$ClientUser = "demo",
+  [string]$ClientPassword = "demo-password"
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,7 +13,7 @@ $credential = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("${AdminU
 $adminHeaders = @{ Authorization = "Basic $credential"; "Content-Type" = "application/json" }
 $clientSession = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 $loginResponse = Invoke-WebRequest -Method POST -Uri "$BaseUrl/api/auth/login" -ContentType "application/json" `
-  -Body (@{ enterpriseId=1; username="demo"; password="demo-password" } | ConvertTo-Json) -WebSession $clientSession -UseBasicParsing
+  -Body (@{ username=$ClientUser; password=$ClientPassword } | ConvertTo-Json) -WebSession $clientSession -UseBasicParsing -Proxy $null
 $jsonHeaders = @{ "Content-Type" = "application/json"; "X-Test-Client" = "1" }
 
 function Test-Case {
@@ -109,10 +111,15 @@ Test-Case "ADM-012 操作日志" {
   $r = Invoke-Json GET "/api/admin/system/logs" $null $adminHeaders
   if ($r.Status -ne 200 -or $r.Data.Count -lt 1) { throw "操作日志为空" }
 }
-Test-Case "CLI-001 协议商品" {
-  $r = Invoke-Json GET "/api/public/catalog/products?enterpriseId=1" $null
+Test-Case "SEC-001 游客不泄露协议价" {
+  $r = Invoke-Json GET "/api/public/catalog/products?enterpriseId=1" $null @{}
   $agreementProducts = @($r.Data | Where-Object { $null -ne $_.agreementPrice })
-  if ($r.Status -ne 200 -or $agreementProducts.Count -lt 2) { throw "协议商品不完整" }
+  if ($r.Status -ne 200 -or $agreementProducts.Count -ne 0) { throw "游客接口泄露协议价" }
+}
+Test-Case "CLI-001 登录后返回协议商品" {
+  $r = Invoke-Json GET "/api/public/catalog/products" $null
+  $agreementProducts = @($r.Data | Where-Object { $null -ne $_.agreementPrice })
+  if ($r.Status -ne 200 -or $agreementProducts.Count -lt 1) { throw "协议商品不完整" }
 }
 Test-Case "CLI-016 企业资料" {
   $r = Invoke-Json GET "/api/client/profile" $null

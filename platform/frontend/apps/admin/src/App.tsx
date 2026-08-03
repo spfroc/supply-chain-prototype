@@ -625,10 +625,15 @@ function AdminLogin({ success }: { success: () => void }) {
 }
 
 function AdminApp({ logout }: { logout: () => void }) {
+  const {message}=AntApp.useApp();
   const [module, setModule] = useState<Module>("overview");
   const [admin, setAdmin] = useState<Row>({});
+  const [health,setHealth]=useState<Row>();
+  const [globalSearch,setGlobalSearch]=useState("");
   useEffect(() => {
     void api<Row>("/me").then(setAdmin);
+    const refresh=()=>void rootApi<Row>("/api/public/status").then(setHealth).catch(()=>setHealth({status:"DOWN"}));
+    refresh();const timer=setInterval(refresh,60000);return()=>clearInterval(timer);
   }, []);
   const permissionSet = useMemo(
     () => new Set(String(admin.permissionCodes || "").split(",").filter(Boolean)),
@@ -666,6 +671,12 @@ function AdminApp({ logout }: { logout: () => void }) {
     logs: ["操作日志", "追踪关键管理操作，支持审计与问题定位"],
     configs: ["基本配置", "维护平台信息、订单和库存参数"],
   };
+  const runGlobalSearch=()=>{
+    const keyword=globalSearch.trim().toLowerCase();
+    if(!keyword)return;
+    const target=(Object.keys(titles) as Module[]).find((key)=>allowed(key)&&titles[key].join(" ").toLowerCase().includes(keyword));
+    if(target)setModule(target);else message.warning("没有找到匹配的管理页面");
+  };
   return (
     <Layout className="admin-shell">
       <Layout.Sider width={242} className="admin-sider">
@@ -694,16 +705,18 @@ function AdminApp({ logout }: { logout: () => void }) {
             <strong>{titles[module][0]}</strong>
           </div>
           <label className="global-search">
-            ⌕ <input placeholder="搜索用户、角色或日志" />
+            ⌕ <input value={globalSearch} onChange={(e)=>setGlobalSearch(e.target.value)}
+              onKeyDown={(e)=>{if(e.key==="Enter")runGlobalSearch();}}
+              placeholder="搜索商品、订单、用户或配置" />
           </label>
           <div
             className="service-health"
             title="当前管理 API 请求正常，且数据库查询成功"
           >
-            <i />
+            <i className={health?.status==="UP"?"":"down"} />
             <span>
-              <strong>运行正常</strong>
-              <small>API · 数据库</small>
+              <strong>{health?.status==="UP"?"服务正常":health?"服务异常":"检查中"}</strong>
+              <small>{health?.components?.api||"—"} API · {health?.components?.database||"—"} 数据库</small>
             </span>
           </div>
           <div className="admin-account">
@@ -720,7 +733,7 @@ function AdminApp({ logout }: { logout: () => void }) {
         <Layout.Content className="admin-content">
           <div className="page-heading">
             <div>
-              <span>2026年7月29日 · 数据实时更新</span>
+              <span>{new Intl.DateTimeFormat("zh-CN",{year:"numeric",month:"long",day:"numeric",weekday:"short"}).format(new Date())} · 数据实时更新</span>
               <Typography.Title level={2}>{titles[module][0]}</Typography.Title>
               <p>{titles[module][1]}</p>
             </div>
@@ -778,6 +791,9 @@ function BusinessModule({ module }: { module: Module }) {
   const categories = useLoad<Row[]>(() =>
     rootApi("/api/admin/business/categories"),
   );
+  const brands = useLoad<Row[]>(() =>
+    rootApi("/api/admin/content/brands/list"),
+  );
   const logisticsCompanies = useLoad<Row[]>(() =>
     rootApi("/api/admin/system/options?type=LOGISTICS_COMPANY&enabled=true"),
   );
@@ -793,6 +809,7 @@ function BusinessModule({ module }: { module: Module }) {
   const [logisticsForm] = Form.useForm();
   const [refundForm] = Form.useForm();
   const [open, setOpen] = useState(false);
+  const [productTab,setProductTab]=useState("basic");
   const [editing, setEditing] = useState<Row>();
   const [mode, setMode] = useState<"entity" | "stock" | "item">("entity");
   const [agreement, setAgreement] = useState<Row>();
@@ -822,6 +839,7 @@ function BusinessModule({ module }: { module: Module }) {
     setEditing(row);
     setMode(nextMode);
     form.resetFields();
+    setProductTab("basic");
     if (nextMode === "stock") form.setFieldsValue({ stock: row?.stock });
     else if (module === "products")
       form.setFieldsValue(
@@ -831,7 +849,7 @@ function BusinessModule({ module }: { module: Module }) {
               categoryId: (categories.data || []).find(
                 (x) => Number(x.level) === 3,
               )?.id,
-              brandId: 1,
+              brandId: (brands.data || []).find((x)=>Number(x.status)===1)?.id,
               status: 1,
               stock: 0,
             },
@@ -869,7 +887,16 @@ function BusinessModule({ module }: { module: Module }) {
       void products.refresh();
       void enterprises.refresh();
     } catch (e) {
-      if (e instanceof Error) message.error(e.message);
+      const error=e as Row;
+      const first=error.errorFields?.[0]?.name?.[0];
+      if(module==="products"&&first){
+        const tab=first==="stock"||first==="marketPrice"||first==="memberPrice"||first==="spec"
+          ?"sales":first==="mainImage"||first==="gallery"?"images"
+          :first==="attributeValues"||first==="attributes"?"attributes"
+          :first==="detailHtml"||first==="deliveryDescription"||first==="afterSalesHtml"?"detail":"basic";
+        setProductTab(tab);
+        message.error(error.errorFields[0].errors?.[0]||"请检查表单必填项");
+      } else if (e instanceof Error) message.error(e.message);
     }
   };
   const remove = (row: Row) =>
@@ -1365,11 +1392,11 @@ function BusinessModule({ module }: { module: Module }) {
               <InputNumber min={0} style={{ width: "100%" }} />
             </Form.Item>
           ) : module === "products" ? (
-            <Tabs className="full" destroyOnHidden={false} items={[
+            <Tabs className="full" destroyOnHidden={false} activeKey={productTab} onChange={setProductTab} items={[
               { key: "basic", label: "基本信息", children: <div className="two-column-form">
                 <Form.Item name="title" label="商品标题" className="full" rules={[{ required: true }]}><Input /></Form.Item>
                 <Form.Item name="categoryId" label="三级分类" rules={[{ required: true, message: "请选择三级分类" }]}><Select options={(categories.data || []).filter((x) => Number(x.level) === 3 && Number(x.status) === 1).map((x) => ({ value: x.id, label: `${x.parentName || ""} / ${x.name}` }))} /></Form.Item>
-                <Form.Item name="brandId" label="品牌"><Select options={[{ value: 1, label: "联想" },{ value: 2, label: "得力" }]} /></Form.Item>
+                <Form.Item name="brandId" label="品牌" rules={[{required:true,message:"请选择品牌"}]}><Select loading={brands.loading} showSearch optionFilterProp="label" options={(brands.data||[]).filter((x)=>Number(x.status)===1).map((x)=>({ value:x.id,label:x.name }))} placeholder="请选择已启用品牌" /></Form.Item>
                 <Form.Item name="status" label="状态"><Select options={[{ value: 1, label: "在售" },{ value: 0, label: "草稿" },{ value: 2, label: "下架" }]} /></Form.Item>
                 <Form.Item name="summary" label="商品摘要" className="full"><Input.TextArea rows={3} /></Form.Item>
               </div> },
