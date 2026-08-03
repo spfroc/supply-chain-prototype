@@ -1134,44 +1134,13 @@ function PlatformProducts({
         ) : (
           <div className="product-grid">
             {(data.products || []).map((product: Row, index: number) => (
-              <article
-                className="product-card"
+              <ProductCard
                 key={product.relationId}
-                onClick={() => open(product)}
-              >
-                <div className={`product-image p${index % 5}`}>
-                  {product.mainImage ? (
-                    <img src={product.mainImage} alt={product.title} />
-                  ) : (
-                    <i>{["💻", "📄", "🖨️", "📦"][index % 4]}</i>
-                  )}
-                  <span>平台商品</span>
-                </div>
-                <div className="product-info">
-                  <small>{data.platform?.title}</small>
-                  <h3>{product.title}</h3>
-                  <p>{product.summary}</p>
-                  <div className="price">
-                    <strong>{money(product.platformPrice)}</strong>
-                    <del>{money(product.marketPrice)}</del>
-                  </div>
-                  <div className="stock">
-                    <span>
-                      库存 {product.availableStock} · 浏览 {product.clickCount}
-                    </span>
-                    {product.productUrl && (
-                      <a
-                        href={product.productUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        onClick={(event) => event.stopPropagation()}
-                      >
-                        平台链接
-                      </a>
-                    )}
-                  </div>
-                </div>
-              </article>
+                product={product}
+                index={index}
+                open={open}
+                platformTitle={data.platform?.title}
+              />
             ))}
           </div>
         )}
@@ -1191,26 +1160,28 @@ function ProductCard({
   index,
   open,
   add,
+  platformTitle,
 }: {
   product: Row;
   index: number;
   open: (r: Row) => void;
-  add: (r: Row) => void;
+  add?: (r: Row) => void;
+  platformTitle?: string;
 }) {
   return (
     <article className="product-card" onClick={() => open(product)}>
       <div className={`product-image p${index % 5}`}>
-        <span>自营</span>
+        <span>{platformTitle ? "平台商品" : "自营"}</span>
         {product.mainImage ? (
           <img src={product.mainImage} alt={product.title} />
         ) : (
           <i>{["💻", "📄", "🖨️", "🖥️", "📦"][index % 5]}</i>
         )}
-        <em>协议专享</em>
+        <em>{platformTitle || "协议专享"}</em>
       </div>
       <div className="product-info">
-        <small>企业协议商品</small>
-        {product.platformNames && (
+        <small>{platformTitle || "企业协议商品"}</small>
+        {!platformTitle && product.platformNames && (
           <div className="platform-tags">
             {String(product.platformNames)
               .split("、")
@@ -1223,20 +1194,17 @@ function ProductCard({
         <p>{product.summary || "政企采购自营商品，全国配送"}</p>
         <div className="price">
           <strong>
-            {money(product.agreementPrice || product.memberPrice)}
+            {money(platformTitle ? product.platformPrice : product.agreementPrice || product.memberPrice)}
           </strong>
           <del>{money(product.marketPrice)}</del>
         </div>
         <div className="stock">
-          <span>库存 {product.availableStock}</span>
-          <button
-            onClick={(event) => {
-              event.stopPropagation();
-              void add(product);
-            }}
-          >
-            加入购物车
-          </button>
+          <span>库存 {product.availableStock}{platformTitle ? ` · 浏览 ${product.clickCount || 0}` : ""}</span>
+          {platformTitle ? (
+            product.productUrl && <a className="platform-card-link" href={product.productUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>平台链接</a>
+          ) : (
+            <button onClick={(event) => { event.stopPropagation(); void add?.(product); }}>加入购物车</button>
+          )}
         </div>
       </div>
     </article>
