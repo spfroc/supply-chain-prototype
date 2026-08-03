@@ -856,6 +856,7 @@ function Products({
   const [active, setActive] = useState<number | undefined>(initialCategory);
   const [onlyStock,setOnlyStock]=useState(false);
   const [onlyAgreement,setOnlyAgreement]=useState(false);
+  const [attributeFilters,setAttributeFilters]=useState<Record<string,string[]>>({});
   const [hovered, setHovered] = useState<number>();
   const [sort, setSort] = useState<"default" | "price">("default");
   const ids = active
@@ -871,12 +872,20 @@ function Products({
           ]),
       ]
     : [];
+  const categoryProducts=products.filter((p)=>!active||ids.includes(Number(p.categoryId)));
+  const filterDefinitions=Array.from(new Map(categoryProducts.flatMap((p)=>structuredSpecs(p.structuredAttributes))
+    .filter((item)=>Number(item.filterable)===1&&item.value)
+    .map((item)=>[String(item.code),item])).values());
+  const filterOptions=(code:string)=>Array.from(new Set(categoryProducts.flatMap((p)=>structuredSpecs(p.structuredAttributes))
+    .filter((item)=>String(item.code)===code).map((item)=>String(item.value))));
   const filtered = products
     .filter(
       (p) =>
         (!active || ids.includes(Number(p.categoryId))) &&
         (!onlyStock || Number(p.availableStock)>0) &&
         (!onlyAgreement || p.agreementPrice != null) &&
+        Object.entries(attributeFilters).every(([code,values])=>!values.length||structuredSpecs(p.structuredAttributes)
+          .some((item)=>String(item.code)===code&&values.includes(String(item.value)))) &&
         (`${p.title || ""} ${p.summary || ""} ${p.brandName || ""} ${p.skuCode || ""}`
           .toLowerCase().includes(keyword.toLowerCase())),
     )
@@ -963,6 +972,16 @@ function Products({
           <h3>商品状态</h3>
           <label><input type="checkbox" checked={onlyStock} onChange={(e)=>setOnlyStock(e.target.checked)}/> 仅看有货</label>
           <label><input type="checkbox" checked={onlyAgreement} onChange={(e)=>setOnlyAgreement(e.target.checked)}/> 企业协议商品</label>
+          {filterDefinitions.map((definition)=><div className="dynamic-filter" key={definition.code}>
+            <h3>{definition.name}{definition.unit?`（${definition.unit}）`:""}</h3>
+            {filterOptions(String(definition.code)).map((value)=><label key={value}>
+              <input type="checkbox" checked={(attributeFilters[String(definition.code)]||[]).includes(value)}
+                onChange={(e)=>setAttributeFilters((current)=>{
+                  const values=current[String(definition.code)]||[];
+                  return {...current,[String(definition.code)]:e.target.checked?[...values,value]:values.filter((item)=>item!==value)};
+                })}/>{value}
+            </label>)}
+          </div>)}
         </aside>
         <section className="listing">
           <div className="listing-head">

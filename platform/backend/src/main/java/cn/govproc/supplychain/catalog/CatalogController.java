@@ -39,8 +39,8 @@ public class CatalogController {
                    p.summary,p.detail_html,p.delivery_description,p.after_sales_html,
                    s.market_price, s.member_price, s.stock - s.reserved_stock AS available_stock,
                    ai.agreement_price,COALESCE(sales.sold_count,0) AS sold_count,
-                   COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('name',ad.name,'groupName',ad.group_name,
-                     'value',pav.value_text,'unit',ad.unit,'sortOrder',ad.sort_order))
+                   COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('id',ad.id,'code',ad.code,'name',ad.name,'groupName',ad.group_name,
+                     'value',pav.value_text,'unit',ad.unit,'filterable',ad.filterable,'searchable',ad.searchable,'sortOrder',ad.sort_order))
                      FROM product_attribute_value pav JOIN attribute_definition ad ON ad.id=pav.attribute_id
                      WHERE pav.product_id=p.id AND ad.visible_flag=1 AND ad.status=1 AND ad.deleted_at IS NULL),JSON_ARRAY()) AS structured_attributes,
                    (SELECT GROUP_CONCAT(DISTINCT pr.title ORDER BY pr.sort_order,pr.id SEPARATOR '、')

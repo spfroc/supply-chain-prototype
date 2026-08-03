@@ -777,6 +777,7 @@ function Category({
 }) {
   const roots = categories.filter((x) => Number(x.level) === 1);
   const [active, setActive] = useState<number>();
+  const [attributeFilters,setAttributeFilters]=useState<Record<string,string>>({});
   const children = active
     ? categories.filter((x) => Number(x.parentId) === active)
     : categories.filter((x) => Number(x.level) === 2);
@@ -791,8 +792,13 @@ function Category({
         ]),
       ]
     : [];
+  const categoryProducts=products.filter((p)=>!active||ids.includes(Number(p.categoryId)));
+  const filterDefinitions=Array.from(new Map(categoryProducts.flatMap((p)=>structuredSpecs(p.structuredAttributes))
+    .filter((item)=>Number(item.filterable)===1&&item.value).map((item)=>[String(item.code),item])).values());
   const visible = products.filter(
     (p) => (!active || ids.includes(Number(p.categoryId))) &&
+      Object.entries(attributeFilters).every(([code,value])=>!value||structuredSpecs(p.structuredAttributes)
+        .some((item)=>String(item.code)===code&&String(item.value)===value)) &&
       `${p.title||""} ${p.summary||""} ${p.brandName||""} ${p.skuCode||""}`.toLowerCase().includes(keyword.toLowerCase()),
   );
   return (
@@ -828,6 +834,17 @@ function Category({
             </strong>
             <small>协议商品专属优惠</small>
           </div>
+          {filterDefinitions.length>0&&<div className="m-attribute-filters">
+            {filterDefinitions.map((definition)=>{
+              const code=String(definition.code);
+              const options=Array.from(new Set(categoryProducts.flatMap((p)=>structuredSpecs(p.structuredAttributes))
+                .filter((item)=>String(item.code)===code).map((item)=>String(item.value))));
+              return <label key={code}>{definition.name}<select value={attributeFilters[code]||""}
+                onChange={(e)=>setAttributeFilters({...attributeFilters,[code]:e.target.value})}>
+                <option value="">全部</option>{options.map((value)=><option key={value}>{value}</option>)}
+              </select></label>;
+            })}
+          </div>}
           <h2>下级分类</h2>
           <div className="category-grid">
             {children.map((x) => (
