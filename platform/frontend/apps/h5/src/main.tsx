@@ -24,17 +24,21 @@ function DragScroll({ className, children }: { className: string; children: Reac
       onPointerDown={(event) => {
         if (event.pointerType === "mouse" && event.button !== 0) return;
         drag.current = { active: true, moved: false, x: event.clientX, left: ref.current?.scrollLeft || 0 };
-        event.currentTarget.setPointerCapture(event.pointerId);
       }}
       onPointerMove={(event) => {
         if (!drag.current.active || !ref.current) return;
         const distance = event.clientX - drag.current.x;
-        if (Math.abs(distance) > 4) drag.current.moved = true;
+        if (Math.abs(distance) > 4) {
+          drag.current.moved = true;
+          if (!event.currentTarget.hasPointerCapture(event.pointerId))
+            event.currentTarget.setPointerCapture(event.pointerId);
+        }
         ref.current.scrollLeft = drag.current.left - distance;
       }}
       onPointerUp={(event) => {
         drag.current.active = false;
-        event.currentTarget.releasePointerCapture(event.pointerId);
+        if (event.currentTarget.hasPointerCapture(event.pointerId))
+          event.currentTarget.releasePointerCapture(event.pointerId);
       }}
       onPointerCancel={() => { drag.current.active = false; }}
       onClickCapture={(event) => {
@@ -925,10 +929,6 @@ function ProductDetail({
       <article className="info-row">
         <strong>配送</strong>
         <span>{product.deliveryDescription || "自营库存 · 全国配送"}</span>
-      </article>
-      <article className="info-row">
-        <strong>参数</strong>
-        <span>{product.skuCode}　›</span>
       </article>
       <article className="detail-copy">
         <h2>商品详情</h2>
