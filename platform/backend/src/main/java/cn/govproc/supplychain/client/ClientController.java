@@ -308,6 +308,10 @@ public class ClientController {
             .optional().orElseThrow(() -> new IllegalArgumentException("企业当前没有生效协议，无法下单"));
         List<Map<String, Object>> lines = jdbc.sql("""
             SELECT c.id AS cartId,c.sku_id AS skuId,c.quantity,p.title,s.sku_code AS skuCode,
+              CAST(s.spec_json AS CHAR) AS skuSpecs,COALESCE(NULLIF(s.sku_image,''),p.main_image,'') AS skuImage,
+              COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('name',ad.name,'value',pav.value_text,'unit',ad.unit))
+                FROM product_attribute_value pav JOIN attribute_definition ad ON ad.id=pav.attribute_id
+                WHERE pav.product_id=p.id AND ad.visible_flag=1),JSON_ARRAY()) AS attributeSnapshot,
               s.stock-s.reserved_stock AS availableStock,COALESCE(ai.agreement_price,s.member_price) AS unitPrice
             FROM cart_item c JOIN product_sku s ON s.id=c.sku_id JOIN product_spu p ON p.id=s.spu_id
             LEFT JOIN agreement_item ai ON ai.agreement_id=:agreementId AND ai.sku_id=s.id
@@ -404,10 +408,14 @@ public class ClientController {
             jdbc.sql("""
                 INSERT INTO order_item(order_main_id,order_sub_id,sku_id,quantity,unit_price,total_price,snapshot_json)
                 VALUES(:orderId,:subOrderId,:skuId,:quantity,:unitPrice,:total,
-                  JSON_OBJECT('title',:title,'skuCode',:skuCode))
-                """).params(Map.of("orderId", orderId, "subOrderId", subOrderId, "skuId", skuId,
-                    "quantity", quantity, "unitPrice", unitPrice, "total", unitPrice.multiply(BigDecimal.valueOf(quantity)),
-                    "title", line.get("title"), "skuCode", line.get("skuCode"))).update();
+                  JSON_OBJECT('title',:title,'skuCode',:skuCode,'image',:image,
+                    'skuSpecs',CAST(:skuSpecs AS JSON),'attributes',CAST(:attributeSnapshot AS JSON)))
+                """).params(Map.ofEntries(Map.entry("orderId",orderId),Map.entry("subOrderId",subOrderId),
+                    Map.entry("skuId",skuId),Map.entry("quantity",quantity),Map.entry("unitPrice",unitPrice),
+                    Map.entry("total",unitPrice.multiply(BigDecimal.valueOf(quantity))),Map.entry("title",line.get("title")),
+                    Map.entry("skuCode",line.get("skuCode")),Map.entry("image",line.get("skuImage")),
+                    Map.entry("skuSpecs",line.get("skuSpecs")),
+                    Map.entry("attributeSnapshot",String.valueOf(line.get("attributeSnapshot"))))).update();
             jdbc.sql("UPDATE product_sku SET reserved_stock=reserved_stock+:quantity WHERE id=:skuId")
                 .params(Map.of("quantity", quantity, "skuId", skuId)).update();
         }

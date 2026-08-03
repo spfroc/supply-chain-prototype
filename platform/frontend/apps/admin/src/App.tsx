@@ -1451,7 +1451,7 @@ function BusinessModule({ module }: { module: Module }) {
                 {attributeTemplate.map((attribute) => {
                   const name = ["attributeValues", String(attribute.id)];
                   const rules = Number(attribute.requiredFlag) === 1 ? [{ required: true, message: `请填写${attribute.name}` }] : [];
-                  const options = (attribute.options || []).filter((x: Row) => Number(x.status) === 1).map((x: Row) => ({ label: x.optionLabel, value: x.optionLabel }));
+                  const options = (attribute.options || []).filter((x: Row) => Number(x.status) === 1).map((x: Row) => ({ label: x.optionLabel, value: Number(x.id) }));
                   const label = `${attribute.name}${attribute.unit ? `（${attribute.unit}）` : ""}${Number(attribute.inheritedLevel) > 0 ? " · 继承自上级分类" : ""}`;
                   return <Form.Item key={attribute.id} name={name} label={label} rules={rules}>{attribute.inputType === "NUMBER" ? <InputNumber style={{width:"100%"}} /> : attribute.inputType === "SELECT" ? <Select options={options} allowClear /> : attribute.inputType === "RADIO" ? <Radio.Group options={options} /> : attribute.inputType === "CHECKBOX" ? <Checkbox.Group options={options} /> : attribute.inputType === "SWITCH" ? <Select options={[{label:"是",value:"是"},{label:"否",value:"否"}]} /> : attribute.inputType === "DATE" ? <Input type="date" /> : <Input />}</Form.Item>;
                 })}

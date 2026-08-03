@@ -46,8 +46,12 @@ public class AdminBusinessController {
             DATE_FORMAT(p.updated_at,'%Y-%m-%d %H:%i:%s') AS updatedAt,
             COALESCE(sales.soldCount,0) AS soldCount,COALESCE(sales.orderCount,0) AS orderCount,
             COALESCE(sales.salesAmount,0) AS salesAmount,
-            COALESCE((SELECT JSON_OBJECTAGG(CAST(pav.attribute_id AS CHAR),pav.value_text)
-              FROM product_attribute_value pav WHERE pav.product_id=p.id),JSON_OBJECT()) AS attributeValues,
+            COALESCE((SELECT JSON_OBJECTAGG(CAST(pav.attribute_id AS CHAR),
+              CASE WHEN pav.option_ids IS NOT NULL THEN
+                CASE WHEN ad.input_type='CHECKBOX' THEN pav.option_ids ELSE JSON_EXTRACT(pav.option_ids,'$[0]') END
+                ELSE pav.value_text END)
+              FROM product_attribute_value pav JOIN attribute_definition ad ON ad.id=pav.attribute_id
+              WHERE pav.product_id=p.id),JSON_OBJECT()) AS attributeValues,
             (SELECT COUNT(*) FROM product_sku sx WHERE sx.spu_id=p.id AND sx.deleted_at IS NULL) AS skuCount,
             COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('id',sx.id,'skuCode',sx.sku_code,
               'specValues',sx.spec_json,'skuImage',sx.sku_image,'marketPrice',sx.market_price,
@@ -504,9 +508,30 @@ public class AdminBusinessController {
         jdbc.sql("DELETE FROM product_attribute_value WHERE product_id=:id").param("id",productId).update();
         if(values==null) return;
         values.forEach((attributeId,value)->{
-            String text=value instanceof List<?> list?list.stream().map(String::valueOf).reduce((a,b)->a+"、"+b).orElse(""):String.valueOf(value==null?"":value);
-            if(!text.isBlank()) jdbc.sql("INSERT INTO product_attribute_value(product_id,attribute_id,value_text) VALUES(:productId,:attributeId,:value)")
-              .params(Map.of("productId",productId,"attributeId",Long.parseLong(attributeId),"value",text)).update();
+            long id=Long.parseLong(attributeId);
+            String inputType=jdbc.sql("SELECT input_type FROM attribute_definition WHERE id=:id AND deleted_at IS NULL")
+              .param("id",id).query(String.class).optional().orElseThrow(()->new IllegalArgumentException("商品属性不存在"));
+            boolean optionType=List.of("SELECT","RADIO","CHECKBOX").contains(inputType);
+            List<?> source=value instanceof List<?> list?list:List.of(value==null?"":value);
+            if(optionType) {
+                var optionIds=new java.util.ArrayList<Long>();var labels=new java.util.ArrayList<String>();
+                for(Object raw:source) if(!String.valueOf(raw).isBlank()) {
+                    long optionId;
+                    try{optionId=Long.parseLong(String.valueOf(raw));}catch(NumberFormatException e){throw new IllegalArgumentException("请选择有效的属性选项");}
+                    String label=jdbc.sql("SELECT option_label FROM attribute_option WHERE id=:optionId AND attribute_id=:attributeId AND status=1 AND deleted_at IS NULL")
+                      .params(Map.of("optionId",optionId,"attributeId",id)).query(String.class).optional()
+                      .orElseThrow(()->new IllegalArgumentException("属性选项不存在或已停用"));
+                    optionIds.add(optionId);labels.add(label);
+                }
+                if(!optionIds.isEmpty()) jdbc.sql("""
+                  INSERT INTO product_attribute_value(product_id,attribute_id,value_text,option_ids)
+                  VALUES(:productId,:attributeId,:value,CAST(:optionIds AS JSON))
+                  """).params(Map.of("productId",productId,"attributeId",id,"value",String.join("、",labels),"optionIds",toJson(optionIds))).update();
+            } else {
+                String text=source.stream().map(String::valueOf).reduce((a,b)->a+"、"+b).orElse("");
+                if(!text.isBlank()) jdbc.sql("INSERT INTO product_attribute_value(product_id,attribute_id,value_text) VALUES(:productId,:attributeId,:value)")
+                  .params(Map.of("productId",productId,"attributeId",id,"value",text)).update();
+            }
         });
     }
     private static void require(int n,String message){if(n==0)throw new IllegalArgumentException(message);}
