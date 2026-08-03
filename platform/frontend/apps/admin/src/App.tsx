@@ -708,6 +708,7 @@ function BusinessModule({ module }: { module: Module }) {
   const [form] = Form.useForm();
   const [memberForm] = Form.useForm();
   const [logisticsForm] = Form.useForm();
+  const [refundForm] = Form.useForm();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Row>();
   const [mode, setMode] = useState<"entity" | "stock" | "item">("entity");
@@ -716,6 +717,7 @@ function BusinessModule({ module }: { module: Module }) {
   const [itemOpen, setItemOpen] = useState(false);
   const [detail, setDetail] = useState<Row>();
   const [logisticsItem, setLogisticsItem] = useState<Row>();
+  const [refundOrder, setRefundOrder] = useState<Row>();
   const [memberEnterprise, setMemberEnterprise] = useState<Row>();
   const [members, setMembers] = useState<Row[]>([]);
   const [memberOpen, setMemberOpen] = useState(false);
@@ -884,12 +886,53 @@ function BusinessModule({ module }: { module: Module }) {
       Number(row.orderStatus) === 0
         ? 1
         : Math.min(3, Number(row.orderStatus) + 1);
-    await business(`/orders/${row.id}/status`, {
-      method: "PUT",
-      body: JSON.stringify({ paymentStatus: payment, orderStatus: status }),
+    const submit = async () => {
+      await business(`/orders/${row.id}/status`, {
+        method: "PUT",
+        body: JSON.stringify({ paymentStatus: payment, orderStatus: status }),
+      });
+      message.success(
+        status === 3
+          ? "订单已完成，订单商品物流状态已同步为已签收"
+          : "订单状态已更新",
+      );
+      void rows.refresh();
+    };
+    if (status === 3) {
+      modal.confirm({
+        title: "确认完成订单",
+        content:
+          "确认后订单状态将变为已完成，订单内已发货或运输中的商品将同步标记为已签收。是否继续？",
+        okText: "确认完成",
+        cancelText: "取消",
+        onOk: submit,
+      });
+      return;
+    }
+    await submit();
+  };
+  const showRefund = (row: Row) => {
+    setRefundOrder(row);
+    refundForm.setFieldsValue({
+      refundAmount: Number(row.payableAmount),
+      refundReason: "",
     });
-    message.success("订单状态已更新");
-    void rows.refresh();
+  };
+  const saveRefund = async () => {
+    try {
+      const values = await refundForm.validateFields();
+      await business(`/orders/${refundOrder!.id}/refund`, {
+        method: "POST",
+        body: JSON.stringify(values),
+      });
+      message.success("退款信息已记录");
+      setRefundOrder(undefined);
+      void rows.refresh();
+      if (detail?.order.id === refundOrder!.id)
+        setDetail(await business(`/orders/${refundOrder!.id}`));
+    } catch (error) {
+      if (error instanceof Error) message.error(error.message);
+    }
   };
   const loadMembers = async (enterprise: Row) => {
     setMemberEnterprise(enterprise);
@@ -1156,6 +1199,12 @@ function BusinessModule({ module }: { module: Module }) {
                 {Number(r.orderStatus) === 0 ? "确认到账" : "推进状态"}
               </Button>
             )}
+            {Number(r.orderStatus) === 3 && Number(r.refundStatus || 0) === 0 && (
+              <Button type="link" danger onClick={() => showRefund(r)}>
+                退款
+              </Button>
+            )}
+            {Number(r.refundStatus || 0) === 1 && <Tag color="red">已退款</Tag>}
           </Space>
         ),
       },
@@ -1615,7 +1664,22 @@ function BusinessModule({ module }: { module: Module }) {
       </Modal>
       <Modal
         open={!!detail}
-        title="订单详情"
+        title={
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span>订单详情</span>
+            {detail &&
+              Number(detail.order.orderStatus) === 3 &&
+              Number(detail.order.refundStatus || 0) === 0 && (
+                <Button
+                  danger
+                  onClick={() => showRefund(detail.order)}
+                  style={{ marginRight: 32 }}
+                >
+                  退款
+                </Button>
+              )}
+          </div>
+        }
         width={1080}
         footer={null}
         onCancel={() => setDetail(undefined)}
@@ -1654,6 +1718,21 @@ function BusinessModule({ module }: { module: Module }) {
                     ["待付款", "待确认", "已确认"][
                       Number(detail.order.paymentStatus)
                     ] || "处理中",
+                },
+                {
+                  key: "refund",
+                  label: "退款状态",
+                  children:
+                    Number(detail.order.refundStatus || 0) === 1 ? (
+                      <Space direction="vertical" size={2}>
+                        <Tag color="red">已退款</Tag>
+                        <span>退款金额：¥{Number(detail.order.refundAmount).toFixed(2)}</span>
+                        <span>退款原因：{detail.order.refundReason}</span>
+                        <small>{dateTime(detail.order.refundedAt)}</small>
+                      </Space>
+                    ) : (
+                      "未退款"
+                    ),
                 },
               ]}
             />
@@ -1789,6 +1868,39 @@ function BusinessModule({ module }: { module: Module }) {
           <Form.Item name="logisticsStatus" label="物流状态说明">
             <Input placeholder="例如：已揽收、运输途中、派送中" />
           </Form.Item>
+        </Form>
+      </Modal>
+      <Modal
+        open={!!refundOrder}
+        title={`订单退款 · ${refundOrder?.orderNo || ""}`}
+        okText="确认退款"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+        onOk={() => void saveRefund()}
+        onCancel={() => setRefundOrder(undefined)}
+      >
+        <Form form={refundForm} layout="vertical">
+          <Form.Item
+            name="refundAmount"
+            label="退款金额"
+            rules={[{ required: true, message: "请输入退款金额" }]}
+          >
+            <InputNumber
+              min={0.01}
+              max={Number(refundOrder?.payableAmount || 0)}
+              precision={2}
+              prefix="¥"
+              style={{ width: "100%" }}
+            />
+          </Form.Item>
+          <Form.Item
+            name="refundReason"
+            label="退款原因"
+            rules={[{ required: true, message: "请输入退款原因" }]}
+          >
+            <Input.TextArea rows={4} maxLength={500} showCount />
+          </Form.Item>
+          <small>退款在第三方或线下完成，此处用于记录平台退款结果。</small>
         </Form>
       </Modal>
     </>

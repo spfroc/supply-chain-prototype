@@ -243,6 +243,7 @@ public class ClientController {
         return jdbc.sql("""
             SELECT o.id, o.order_no AS orderNo, o.item_amount AS itemAmount, o.freight_amount AS freightAmount,
               o.payable_amount AS payableAmount, o.payment_status AS paymentStatus, o.order_status AS orderStatus,
+              o.refund_status AS refundStatus,o.refund_amount AS refundAmount,
               DATE_FORMAT(o.payment_due_at, '%Y-%m-%d %H:%i:%s') AS paymentDueAt,
               DATE_FORMAT(o.created_at, '%Y-%m-%d %H:%i:%s') AS createdAt,
               COUNT(DISTINCT oi.id) AS itemKinds, COALESCE(SUM(oi.quantity),0) AS itemCount,
@@ -260,6 +261,8 @@ public class ClientController {
         var orders=jdbc.sql("""
             SELECT o.id,o.order_no AS orderNo,o.item_amount AS itemAmount,o.freight_amount AS freightAmount,
               o.payable_amount AS payableAmount,o.payment_status AS paymentStatus,o.order_status AS orderStatus,
+              o.refund_status AS refundStatus,o.refund_amount AS refundAmount,o.refund_reason AS refundReason,
+              DATE_FORMAT(o.refunded_at,'%Y-%m-%d %H:%i:%s') AS refundedAt,
               DATE_FORMAT(o.payment_due_at,'%Y-%m-%d %H:%i:%s') AS paymentDueAt,
               DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
             FROM order_main o WHERE o.id=:id AND o.user_id=:userId

@@ -312,7 +312,8 @@ public class AdminBusinessController {
     List<Map<String,Object>> orders() {
         return jdbc.sql("""
           SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,o.payable_amount AS payableAmount,
-            o.payment_status AS paymentStatus,o.order_status AS orderStatus,
+            o.payment_status AS paymentStatus,o.order_status AS orderStatus,o.refund_status AS refundStatus,
+            o.refund_amount AS refundAmount,
             DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,COUNT(oi.id) AS itemKinds,SUM(oi.quantity) AS itemCount
           FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id LEFT JOIN order_item oi ON oi.order_main_id=o.id
           GROUP BY o.id ORDER BY o.id DESC
@@ -324,7 +325,9 @@ public class AdminBusinessController {
         var order=jdbc.sql("""
           SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,u.real_name AS buyerName,
             o.item_amount AS itemAmount,o.freight_amount AS freightAmount,o.payable_amount AS payableAmount,
-            o.payment_status AS paymentStatus,o.order_status AS orderStatus,
+            o.payment_status AS paymentStatus,o.order_status AS orderStatus,o.refund_status AS refundStatus,
+            o.refund_amount AS refundAmount,o.refund_reason AS refundReason,
+            DATE_FORMAT(o.refunded_at,'%Y-%m-%d %H:%i:%s') AS refundedAt,
             DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
           FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id JOIN enterprise_user u ON u.id=o.user_id WHERE o.id=:id
           """)
@@ -374,9 +377,39 @@ public class AdminBusinessController {
     }
 
     @PutMapping("/orders/{id}/status")
+    @Transactional
     void orderStatus(@PathVariable long id,@RequestBody OrderStatusRequest r) {
         require(jdbc.sql("UPDATE order_main SET payment_status=:paymentStatus,order_status=:orderStatus WHERE id=:id")
           .params(Map.of("id",id,"paymentStatus",r.paymentStatus(),"orderStatus",r.orderStatus())).update(),"订单不存在");
+        if(r.orderStatus()==3) {
+            jdbc.sql("""
+              UPDATE order_item SET fulfillment_status=3,
+                logistics_status='已签收'
+              WHERE order_main_id=:id AND fulfillment_status IN (1,2)
+              """).param("id",id).update();
+        }
+    }
+
+    @PostMapping("/orders/{id}/refund")
+    @Transactional
+    void refundOrder(@PathVariable long id,@Valid @RequestBody RefundRequest r) {
+        List<Map<String,Object>> orders=jdbc.sql("""
+          SELECT order_status AS orderStatus,refund_status AS refundStatus,payable_amount AS payableAmount
+          FROM order_main WHERE id=:id
+          """).param("id",id).query().listOfRows();
+        if(orders.isEmpty()) throw new IllegalArgumentException("订单不存在");
+        Map<String,Object> order=orders.get(0);
+        if(((Number)order.get("orderStatus")).intValue()!=3)
+            throw new IllegalArgumentException("只有已完成订单可以退款");
+        if(((Number)order.get("refundStatus")).intValue()!=0)
+            throw new IllegalArgumentException("订单已经退款，不能重复操作");
+        BigDecimal payable=(BigDecimal)order.get("payableAmount");
+        if(r.refundAmount().compareTo(BigDecimal.ZERO)<=0||r.refundAmount().compareTo(payable)>0)
+            throw new IllegalArgumentException("退款金额必须大于0且不能超过订单实付金额");
+        jdbc.sql("""
+          UPDATE order_main SET refund_status=1,refund_amount=:amount,refund_reason=:reason,refunded_at=NOW()
+          WHERE id=:id AND refund_status=0
+          """).params(Map.of("id",id,"amount",r.refundAmount(),"reason",r.refundReason())).update();
     }
 
     private static String value(String s){return s==null?"":s;}
@@ -421,4 +454,6 @@ public class AdminBusinessController {
     public record OrderStatusRequest(int paymentStatus,int orderStatus){}
     public record ItemLogisticsRequest(int fulfillmentStatus,String logisticsCompany,
         String logisticsNo,String logisticsStatus){}
+    public record RefundRequest(@NotNull @DecimalMin("0.01") BigDecimal refundAmount,
+        @NotBlank String refundReason){}
 }

@@ -1154,6 +1154,12 @@ function Orders() {
           <p>
             订单状态 <em>{statuses[detail.order.orderStatus]}</em>
           </p>
+          {Number(detail.order.refundStatus || 0) === 1 && (
+            <p>
+              退款状态 <em>已退款 {money(detail.order.refundAmount)}</em>
+              <small>{detail.order.refundReason} · {dateTime(detail.order.refundedAt)}</small>
+            </p>
+          )}
         </section>
         <h3>商品明细</h3>
         {detail.items.map((x: Row) => (
@@ -1171,7 +1177,9 @@ function Orders() {
               <address>{deliveryAddress(x.addressSnapshot)}</address>
               <span>
                 {["待发货", "已发货", "运输中", "已签收", "已取消"][Number(x.fulfillmentStatus)] || "待发货"}
-                {x.logisticsNo ? ` · ${x.logisticsCompany} ${x.logisticsNo}` : ""}
+                {x.logisticsNo
+                  ? ` · ${x.logisticsCompany} ${x.logisticsNo}${x.logisticsStatus ? ` · ${x.logisticsStatus}` : ""}`
+                  : ""}
               </span>
             </div>
             <b>{money(x.totalPrice)}</b>
