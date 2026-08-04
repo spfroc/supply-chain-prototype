@@ -47,3 +47,8 @@
   .category-layout>section{padding:10px}
   .m-attribute-filters{grid-template-columns:1fr}
 }
+
+.category-grid{gap:8px}
+.category-grid button{min-height:38px;padding:8px 6px;border:1px solid #e4eaf1;border-radius:7px;background:#f8fafc;color:#33445e}
+.category-grid button:active{border-color:#1767d2;background:#edf5ff;color:#1767d2}
+.category-grid span{margin-top:0;line-height:1.35}

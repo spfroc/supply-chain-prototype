@@ -849,7 +849,6 @@ function Category({
           <div className="category-grid">
             {children.map((x) => (
               <button key={x.id} onClick={()=>setActive(Number(x.id))}>
-                <i>{x.name.slice(0, 1)}</i>
                 <span>{x.name}</span>
               </button>
             ))}
