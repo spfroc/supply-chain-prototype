@@ -14,3 +14,18 @@
 .m-image > span {
   z-index: 2;
 }
+
+.category-product-image {
+  flex: 0 0 45px;
+  overflow: hidden;
+}
+
+.category-product-image > img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-width: 45px;
+  max-height: 45px;
+  object-fit: contain;
+  background: #fff;
+}
