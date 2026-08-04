@@ -67,6 +67,7 @@ const orderStatus = ["待付款", "待发货", "运输中", "已完成", "已取
 const routeViews: View[] = [
   "home",
   "products",
+  "detail",
   "solutions",
   "solution-detail",
   "platforms",
@@ -219,11 +220,15 @@ function App() {
     nextCategory?: number,
     nextPlatform?: number,
     nextSolution?: number,
+    nextProduct?: number,
   ) => {
     setView(target);
     setCategoryId(nextCategory);
     setPlatformId(nextPlatform);
     setSolutionId(nextSolution);
+    if (target === "detail" && nextProduct) {
+      setSelected(products.find((row) => Number(row.id) === nextProduct));
+    }
     const url = new URL(location.href);
     if (target === "home") url.searchParams.delete("view");
     else url.searchParams.set("view", target);
@@ -233,7 +238,8 @@ function App() {
     else url.searchParams.delete("platformId");
     if (nextSolution) url.searchParams.set("solutionId", String(nextSolution));
     else url.searchParams.delete("solutionId");
-    url.searchParams.delete("productId");
+    if (nextProduct) url.searchParams.set("productId", String(nextProduct));
+    else url.searchParams.delete("productId");
     history.pushState({ view: target }, "", url);
   };
   const navigate = (
@@ -241,12 +247,13 @@ function App() {
     nextCategory?: number,
     nextPlatform?: number,
     nextSolution?: number,
+    nextProduct?: number,
   ) => {
     if (protectedViews.has(target) && !current) {
-      requireAuth(() => applyNavigation(target, nextCategory, nextPlatform, nextSolution));
+      requireAuth(() => applyNavigation(target, nextCategory, nextPlatform, nextSolution, nextProduct));
       return;
     }
-    applyNavigation(target, nextCategory, nextPlatform, nextSolution);
+    applyNavigation(target, nextCategory, nextPlatform, nextSolution, nextProduct);
   };
   const openNavigation = (item: Row, index: number) => {
     const fallback: View =
@@ -257,20 +264,22 @@ function App() {
           : item.title.includes("平台")
             ? "platforms"
             : "products";
-    if (/^https?:\/\//.test(item.linkUrl || "")) {
-      location.href = item.linkUrl;
-      return;
-    }
     const configured = item.linkUrl
       ? new URL(item.linkUrl, location.origin)
       : null;
+    if (configured && configured.origin !== location.origin) {
+      location.href = configured.href;
+      return;
+    }
     const configuredView = configured?.searchParams.get("view") as View | null;
     navigate(
       configuredView && routeViews.includes(configuredView)
         ? configuredView
         : fallback,
-      undefined,
+      Number(configured?.searchParams.get("categoryId")) || undefined,
       Number(configured?.searchParams.get("platformId")) || undefined,
+      Number(configured?.searchParams.get("solutionId")) || undefined,
+      Number(configured?.searchParams.get("productId")) || undefined,
     );
   };
   const addToCart = async (product: Row, quantity = 1) => {
