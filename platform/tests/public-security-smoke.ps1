@@ -1,8 +1,8 @@
 ﻿param([string]$BaseUrl = "http://supply.comp")
 
 $ErrorActionPreference = "Stop"
-$passed = 0
-$failed = 0
+$script:passed = 0
+$script:failed = 0
 
 function Case([string]$Name,[scriptblock]$Action) {
   try { & $Action; $script:passed++; Write-Host "PASS $Name" -ForegroundColor Green }
@@ -51,6 +51,7 @@ Case "SKU-001 商品返回可销售 SKU 列表" {
   $duplicate=@($r.Data|Group-Object spuCode|Where-Object Count -gt 1)
   if($duplicate.Count-ne 0){throw "商品列表按 SKU 重复展示 SPU"}
   foreach($product in @($r.Data)){
+    if(!$product.id){throw "商品主键缺失，详情页无法生成可刷新链接"}
     $variants=@($product.variants|ConvertFrom-Json)
     if($variants.Count-lt 1-or !$variants[0].skuId-or !$variants[0].skuCode){throw "SKU 数据不完整"}
   }
@@ -59,5 +60,5 @@ Case "PORTAL-001 门户配置可用" {
   $r=Json "/api/public/portal";if($r.Status-ne 200-or $null-eq $r.Data.navigation){throw "门户数据缺失"}
 }
 
-Write-Host "`n测试完成：通过 $passed，失败 $failed"
-if($failed-gt 0){exit 1}
+Write-Host "`n测试完成：通过 $script:passed，失败 $script:failed"
+if($script:failed-gt 0){exit 1}

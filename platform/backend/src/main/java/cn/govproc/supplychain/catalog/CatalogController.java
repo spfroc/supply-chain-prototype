@@ -33,7 +33,7 @@ public class CatalogController {
     List<ProductSummary> products() {
         Long enterpriseId=auth.optionalCurrent().map(ClientAuthService.CurrentUser::enterpriseId).orElse(null);
         return jdbc.sql("""
-            SELECT s.id AS sku_id, p.spu_code, s.sku_code, p.title, COALESCE(NULLIF(s.sku_image,''),p.main_image) AS main_image,p.category_id,
+            SELECT p.id AS product_id,s.id AS sku_id, p.spu_code, s.sku_code, p.title, COALESCE(NULLIF(s.sku_image,''),p.main_image) AS main_image,p.category_id,
                    JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')) AS gallery,
                    JSON_UNQUOTE(JSON_EXTRACT(p.attributes_json,'$.content')) AS attributes,
                    p.summary,p.detail_html,p.delivery_description,p.after_sales_html,
@@ -71,7 +71,7 @@ public class CatalogController {
               AND s.id=(SELECT MIN(s0.id) FROM product_sku s0 WHERE s0.spu_id=p.id AND s0.status=1 AND s0.deleted_at IS NULL)
             ORDER BY p.id DESC
             """).param("enterpriseId", enterpriseId).query((rs, n) -> new ProductSummary(
-                rs.getLong("sku_id"), rs.getString("spu_code"), rs.getString("sku_code"),
+                rs.getLong("product_id"),rs.getLong("sku_id"), rs.getString("spu_code"), rs.getString("sku_code"),
                 rs.getString("title"), rs.getString("main_image"),rs.getString("gallery"),
                 rs.getString("attributes"),rs.getString("summary"),rs.getString("detail_html"),
                 rs.getString("delivery_description"),rs.getString("after_sales_html"),rs.getLong("category_id"),
@@ -81,7 +81,7 @@ public class CatalogController {
     }
 
     public record ProductSummary(
-        long skuId, String spuCode, String skuCode, String title, String mainImage,String gallery,
+        long id,long skuId, String spuCode, String skuCode, String title, String mainImage,String gallery,
         String attributes,String summary,String detailHtml,String deliveryDescription,String afterSalesHtml,long categoryId,
         BigDecimal marketPrice, BigDecimal memberPrice, BigDecimal agreementPrice, int availableStock,long soldCount,String structuredAttributes,String platformNames,String variants
     ) {}
