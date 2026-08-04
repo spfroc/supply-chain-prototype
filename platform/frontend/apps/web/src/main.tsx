@@ -90,9 +90,40 @@ const protectedViews = new Set<View>([
   "invoices",
   "members",
 ]);
-const routeFromLocation = () => {
-  const value = new URLSearchParams(location.search).get("view") as View | null;
-  return value && routeViews.includes(value) ? value : "home";
+const parseRoute = (url = new URL(location.href)) => {
+  const path = url.pathname.replace(/\/$/, "") || "/web";
+  const product = path.match(/^\/web\/products\/(\d+)$/);
+  const solution = path.match(/^\/web\/solutions\/(\d+)$/);
+  const platform = path.match(/^\/web\/platforms\/(\d+)\/products$/);
+  const route: Record<string, View> = {
+    "/web": "home", "/web/products": "products", "/web/solutions": "solutions",
+    "/web/platforms": "platforms", "/web/content": "content", "/web/cart": "cart",
+    "/web/checkout": "checkout", "/web/orders": "orders", "/web/account": "profile",
+    "/web/account/addresses": "addresses", "/web/account/invoices": "invoices",
+    "/web/account/members": "members",
+  };
+  const legacy = url.searchParams.get("view") as View | null;
+  return {
+    view: product ? "detail" as View : solution ? "solution-detail" as View
+      : platform ? "platform-products" as View
+        : legacy && routeViews.includes(legacy) ? legacy
+          : route[path] || "home",
+    categoryId: Number(url.searchParams.get("categoryId")) || undefined,
+    platformId: platform ? Number(platform[1]) : Number(url.searchParams.get("platformId")) || undefined,
+    solutionId: solution ? Number(solution[1]) : Number(url.searchParams.get("solutionId")) || undefined,
+    productId: product ? Number(product[1]) : Number(url.searchParams.get("productId")) || undefined,
+  };
+};
+const routeFromLocation = () => parseRoute().view;
+const pathFor = (view: View, platformId?: number, solutionId?: number, productId?: number) => {
+  if (view === "detail" && productId) return `/web/products/${productId}`;
+  if (view === "solution-detail" && solutionId) return `/web/solutions/${solutionId}`;
+  if (view === "platform-products" && platformId) return `/web/platforms/${platformId}/products`;
+  return ({ home: "/web/", products: "/web/products", solutions: "/web/solutions",
+    platforms: "/web/platforms", content: "/web/content", cart: "/web/cart",
+    checkout: "/web/checkout", orders: "/web/orders", profile: "/web/account",
+    addresses: "/web/account/addresses", invoices: "/web/account/invoices",
+    members: "/web/account/members" } as Partial<Record<View, string>>)[view] || "/web/";
 };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -117,20 +148,13 @@ function App() {
   const [categories, setCategories] = useState<Row[]>([]);
   const [portal, setPortal] = useState<Row>({});
   const [categoryId, setCategoryId] = useState<number | undefined>(() => {
-    const value = Number(
-      new URLSearchParams(location.search).get("categoryId"),
-    );
-    return value || undefined;
+    return parseRoute().categoryId;
   });
   const [platformId, setPlatformId] = useState<number | undefined>(() => {
-    const value = Number(
-      new URLSearchParams(location.search).get("platformId"),
-    );
-    return value || undefined;
+    return parseRoute().platformId;
   });
   const [solutionId, setSolutionId] = useState<number | undefined>(() => {
-    const value = Number(new URLSearchParams(location.search).get("solutionId"));
-    return value || undefined;
+    return parseRoute().solutionId;
   });
   const [profile, setProfile] = useState<Row>({});
   const [summary, setSummary] = useState<Row>({});
@@ -204,12 +228,12 @@ function App() {
   }, [authReady, current, view]);
   useEffect(() => {
     const pop = () => {
-      const params = new URLSearchParams(location.search);
-      setView(routeFromLocation());
-      setCategoryId(Number(params.get("categoryId")) || undefined);
-      setPlatformId(Number(params.get("platformId")) || undefined);
-      setSolutionId(Number(params.get("solutionId")) || undefined);
-      setSearchKeyword(params.get("q") || "");
+      const route = parseRoute();
+      setView(route.view);
+      setCategoryId(route.categoryId);
+      setPlatformId(route.platformId);
+      setSolutionId(route.solutionId);
+      setSearchKeyword(new URLSearchParams(location.search).get("q") || "");
       setSelected(undefined);
     };
     addEventListener("popstate", pop);
@@ -230,16 +254,14 @@ function App() {
       setSelected(products.find((row) => Number(row.id) === nextProduct));
     }
     const url = new URL(location.href);
-    if (target === "home") url.searchParams.delete("view");
-    else url.searchParams.set("view", target);
+    url.pathname = pathFor(target, nextPlatform, nextSolution, nextProduct);
+    url.searchParams.delete("view");
     if (nextCategory) url.searchParams.set("categoryId", String(nextCategory));
     else url.searchParams.delete("categoryId");
-    if (nextPlatform) url.searchParams.set("platformId", String(nextPlatform));
-    else url.searchParams.delete("platformId");
-    if (nextSolution) url.searchParams.set("solutionId", String(nextSolution));
-    else url.searchParams.delete("solutionId");
-    if (nextProduct) url.searchParams.set("productId", String(nextProduct));
-    else url.searchParams.delete("productId");
+    if (target !== "products") url.searchParams.delete("q");
+    url.searchParams.delete("platformId");
+    url.searchParams.delete("solutionId");
+    url.searchParams.delete("productId");
     history.pushState({ view: target }, "", url);
   };
   const navigate = (
@@ -271,15 +293,13 @@ function App() {
       location.href = configured.href;
       return;
     }
-    const configuredView = configured?.searchParams.get("view") as View | null;
+    const configuredRoute = configured ? parseRoute(configured) : null;
     navigate(
-      configuredView && routeViews.includes(configuredView)
-        ? configuredView
-        : fallback,
-      Number(configured?.searchParams.get("categoryId")) || undefined,
-      Number(configured?.searchParams.get("platformId")) || undefined,
-      Number(configured?.searchParams.get("solutionId")) || undefined,
-      Number(configured?.searchParams.get("productId")) || undefined,
+      configuredRoute ? configuredRoute.view : fallback,
+      configuredRoute?.categoryId,
+      configuredRoute?.platformId,
+      configuredRoute?.solutionId,
+      configuredRoute?.productId,
     );
   };
   const addToCart = async (product: Row, quantity = 1) => {
@@ -321,24 +341,20 @@ function App() {
       applyNavigation("checkout");
     });
   const goProduct = (product: Row) => {
-    setSelected(product);
-    const url = new URL(location.href);
-    url.searchParams.set("view", "detail");
-    url.searchParams.set("productId", String(product.id));
-    history.pushState({ view: "detail" }, "", url);
-    setView("detail");
+    applyNavigation("detail", undefined, undefined, undefined, Number(product.id));
     scrollTo(0, 0);
   };
   useEffect(() => {
     if (view !== "detail" || selected) return;
-    const id = Number(new URLSearchParams(location.search).get("productId"));
+    const id = parseRoute().productId;
     const product = products.find((row) => Number(row.id) === id);
     if (product) setSelected(product);
   }, [products, selected, view]);
   const search = () => {
     const keyword = searchKeyword.trim();
     const url = new URL(location.href);
-    url.searchParams.set("view", "products");
+    url.pathname = "/web/products";
+    url.searchParams.delete("view");
     if (keyword) url.searchParams.set("q", keyword);
     else url.searchParams.delete("q");
     url.searchParams.delete("categoryId");
