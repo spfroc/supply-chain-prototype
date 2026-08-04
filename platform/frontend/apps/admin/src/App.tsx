@@ -441,6 +441,9 @@ function RichTextEditor({
         ref={localImageInput}
         className="rich-media-input"
         type="file"
+        hidden
+        aria-hidden="true"
+        tabIndex={-1}
         accept=".jpg,.jpeg,.png"
         onChange={(event) => void uploadLocalImage(event.target.files?.[0])}
       />
