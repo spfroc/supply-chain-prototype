@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import type { Key, ReactNode } from "react";
 import {
   App as AntApp,
   Alert,
@@ -20,17 +20,110 @@ import {
   Space,
   Statistic,
   Switch,
-  Table,
+  Table as AntTable,
   Tabs,
   Tag,
   Typography,
   Upload,
 } from "antd";
-import type { ColumnsType } from "antd/es/table";
+import type { ColumnsType, TableProps } from "antd/es/table";
 import type { UploadFile } from "antd/es/upload/interface";
 import zhCN from "antd/locale/zh_CN";
 
 type Row = Record<string, any>;
+
+type ManagedTableProps<T extends Row> = TableProps<T> & {
+  searchPlaceholder?: string;
+};
+
+function Table<T extends Row>({
+  dataSource = [],
+  pagination,
+  rowKey = "id",
+  rowSelection,
+  searchPlaceholder = "搜索当前列表的名称、编码或关键字段",
+  ...props
+}: ManagedTableProps<T>) {
+  const [keyword, setKeyword] = useState("");
+  const [status, setStatus] = useState<string>();
+  const [selectedRowKeys, setSelectedRowKeys] = useState<Key[]>([]);
+  const source = dataSource as T[];
+  const flatRows = useMemo(() => {
+    const result: T[] = [];
+    const visit = (items: readonly T[]) => items.forEach((item) => {
+      result.push(item);
+      if (Array.isArray(item.children)) visit(item.children);
+    });
+    visit(source);
+    return result;
+  }, [source]);
+  const hasStatus = flatRows.some((row) => row.status !== undefined && row.status !== null);
+  const matches = (row: T) => {
+    const keywordMatched = !keyword.trim() || Object.entries(row).some(([key, value]) =>
+      key !== "children" && ["string", "number"].includes(typeof value) &&
+      String(value).toLowerCase().includes(keyword.trim().toLowerCase()),
+    );
+    return keywordMatched && (!status || String(row.status) === status);
+  };
+  const filterTree = (items: readonly T[]): T[] => items.flatMap((row) => {
+    const children = Array.isArray(row.children) ? filterTree(row.children) : [];
+    return matches(row) || children.length ? [{ ...row, ...(children.length ? { children } : {}) }] : [];
+  });
+  const filteredRows = filterTree(source);
+  const keyOf = (row: T, index: number): Key =>
+    typeof rowKey === "function" ? rowKey(row) : (row[rowKey as string] ?? index);
+  const selected = flatRows.filter((row, index) => selectedRowKeys.includes(keyOf(row, index)));
+  const exportSelected = () => {
+    if (!selected.length) return;
+    const keys = [...new Set(selected.flatMap((row) => Object.keys(row)).filter((key) => key !== "children"))];
+    const cell = (value: unknown) => `"${String(value ?? "").replaceAll('"', '""')}"`;
+    const csv = "\ufeff" + [keys.map(cell).join(","), ...selected.map((row) => keys.map((key) => cell(row[key])).join(","))].join("\r\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `列表选中数据-${Date.now()}.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+  const pager = {
+    pageSize: typeof pagination === "object" ? pagination.pageSize : 10,
+    ...(typeof pagination === "object" ? pagination : {}),
+    showSizeChanger: true,
+    showQuickJumper: true,
+    pageSizeOptions: ["10", "20", "50", "100"],
+    showTotal: typeof pagination === "object" && pagination.showTotal
+      ? pagination.showTotal
+      : (total: number) => `共 ${total} 条`,
+  };
+  return <div className="managed-table">
+    <div className="managed-table-toolbar">
+      <Space wrap>
+        <Input.Search allowClear value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder={searchPlaceholder} style={{ width: 320 }} />
+        {hasStatus && <Select allowClear value={status} onChange={setStatus} placeholder="全部状态" style={{ width: 130 }} options={[{ label: "启用 / 正常 / 在售", value: "1" }, { label: "停用 / 禁用 / 下架", value: "0" }]} />}
+      </Space>
+      <Space>
+        <span className="selection-summary">已选 {selectedRowKeys.length} 项</span>
+        <Button disabled={!selected.length} onClick={exportSelected}>批量导出选中</Button>
+        <Button disabled={!selectedRowKeys.length} onClick={() => setSelectedRowKeys([])}>清空选择</Button>
+      </Space>
+    </div>
+    <AntTable<T>
+      {...props}
+      rowKey={rowKey}
+      dataSource={filteredRows}
+      rowSelection={{
+        ...rowSelection,
+        preserveSelectedRowKeys: true,
+        selectedRowKeys: rowSelection?.selectedRowKeys || selectedRowKeys,
+        onChange: (keys, selectedRows, info) => {
+          setSelectedRowKeys(keys);
+          rowSelection?.onChange?.(keys, selectedRows, info);
+        },
+      }}
+      pagination={pager}
+    />
+  </div>;
+}
 type Module =
   | "overview"
   | "products"
@@ -2250,9 +2343,12 @@ function AttributeTemplates() {
 function Categories() {
   const { message, modal } = AntApp.useApp();
   const rows = useLoad<Row[]>(() => rootApi("/api/admin/business/categories"));
+  const attributes = useLoad<Row[]>(() => rootApi("/api/admin/business/attributes"));
   const [form] = Form.useForm();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Row>();
+  const [attributeOwner, setAttributeOwner] = useState<Row>();
+  const [selectedAttributeIds, setSelectedAttributeIds] = useState<number[]>([]);
   const show = (row?: Row) => {
     setEditing(row);
     form.resetFields();
@@ -2312,6 +2408,42 @@ function Categories() {
         row.id !== editing?.id,
     )
     .map((row) => ({ value: row.id, label: `${row.level}级 · ${row.name}` }));
+  const treeData = useMemo(() => {
+    const nodes = new Map<number, Row>();
+    (rows.data || []).forEach((row) => nodes.set(Number(row.id), { ...row, children: [] }));
+    const roots: Row[] = [];
+    nodes.forEach((node) => {
+      const parent = nodes.get(Number(node.parentId));
+      if (parent) parent.children.push(node);
+      else roots.push(node);
+    });
+    const sort = (items: Row[]): Row[] => items
+      .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || Number(a.id) - Number(b.id))
+      .map((item) => ({ ...item, children: item.children.length ? sort(item.children) : undefined }));
+    return sort(roots);
+  }, [rows.data]);
+  const showAttributes = (row: Row) => {
+    setAttributeOwner(row);
+    setSelectedAttributeIds((attributes.data || []).filter((attribute) =>
+      (attribute.categoryIds || []).map(Number).includes(Number(row.id)),
+    ).map((attribute) => Number(attribute.id)));
+  };
+  const saveAttributes = async () => {
+    if (!attributeOwner) return;
+    try {
+      await Promise.all((attributes.data || []).map((attribute) => {
+        const categoryIds = (attribute.categoryIds || []).map(Number).filter((id: number) => id !== Number(attributeOwner.id));
+        if (selectedAttributeIds.includes(Number(attribute.id))) categoryIds.push(Number(attributeOwner.id));
+        return rootMutation(`/api/admin/business/attributes/${attribute.id}`, {
+          method: "PUT",
+          body: JSON.stringify({ ...attribute, categoryIds, options: undefined }),
+        });
+      }));
+      message.success(`已更新“${attributeOwner.name}”的属性`);
+      setAttributeOwner(undefined);
+      void attributes.refresh();
+    } catch (error) { message.error((error as Error).message); }
+  };
   const columns: ColumnsType<Row> = [
     {
       title: "分类名称",
@@ -2371,6 +2503,9 @@ function Categories() {
           <Button type="link" onClick={() => show(row)}>
             编辑
           </Button>
+          <Button type="link" onClick={() => showAttributes(row)}>
+            属性管理
+          </Button>
           <Button type="link" danger onClick={() => remove(row)}>
             删除
           </Button>
@@ -2392,8 +2527,10 @@ function Categories() {
         <Table
           rowKey="id"
           loading={rows.loading}
-          dataSource={rows.data}
+          dataSource={treeData}
           columns={columns}
+          expandable={{ defaultExpandAllRows: true, indentSize: 24 }}
+          searchPlaceholder="搜索分类名称、上级分类或级别"
         />
       </Card>
       <Modal
@@ -2443,6 +2580,31 @@ function Categories() {
             />
           </Form.Item>
         </Form>
+      </Modal>
+      <Modal
+        open={Boolean(attributeOwner)}
+        title={`${attributeOwner?.name || ""} · 属性管理`}
+        width={760}
+        onCancel={() => setAttributeOwner(undefined)}
+        onOk={() => void saveAttributes()}
+        okText="保存关联"
+      >
+        <Alert type="info" showIcon message="勾选该分类直接拥有的属性；上级分类属性会自动继承，无需重复关联。" style={{ marginBottom: 16 }} />
+        <Table<Row>
+          rowKey="id"
+          dataSource={attributes.data || []}
+          searchPlaceholder="搜索属性名称、编码、分组或输入方式"
+          rowSelection={{
+            selectedRowKeys: selectedAttributeIds,
+            onChange: (keys) => setSelectedAttributeIds(keys.map(Number)),
+          }}
+          columns={[
+            { title: "属性名称", render: (_, row) => <><strong>{row.name}</strong><div className="subline">{row.code}</div></> },
+            { title: "分组", dataIndex: "groupName" },
+            { title: "输入方式", dataIndex: "inputType" },
+            { title: "状态", dataIndex: "status", render: (value) => Number(value) === 1 ? <Tag color="green">启用</Tag> : <Tag>停用</Tag> },
+          ]}
+        />
       </Modal>
     </>
   );
