@@ -29,9 +29,11 @@ public class SecurityConfig {
                 .requestMatchers("/api/admin/business/products/**","/api/admin/business/categories/**",
                   "/api/admin/business/attributes/**","/api/admin/business/uploads/**",
                   "/api/admin/content/**").hasAuthority("product:manage")
-                .requestMatchers("/api/admin/business/enterprises/**").hasAuthority("enterprise:manage")
+                .requestMatchers("/api/admin/business/enterprises/**",
+                  "/api/admin/business/enterprise-users/**").hasAuthority("enterprise:manage")
                 .requestMatchers("/api/admin/business/agreements/**","/api/admin/agreements/**").hasAuthority("agreement:manage")
-                .requestMatchers("/api/admin/business/orders/**").hasAuthority("order:manage")
+                .requestMatchers("/api/admin/business/orders/**","/api/admin/business/agreement-orders/**",
+                  "/api/admin/business/platform-orders/**").hasAuthority("order:manage")
                 .requestMatchers("/api/admin/**").denyAll()
                 .anyRequest().authenticated())
             .httpBasic(Customizer.withDefaults())

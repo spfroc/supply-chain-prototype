@@ -63,6 +63,10 @@ Case "BIZ-ENTERPRISE-USER-001" "企业用户支持按用户维度查询" {
     throw "企业用户列表缺少企业或账号信息"
   }
 }
+Case "BIZ-ENTERPRISE-USER-002" "企业用户接口受企业管理权限保护" {
+  $withoutAuth=Invoke-Api GET "/api/admin/business/enterprise-users" $null @{}
+  Expect-Status $withoutAuth @(401)
+}
 Case "BIZ-ORDER-SCOPE-001" "协议订单和平台商品订单可独立查询" {
   Expect-Status (Invoke-Api GET "/api/admin/business/agreement-orders" $null $adminHeaders) @(200)
   Expect-Status (Invoke-Api GET "/api/admin/business/platform-orders" $null $adminHeaders) @(200)
