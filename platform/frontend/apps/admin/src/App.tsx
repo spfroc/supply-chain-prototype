@@ -38,12 +38,18 @@ type Module =
   | "attributes"
   | "brands"
   | "platforms"
+  | "platformProducts"
+  | "platformOrders"
   | "navigations"
   | "banners"
   | "solutions"
+  | "solutionProducts"
   | "contents"
   | "enterprises"
+  | "enterpriseUsers"
   | "agreements"
+  | "agreementProducts"
+  | "agreementOrders"
   | "orders"
   | "users"
   | "roles"
@@ -485,18 +491,44 @@ function MenuIcon({ name }: { name: string }) {
 const navItems = [
   { key: "overview", label: "经营概览", icon: <MenuIcon name="dashboard" /> },
   {
-    key: "business",
-    label: "业务管理",
+    key: "goodsCenter",
+    label: "商品管理",
     children: [
       { key: "products", label: "商品管理", icon: <MenuIcon name="goods" /> },
       { key: "categories", label: "分类管理", icon: <MenuIcon name="category" /> },
-      { key: "attributes", label: "属性模板", icon: <MenuIcon name="config" /> },
       { key: "brands", label: "品牌管理", icon: <MenuIcon name="brand" /> },
-      { key: "platforms", label: "平台管理", icon: <MenuIcon name="platform" /> },
-      { key: "solutions", label: "方案管理", icon: <MenuIcon name="solution" /> },
-      { key: "enterprises", label: "企业管理", icon: <MenuIcon name="enterprise" /> },
-      { key: "agreements", label: "协议管理", icon: <MenuIcon name="agreement" /> },
+      { key: "attributes", label: "属性模板", icon: <MenuIcon name="config" /> },
+    ],
+  },
+  {
+    key: "orderCenter", label: "订单管理", children: [
       { key: "orders", label: "订单管理", icon: <MenuIcon name="order" /> },
+    ],
+  },
+  {
+    key: "platformCenter", label: "平台管理", children: [
+      { key: "platforms", label: "平台管理", icon: <MenuIcon name="platform" /> },
+      { key: "platformProducts", label: "平台商品管理", icon: <MenuIcon name="goods" /> },
+      { key: "platformOrders", label: "平台订单管理", icon: <MenuIcon name="order" /> },
+    ],
+  },
+  {
+    key: "agreementCenter", label: "协议管理", children: [
+      { key: "agreements", label: "协议管理", icon: <MenuIcon name="agreement" /> },
+      { key: "agreementProducts", label: "协议商品管理", icon: <MenuIcon name="goods" /> },
+      { key: "agreementOrders", label: "协议订单管理", icon: <MenuIcon name="order" /> },
+    ],
+  },
+  {
+    key: "solutionCenter", label: "方案管理", children: [
+      { key: "solutions", label: "方案管理", icon: <MenuIcon name="solution" /> },
+      { key: "solutionProducts", label: "方案商品管理", icon: <MenuIcon name="goods" /> },
+    ],
+  },
+  {
+    key: "enterpriseCenter", label: "企业管理", children: [
+      { key: "enterprises", label: "企业管理", icon: <MenuIcon name="enterprise" /> },
+      { key: "enterpriseUsers", label: "用户管理", icon: <MenuIcon name="user" /> },
     ],
   },
   {
@@ -523,8 +555,11 @@ const navItems = [
 const modulePermission: Partial<Record<Module, string>> = {
   overview: "dashboard:view", products: "product:manage", categories: "product:manage",
   attributes: "product:manage", brands: "product:manage", platforms: "product:manage",
+  platformProducts: "product:manage", platformOrders: "order:manage",
   navigations: "product:manage", banners: "product:manage", solutions: "product:manage",
-  contents: "product:manage", enterprises: "enterprise:manage", agreements: "agreement:manage",
+  contents: "product:manage", enterprises: "enterprise:manage", enterpriseUsers: "enterprise:manage",
+  agreements: "agreement:manage", agreementProducts: "agreement:manage", agreementOrders: "order:manage",
+  solutionProducts: "product:manage",
   orders: "order:manage", users: "system:user", roles: "system:role",
   permissions: "system:role", logs: "system:log", configs: "system:config",
 };
@@ -662,15 +697,21 @@ function AdminApp({ logout }: { logout: () => void }) {
     attributes: ["分类属性模板", "按商品分类配置基础属性、销售规格、选项及前台展示规则"],
     brands: ["品牌管理", "维护商品品牌、品牌说明、排序与启停状态"],
     platforms: ["平台管理", "维护第三方平台资料、商品参考入口与展示状态"],
+    platformProducts: ["平台商品管理", "按采购平台维护关联商品、平台售价、链接及上架状态"],
+    platformOrders: ["平台订单管理", "查看包含平台关联商品的采购订单及履约状态"],
     navigations: [
       "导航栏管理",
       "配置 Web 客户端顶部导航名称、链接、排序与状态",
     ],
     banners: ["首页轮播图管理", "配置 Web 与 H5 首页活动内容、图片和跳转链接"],
     solutions: ["方案管理", "维护企业采购场景方案及客户端展示内容"],
+    solutionProducts: ["方案商品管理", "按采购方案维护必选商品、可选商品、数量与排序"],
     contents: ["内容管理", "维护采购指南、服务说明及其他门户内容"],
     enterprises: ["企业管理", "查看企业客户、成员账户和有效采购协议"],
+    enterpriseUsers: ["企业用户管理", "以用户维度查看、创建、编辑和维护全部企业账号"],
     agreements: ["协议管理", "维护协议商品关联及企业专属成交价格"],
+    agreementProducts: ["协议商品管理", "按采购协议维护商品范围与企业专属价格"],
+    agreementOrders: ["协议订单管理", "查看协议产生的采购订单与履约进度"],
     orders: ["订单管理", "查询采购订单、付款状态与履约进度"],
     users: ["用户管理", "维护后台登录用户、角色归属与启停状态"],
     roles: ["角色管理", "按岗位配置角色与操作权限"],
@@ -698,7 +739,7 @@ function AdminApp({ logout }: { logout: () => void }) {
           <Menu
             mode="inline"
             theme="dark"
-            defaultOpenKeys={["business"]}
+            defaultOpenKeys={["goodsCenter", "orderCenter"]}
             selectedKeys={[module]}
             items={visibleNavItems}
             onClick={({ key }) => setModule(key as Module)}
@@ -752,6 +793,10 @@ function AdminApp({ logout }: { logout: () => void }) {
           {(
             ["products", "enterprises", "agreements", "orders"] as Module[]
           ).includes(module) && <BusinessModule module={module} />}
+          {module === "agreementProducts" && <BusinessModule module="agreements" listTitle="采购协议列表（进入商品管理）" />}
+          {module === "agreementOrders" && <BusinessModule module="orders" endpointOverride="/agreement-orders" listTitle="协议订单列表" extraColumn="agreementName" />}
+          {module === "platformOrders" && <BusinessModule module="orders" endpointOverride="/platform-orders" listTitle="平台关联商品订单列表" extraColumn="platformNames" />}
+          {module === "enterpriseUsers" && <EnterpriseUsers />}
           {module === "categories" && <Categories />}
           {module === "attributes" && <AttributeTemplates />}
           {(
@@ -764,6 +809,8 @@ function AdminApp({ logout }: { logout: () => void }) {
               "contents",
             ] as Module[]
           ).includes(module) && <PortalManager module={module} />}
+          {module === "platformProducts" && <PortalManager module="platforms" />}
+          {module === "solutionProducts" && <PortalManager module="solutions" />}
           {module === "users" && <Users />}
           {module === "roles" && <Roles />}
           {module === "permissions" && <Permissions />}
@@ -775,7 +822,72 @@ function AdminApp({ logout }: { logout: () => void }) {
   );
 }
 
-function BusinessModule({ module }: { module: Module }) {
+function EnterpriseUsers() {
+  const {message,modal}=AntApp.useApp();
+  const users=useLoad<Row[]>(()=>rootApi("/api/admin/business/enterprise-users"));
+  const enterprises=useLoad<Row[]>(()=>rootApi("/api/admin/business/enterprises"));
+  const [form]=Form.useForm();
+  const [editing,setEditing]=useState<Row>();
+  const [open,setOpen]=useState(false);
+  const [keyword,setKeyword]=useState("");
+  const filtered=(users.data||[]).filter((row)=>[row.enterpriseName,row.username,row.realName,row.phone]
+    .some((value)=>String(value||"").toLowerCase().includes(keyword.trim().toLowerCase())));
+  const show=(row?:Row)=>{
+    setEditing(row);
+    form.resetFields();
+    form.setFieldsValue(row?{...row,password:""}:{enterpriseId:enterprises.data?.[0]?.id,roleCode:"BUYER",status:1,password:""});
+    setOpen(true);
+  };
+  const save=async()=>{
+    try{
+      const values=await form.validateFields();
+      const enterpriseId=Number(editing?.enterpriseId||values.enterpriseId);
+      const response=await fetch(`/api/admin/business/enterprises/${enterpriseId}/members${editing?`/${editing.id}`:""}`,{
+        method:editing?"PUT":"POST",headers:apiHeaders(),body:JSON.stringify(values),
+      });
+      if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"企业用户保存失败");}
+      setOpen(false);message.success("企业用户已保存");void users.refresh();
+    }catch(error){if(error instanceof Error)message.error(error.message);}
+  };
+  const remove=(row:Row)=>modal.confirm({
+    title:`确认删除用户“${row.realName}”？`,content:`所属企业：${row.enterpriseName}`,
+    okButtonProps:{danger:true},onOk:async()=>{
+      const response=await fetch(`/api/admin/business/enterprises/${row.enterpriseId}/members/${row.id}`,{method:"DELETE",headers:apiHeaders()});
+      if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"企业用户删除失败");}
+      message.success("企业用户已删除");void users.refresh();
+    },
+  });
+  return <>
+    <Card className="data-card" title="企业用户列表" extra={<Space>
+      <Input allowClear value={keyword} onChange={(event)=>setKeyword(event.target.value)} placeholder="搜索企业、账号、姓名或手机" style={{width:300}} />
+      <Button type="primary" onClick={()=>show()}>＋ 新增企业用户</Button>
+    </Space>}>
+      <Table rowKey="id" loading={users.loading} dataSource={filtered} pagination={{pageSize:12,showSizeChanger:false,showTotal:(total)=>`共 ${total} 个用户`}} columns={[
+        {title:"用户",render:(_:unknown,row:Row)=><div className="user-cell"><i>{String(row.realName||"用").slice(0,1)}</i><span><strong>{row.realName}</strong><small>@{row.username}</small></span></div>},
+        {title:"所属企业",dataIndex:"enterpriseName"},{title:"手机号码",dataIndex:"phone"},
+        {title:"企业角色",dataIndex:"roleCode",render:(value)=>value==="ENTERPRISE_ADMIN"?<Tag color="blue">企业管理员</Tag>:<Tag>采购员</Tag>},
+        {title:"状态",dataIndex:"status",render:(value)=><Tag color={Number(value)===1?"green":"default"}>{Number(value)===1?"启用":"停用"}</Tag>},
+        {title:"创建时间",dataIndex:"createdAt",render:dateTime},
+        {title:"操作",render:(_:unknown,row:Row)=><Space><Button type="link" onClick={()=>show(row)}>编辑</Button><Button type="link" danger onClick={()=>remove(row)}>删除</Button></Space>},
+      ]}/>
+    </Card>
+    <Modal open={open} title={`${editing?"编辑":"新增"}企业用户`} onCancel={()=>setOpen(false)} onOk={()=>void save()}>
+      <Form form={form} layout="vertical">
+        <Form.Item name="enterpriseId" label="所属企业" rules={[{required:true,message:"请选择所属企业"}]}><Select showSearch optionFilterProp="label" disabled={!!editing} options={(enterprises.data||[]).map((row)=>({value:row.id,label:row.name}))}/></Form.Item>
+        <Form.Item name="username" label="登录账号" rules={[{required:true,message:"请输入登录账号"},{min:3,max:80}]}><Input disabled={!!editing}/></Form.Item>
+        <Form.Item name="password" label={editing?"重置密码":"初始密码"} extra={editing?"不修改密码请留空":undefined} rules={[{required:!editing,message:"请输入初始密码"},{min:8,max:72,message:"密码长度必须为8至72位"}]}><Input.Password autoComplete="new-password"/></Form.Item>
+        <Form.Item name="realName" label="姓名" rules={[{required:true,message:"请输入姓名"}]}><Input/></Form.Item>
+        <Form.Item name="phone" label="手机号码" rules={[{required:true,message:"请输入手机号码"},{pattern:/^1\d{10}$/,message:"请输入11位手机号码"}]}><Input/></Form.Item>
+        <Form.Item name="roleCode" label="企业角色" rules={[{required:true}]}><Select options={[{value:"BUYER",label:"采购员"},{value:"ENTERPRISE_ADMIN",label:"企业管理员"}]}/></Form.Item>
+        <Form.Item name="status" label="账号状态" rules={[{required:true}]}><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]}/></Form.Item>
+      </Form>
+    </Modal>
+  </>;
+}
+
+function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
+  module: Module; endpointOverride?: string; listTitle?: string; extraColumn?: "agreementName"|"platformNames";
+}) {
   const { message, modal } = AntApp.useApp();
   const endpoint =
     module === "products"
@@ -786,8 +898,8 @@ function BusinessModule({ module }: { module: Module }) {
           ? "/agreements"
           : "/orders";
   const rows = useLoad<Row[]>(
-    () => rootApi(`/api/admin/business${endpoint}`),
-    [module],
+    () => rootApi(`/api/admin/business${endpointOverride||endpoint}`),
+    [module,endpointOverride],
   );
   const enterprises = useLoad<Row[]>(() =>
     rootApi("/api/admin/business/enterprises"),
@@ -1386,7 +1498,12 @@ function BusinessModule({ module }: { module: Module }) {
         ),
       },
     ];
-  const title =
+  if(module === "orders" && extraColumn) columns.splice(2,0,{
+    title: extraColumn==="agreementName"?"采购协议":"关联平台",
+    dataIndex: extraColumn,
+    render: (value) => value || "—",
+  });
+  const defaultListTitle =
     module === "products"
       ? "自营商品列表"
       : module === "enterprises"
@@ -1398,7 +1515,7 @@ function BusinessModule({ module }: { module: Module }) {
     <>
       <Card
         className="data-card"
-        title={title}
+        title={listTitle||defaultListTitle}
         extra={
           module !== "orders" && (
             <Button type="primary" onClick={() => show()}>

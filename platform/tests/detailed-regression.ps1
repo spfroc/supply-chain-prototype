@@ -56,6 +56,18 @@ function Expect-Status($Response, [int[]]$Expected) {
   }
 }
 
+Case "BIZ-ENTERPRISE-USER-001" "企业用户支持按用户维度查询" {
+  $result=Invoke-Api GET "/api/admin/business/enterprise-users" $null $adminHeaders
+  Expect-Status $result @(200)
+  if(@($result.Data).Count -lt 1 -or !$result.Data[0].enterpriseName -or !$result.Data[0].username){
+    throw "企业用户列表缺少企业或账号信息"
+  }
+}
+Case "BIZ-ORDER-SCOPE-001" "协议订单和平台商品订单可独立查询" {
+  Expect-Status (Invoke-Api GET "/api/admin/business/agreement-orders" $null $adminHeaders) @(200)
+  Expect-Status (Invoke-Api GET "/api/admin/business/platform-orders" $null $adminHeaders) @(200)
+}
+
 # ---------- 权限、角色、后台用户 ----------
 $permissions = (Invoke-Api GET "/api/admin/system/permissions" $null $adminHeaders).Data
 $permissionIds = @($permissions | Select-Object -First 2 | ForEach-Object { [long]$_.id })

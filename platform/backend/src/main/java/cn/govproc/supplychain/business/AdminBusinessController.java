@@ -228,6 +228,18 @@ public class AdminBusinessController {
           """).param("enterpriseId",enterpriseId).query().listOfRows();
     }
 
+    @GetMapping("/enterprise-users")
+    List<Map<String,Object>> enterpriseUsers() {
+        return jdbc.sql("""
+          SELECT u.id,u.enterprise_id AS enterpriseId,e.name AS enterpriseName,u.username,
+            u.real_name AS realName,u.phone,u.role_code AS roleCode,u.status,
+            DATE_FORMAT(u.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
+          FROM enterprise_user u JOIN enterprise e ON e.id=u.enterprise_id
+          WHERE u.deleted_at IS NULL AND e.deleted_at IS NULL
+          ORDER BY u.id DESC
+          """).query().listOfRows();
+    }
+
     @PostMapping("/enterprises/{enterpriseId}/members") @ResponseStatus(HttpStatus.CREATED)
     void createEnterpriseMember(@PathVariable long enterpriseId,@Valid @RequestBody EnterpriseMemberRequest r) {
         validatePassword(r.password(),true);
@@ -336,6 +348,40 @@ public class AdminBusinessController {
             DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,COUNT(oi.id) AS itemKinds,SUM(oi.quantity) AS itemCount
           FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id LEFT JOIN order_item oi ON oi.order_main_id=o.id
           GROUP BY o.id ORDER BY o.id DESC
+          """).query().listOfRows();
+    }
+
+    @GetMapping("/agreement-orders")
+    List<Map<String,Object>> agreementOrders() {
+        return jdbc.sql("""
+          SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,a.name AS agreementName,
+            o.payable_amount AS payableAmount,o.payment_status AS paymentStatus,
+            o.order_status AS orderStatus,o.refund_status AS refundStatus,o.refund_amount AS refundAmount,
+            DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,
+            COUNT(oi.id) AS itemKinds,SUM(oi.quantity) AS itemCount
+          FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id JOIN agreement a ON a.id=o.agreement_id
+          LEFT JOIN order_item oi ON oi.order_main_id=o.id
+          GROUP BY o.id,a.id ORDER BY o.id DESC
+          """).query().listOfRows();
+    }
+
+    @GetMapping("/platform-orders")
+    List<Map<String,Object>> platformOrders() {
+        return jdbc.sql("""
+          SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,o.payable_amount AS payableAmount,
+            o.payment_status AS paymentStatus,o.order_status AS orderStatus,o.refund_status AS refundStatus,
+            o.refund_amount AS refundAmount,DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,
+            COUNT(oi.id) AS itemKinds,SUM(oi.quantity) AS itemCount,platforms.platformNames
+          FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id
+          LEFT JOIN order_item oi ON oi.order_main_id=o.id
+          JOIN (
+            SELECT oi2.order_main_id,
+              GROUP_CONCAT(DISTINCT pr.title ORDER BY pr.sort_order SEPARATOR '、') AS platformNames
+            FROM order_item oi2 JOIN product_platform pp ON pp.sku_id=oi2.sku_id AND pp.deleted_at IS NULL
+            JOIN portal_resource pr ON pr.id=pp.platform_id AND pr.resource_type='PLATFORM' AND pr.deleted_at IS NULL
+            GROUP BY oi2.order_main_id
+          ) platforms ON platforms.order_main_id=o.id
+          GROUP BY o.id,platforms.platformNames ORDER BY o.id DESC
           """).query().listOfRows();
     }
 
