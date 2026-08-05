@@ -424,13 +424,17 @@ function MobileAuth({
     const required =
       mode === "login"
         ? ["username", "password"]
-        : ["enterpriseName", "username", "password", "realName", "phone"];
+        : ["enterpriseName", "creditCode", "username", "password", "realName", "phone"];
     if (required.some((k) => !String(form[k] || "").trim())) {
       Toast.show("请完整填写必填信息");
       return;
     }
     if (mode === "register" && !/^1\d{10}$/.test(String(form.phone))) {
       Toast.show("请输入11位手机号码");
+      return;
+    }
+    if (mode === "register" && !/^[0-9A-Z]{18}$/.test(String(form.creditCode || "").trim().toUpperCase())) {
+      Toast.show("请输入正确的18位统一社会信用代码");
       return;
     }
     setSubmitting(true);
@@ -481,23 +485,25 @@ function MobileAuth({
             注册
           </button>
         </nav>
-        <h1>{mode === "login" ? "欢迎登录" : "注册采购员账号"}</h1>
+        <h1>{mode === "login" ? "欢迎登录" : "注册企业账号"}</h1>
         <p>
           {mode === "login"
             ? "登录后查看企业协议、订单和购物车"
-            : "请输入企业全称，提交后由企业管理员启用账号"}
+            : "企业不存在时将自动创建，首个账号为企业主账号"}
         </p>
         {mode === "register" && (
-          <label>
-            所属企业
-            <input
-              value={form.enterpriseName || ""}
-              onChange={(e) =>
-                setForm({ ...form, enterpriseName: e.target.value })
-              }
-              placeholder="请输入所属企业全称"
-            />
-          </label>
+          <>
+            <label>
+              所属企业
+              <input value={form.enterpriseName || ""} onChange={(e) => setForm({ ...form, enterpriseName: e.target.value })} placeholder="请输入所属企业全称" />
+            </label>
+            <label>
+              统一社会信用代码
+              <input value={form.creditCode || ""} maxLength={18} autoCapitalize="characters"
+                onChange={(e) => setForm({ ...form, creditCode: e.target.value.toUpperCase() })}
+                placeholder="请输入18位统一社会信用代码" />
+            </label>
+          </>
         )}
         <label>
           {mode === "login" ? "账号或手机号" : "登录账号"}
