@@ -961,7 +961,7 @@ function EnterpriseUsers() {
         {title:"企业角色",dataIndex:"roleCode",render:(value)=>value==="ENTERPRISE_ADMIN"?<Tag color="blue">企业管理员</Tag>:<Tag>采购员</Tag>},
         {title:"状态",dataIndex:"status",render:(value)=><Tag color={Number(value)===1?"green":"default"}>{Number(value)===1?"启用":"停用"}</Tag>},
         {title:"创建时间",dataIndex:"createdAt",render:dateTime},
-        {title:"操作",render:(_:unknown,row:Row)=><Space><Button type="link" onClick={()=>show(row)}>编辑</Button><Button type="link" danger onClick={()=>remove(row)}>删除</Button></Space>},
+        {title:"操作",render:(_:unknown,row:Row)=><Button type="link" onClick={()=>show(row)}>编辑</Button>},
       ]}/>
     </Card>
     <Modal open={open} title={`${editing?"编辑":"新增"}企业用户`} onCancel={()=>setOpen(false)} onOk={()=>void save()}>
@@ -1425,9 +1425,6 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
             <Button type="link" onClick={() => void toggle(r)}>
               {Number(r.status) === 1 ? "下架" : "上架"}
             </Button>
-            <Button type="link" danger onClick={() => remove(r)}>
-              删除
-            </Button>
           </Space>
         ),
       },
@@ -1478,9 +1475,6 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
             <Button type="link" onClick={() => show(r)}>
               编辑
             </Button>
-            <Button type="link" danger onClick={() => remove(r)}>
-              删除
-            </Button>
           </Space>
         ),
       },
@@ -1525,9 +1519,6 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
             </Button>
             <Button type="link" onClick={() => show(r)}>
               编辑
-            </Button>
-            <Button type="link" danger onClick={() => remove(r)}>
-              删除
             </Button>
           </Space>
         ),
@@ -1930,7 +1921,6 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
                     编辑
                   </Button>
                   <Button type="link" danger onClick={() => removeMember(r)}>
-                    删除
                   </Button>
                 </Space>
               ),
@@ -2238,7 +2228,6 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
         title={`订单退款 · ${refundOrder?.orderNo || ""}`}
         okText="确认退款"
         cancelText="取消"
-        okButtonProps={{ danger: true }}
         onOk={() => void saveRefund()}
         onCancel={() => setRefundOrder(undefined)}
       >
@@ -2306,7 +2295,7 @@ function AttributeTemplates() {
     { title: "输入方式", dataIndex: "inputType", render: (v) => ({ TEXT:"文本",NUMBER:"数字",SELECT:"下拉单选",RADIO:"单选",CHECKBOX:"多选",SWITCH:"开关",DATE:"日期" }[v as string] || v) },
     { title: "规则", render: (_,r) => <Space wrap>{Number(r.requiredFlag)===1&&<Tag color="red">必填</Tag>}{Number(r.filterable)===1&&<Tag color="blue">可筛选</Tag>}{Number(r.visibleFlag)===1&&<Tag color="green">前台展示</Tag>}</Space> },
     { title: "关联分类", render: (_,r) => `${r.categoryIds?.length || 0} 个` },
-    { title: "操作", render: (_,r) => <Space><Button type="link" onClick={()=>{setEditing(r);form.setFieldsValue({...r,categoryIds:(r.categoryIds||[]).map(Number)});setOpen(true);}}>编辑</Button>{["SELECT","RADIO","CHECKBOX"].includes(r.inputType)&&<Button type="link" onClick={()=>{setOptionOwner(r);setOptionEditing(undefined);optionForm.resetFields();}}>管理选项</Button>}<Button danger type="link" onClick={()=>modal.confirm({title:`删除属性“${r.name}”？`,onOk:async()=>{await rootMutation(`/api/admin/business/attributes/${r.id}`,{method:"DELETE"});void rows.refresh();}})}>删除</Button></Space> },
+    { title: "操作", render: (_,r) => <Space><Button type="link" onClick={()=>{setEditing(r);form.setFieldsValue({...r,categoryIds:(r.categoryIds||[]).map(Number)});setOpen(true);}}>编辑</Button>{["SELECT","RADIO","CHECKBOX"].includes(r.inputType)&&<Button type="link" onClick={()=>{setOptionOwner(r);setOptionEditing(undefined);optionForm.resetFields();}}>管理选项</Button>}</Space> },
   ];
   return <>
     <Card title="属性模板列表" extra={<Button type="primary" onClick={()=>{setEditing(undefined);form.resetFields();form.setFieldsValue({groupName:"规格参数",attributeType:"BASIC",inputType:"TEXT",requiredFlag:0,filterable:0,searchable:0,visibleFlag:1,allowCustom:0,sortOrder:0,status:1});setOpen(true);}}>新增属性</Button>}>
@@ -2335,7 +2324,7 @@ function AttributeTemplates() {
       <Form form={optionForm} layout="inline" initialValues={{sortOrder:0,status:1}} style={{marginBottom:16}}>
         <Form.Item name="optionLabel" rules={[{required:true}]}><Input placeholder="选项名称" /></Form.Item><Form.Item name="optionCode" rules={[{required:true}]}><Input placeholder="选项编码" /></Form.Item><Form.Item name="sortOrder"><InputNumber min={0} placeholder="排序" /></Form.Item><Form.Item name="status"><Select style={{width:90}} options={[{label:"启用",value:1},{label:"停用",value:0}]} /></Form.Item><Button type="primary" onClick={saveOption}>{optionEditing?"保存":"添加"}</Button>
       </Form>
-      <Table<Row> rowKey="id" dataSource={(rows.data||[]).find(r=>r.id===optionOwner?.id)?.options || optionOwner?.options || []} pagination={{pageSize:8}} columns={[{title:"选项",dataIndex:"optionLabel"},{title:"编码",dataIndex:"optionCode"},{title:"排序",dataIndex:"sortOrder"},{title:"状态",dataIndex:"status",render:v=>Number(v)===1?<Tag color="green">启用</Tag>:<Tag>停用</Tag>},{title:"操作",render:(_,r)=><Space><Button type="link" onClick={()=>{setOptionEditing(r);optionForm.setFieldsValue(r);}}>编辑</Button><Button danger type="link" onClick={async()=>{await rootMutation(`/api/admin/business/attributes/${optionOwner!.id}/options/${r.id}`,{method:"DELETE"});void rows.refresh();}}>删除</Button></Space>}]}/>
+      <Table<Row> rowKey="id" dataSource={(rows.data||[]).find(r=>r.id===optionOwner?.id)?.options || optionOwner?.options || []} pagination={{pageSize:8}} columns={[{title:"选项",dataIndex:"optionLabel"},{title:"编码",dataIndex:"optionCode"},{title:"排序",dataIndex:"sortOrder"},{title:"状态",dataIndex:"status",render:v=>Number(v)===1?<Tag color="green">启用</Tag>:<Tag>停用</Tag>},{title:"操作",render:(_,r)=><Button type="link" onClick={()=>{setOptionEditing(r);optionForm.setFieldsValue(r);}}>编辑</Button>}]}/>
     </Modal>
   </>;
 }
@@ -2505,9 +2494,6 @@ function Categories() {
           </Button>
           <Button type="link" onClick={() => showAttributes(row)}>
             属性管理
-          </Button>
-          <Button type="link" danger onClick={() => remove(row)}>
-            删除
           </Button>
         </Space>
       ),
@@ -2839,9 +2825,6 @@ function PortalManager({ module }: { module: Module }) {
           )}
           <Button type="link" onClick={() => show(row)}>
             编辑
-          </Button>
-          <Button type="link" danger onClick={() => remove(row)}>
-            删除
           </Button>
         </Space>
       ),
@@ -3331,14 +3314,6 @@ function Users() {
           <Button type="link" onClick={() => show(row)}>
             编辑
           </Button>
-          <Button
-            type="link"
-            danger
-            disabled={row.id === 1}
-            onClick={() => remove(row)}
-          >
-            删除
-          </Button>
         </Space>
       ),
     },
@@ -3538,14 +3513,6 @@ function Roles() {
                 <Space>
                   <Button type="link" onClick={() => show(r)}>
                     配置权限
-                  </Button>
-                  <Button
-                    type="link"
-                    danger
-                    disabled={r.id === 1}
-                    onClick={() => remove(r)}
-                  >
-                    删除
                   </Button>
                 </Space>
               ),
@@ -3978,13 +3945,6 @@ function Configs() {
                             <Button type="link" onClick={() => showOption(row)}>
                               编辑
                             </Button>
-                            <Button
-                              type="link"
-                              danger
-                              onClick={() => removeOption(row)}
-                            >
-                              删除
-                            </Button>
                           </Space>
                         ),
                       },
@@ -4085,9 +4045,6 @@ function Configs() {
                 <Space>
                   <Button type="link" onClick={() => showValue(row)}>
                     编辑
-                  </Button>
-                  <Button type="link" danger onClick={() => removeValue(row)}>
-                    删除
                   </Button>
                 </Space>
               ),
