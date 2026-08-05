@@ -104,7 +104,10 @@ function Table<T extends Row>({
       <Space>
         <span className="selection-summary">已选 {selectedRowKeys.length} 项</span>
         <Button disabled={!selected.length} onClick={exportSelected}>批量导出选中</Button>
-        <Button disabled={!selectedRowKeys.length} onClick={() => setSelectedRowKeys([])}>清空选择</Button>
+        <Button disabled={!selectedRowKeys.length} onClick={() => {
+          setSelectedRowKeys([]);
+          rowSelection?.onChange?.([], [], { type: "none" });
+        }}>清空选择</Button>
       </Space>
     </div>
     <AntTable<T>
@@ -2338,6 +2341,8 @@ function Categories() {
   const [editing, setEditing] = useState<Row>();
   const [attributeOwner, setAttributeOwner] = useState<Row>();
   const [selectedAttributeIds, setSelectedAttributeIds] = useState<number[]>([]);
+  const [attributeAddOpen, setAttributeAddOpen] = useState(false);
+  const [pendingAttributeIds, setPendingAttributeIds] = useState<number[]>([]);
   const show = (row?: Row) => {
     setEditing(row);
     form.resetFields();
@@ -2413,26 +2418,48 @@ function Categories() {
   }, [rows.data]);
   const showAttributes = (row: Row) => {
     setAttributeOwner(row);
-    setSelectedAttributeIds((attributes.data || []).filter((attribute) =>
-      (attribute.categoryIds || []).map(Number).includes(Number(row.id)),
-    ).map((attribute) => Number(attribute.id)));
+    setSelectedAttributeIds([]);
   };
-  const saveAttributes = async () => {
+  const updateAttributeAssociation = (attribute: Row, attach: boolean) => {
+    const categoryIds = (attribute.categoryIds || []).map(Number)
+      .filter((id: number) => id !== Number(attributeOwner?.id));
+    if (attach && attributeOwner) categoryIds.push(Number(attributeOwner.id));
+    return rootMutation(`/api/admin/business/attributes/${attribute.id}`, {
+      method: "PUT",
+      body: JSON.stringify({ ...attribute, categoryIds, options: undefined }),
+    });
+  };
+  const addAttributes = async () => {
     if (!attributeOwner) return;
     try {
-      await Promise.all((attributes.data || []).map((attribute) => {
-        const categoryIds = (attribute.categoryIds || []).map(Number).filter((id: number) => id !== Number(attributeOwner.id));
-        if (selectedAttributeIds.includes(Number(attribute.id))) categoryIds.push(Number(attributeOwner.id));
-        return rootMutation(`/api/admin/business/attributes/${attribute.id}`, {
-          method: "PUT",
-          body: JSON.stringify({ ...attribute, categoryIds, options: undefined }),
-        });
-      }));
-      message.success(`已更新“${attributeOwner.name}”的属性`);
-      setAttributeOwner(undefined);
-      void attributes.refresh();
+      await Promise.all((attributes.data || []).filter((attribute) => pendingAttributeIds.includes(Number(attribute.id)))
+        .map((attribute) => updateAttributeAssociation(attribute, true)));
+      message.success(`已为“${attributeOwner.name}”添加 ${pendingAttributeIds.length} 个属性`);
+      setAttributeAddOpen(false);
+      setPendingAttributeIds([]);
+      await attributes.refresh();
     } catch (error) { message.error((error as Error).message); }
   };
+  const detachAttributes = () => {
+    if (!attributeOwner || !selectedAttributeIds.length) return;
+    modal.confirm({
+      title: `取消关联 ${selectedAttributeIds.length} 个属性？`,
+      content: "只取消与当前分类的直接关联，不影响属性模板及其他分类。",
+      onOk: async () => {
+        await Promise.all((attributes.data || []).filter((attribute) => selectedAttributeIds.includes(Number(attribute.id)))
+          .map((attribute) => updateAttributeAssociation(attribute, false)));
+        message.success("已取消属性关联");
+        setSelectedAttributeIds([]);
+        await attributes.refresh();
+      },
+    });
+  };
+  const associatedAttributes = (attributes.data || []).filter((attribute) =>
+    (attribute.categoryIds || []).map(Number).includes(Number(attributeOwner?.id)),
+  );
+  const unassociatedAttributes = (attributes.data || []).filter((attribute) =>
+    !(attribute.categoryIds || []).map(Number).includes(Number(attributeOwner?.id)),
+  );
   const columns: ColumnsType<Row> = [
     {
       title: "分类名称",
@@ -2572,14 +2599,13 @@ function Categories() {
         title={`${attributeOwner?.name || ""} · 属性管理`}
         width={760}
         onCancel={() => setAttributeOwner(undefined)}
-        onOk={() => void saveAttributes()}
-        okText="保存关联"
+        footer={<Space><Button onClick={() => setAttributeOwner(undefined)}>关闭</Button><Button disabled={!selectedAttributeIds.length} onClick={detachAttributes}>批量取消关联</Button><Button type="primary" onClick={() => { setPendingAttributeIds([]); setAttributeAddOpen(true); }}>添加关联属性</Button></Space>}
       >
-        <Alert type="info" showIcon message="勾选该分类直接拥有的属性；上级分类属性会自动继承，无需重复关联。" style={{ marginBottom: 16 }} />
+        <Alert type="info" showIcon message="这里只显示当前分类直接关联的属性；上级分类属性仍会自动继承。" style={{ marginBottom: 16 }} />
         <Table<Row>
           rowKey="id"
-          dataSource={attributes.data || []}
-          searchPlaceholder="搜索属性名称、编码、分组或输入方式"
+          dataSource={associatedAttributes}
+          searchPlaceholder="搜索已关联属性的名称、编码或分组"
           rowSelection={{
             selectedRowKeys: selectedAttributeIds,
             onChange: (keys) => setSelectedAttributeIds(keys.map(Number)),
@@ -2589,6 +2615,29 @@ function Categories() {
             { title: "分组", dataIndex: "groupName" },
             { title: "输入方式", dataIndex: "inputType" },
             { title: "状态", dataIndex: "status", render: (value) => Number(value) === 1 ? <Tag color="green">启用</Tag> : <Tag>停用</Tag> },
+          ]}
+        />
+      </Modal>
+      <Modal
+        open={attributeAddOpen}
+        title={`${attributeOwner?.name || ""} · 添加关联属性`}
+        width={760}
+        onCancel={() => setAttributeAddOpen(false)}
+        onOk={() => void addAttributes()}
+        okText={`添加所选属性${pendingAttributeIds.length ? `（${pendingAttributeIds.length}）` : ""}`}
+        okButtonProps={{ disabled: !pendingAttributeIds.length }}
+      >
+        <Alert type="info" showIcon message="以下仅列出尚未与当前分类直接关联的属性，可搜索后批量选择。" style={{ marginBottom: 16 }} />
+        <Table<Row>
+          rowKey="id"
+          dataSource={unassociatedAttributes}
+          searchPlaceholder="搜索未关联属性的名称、编码、分组或输入方式"
+          rowSelection={{ selectedRowKeys: pendingAttributeIds, onChange: (keys) => setPendingAttributeIds(keys.map(Number)) }}
+          columns={[
+            { title: "属性名称", render: (_, row) => <><strong>{row.name}</strong><div className="subline">{row.code}</div></> },
+            { title: "分组", dataIndex: "groupName" },
+            { title: "输入方式", dataIndex: "inputType" },
+            { title: "已关联分类", render: (_, row) => `${row.categoryIds?.length || 0} 个` },
           ]}
         />
       </Modal>
