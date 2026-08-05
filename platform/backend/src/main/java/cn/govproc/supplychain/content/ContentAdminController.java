@@ -101,11 +101,15 @@ public class ContentAdminController {
     @PostMapping("/platform/{platformId}/products") @ResponseStatus(HttpStatus.CREATED) @Transactional
     Map<String, Object> addPlatformProduct(@PathVariable long platformId, @Valid @RequestBody PlatformProductRequest request) {
         requirePlatform(platformId);
+        requireSku(request.skuId());
+        String productUrl=normalizeProductUrl(request.productUrl());
         jdbc.sql("""
             INSERT INTO product_platform(platform_id,sku_id,platform_price,product_url,listing_status,click_count)
             VALUES(:platformId,:skuId,:platformPrice,:productUrl,:listingStatus,0)
+            ON DUPLICATE KEY UPDATE id=LAST_INSERT_ID(id),platform_price=VALUES(platform_price),
+              product_url=VALUES(product_url),listing_status=VALUES(listing_status),deleted_at=NULL,updated_at=NOW()
             """).param("platformId", platformId).param("skuId", request.skuId())
-            .param("platformPrice", request.platformPrice()).param("productUrl", request.productUrl())
+            .param("platformPrice", request.platformPrice()).param("productUrl", productUrl)
             .param("listingStatus", request.listingStatus()).update();
         return Map.of("id", jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single());
     }
@@ -118,9 +122,19 @@ public class ContentAdminController {
                 listing_status=:listingStatus
             WHERE id=:id AND platform_id=:platformId AND deleted_at IS NULL
             """).param("id", id).param("platformId", platformId)
-            .param("platformPrice", request.platformPrice()).param("productUrl", request.productUrl())
+            .param("platformPrice", request.platformPrice()).param("productUrl", normalizeProductUrl(request.productUrl()))
             .param("listingStatus", request.listingStatus()).update();
         if(changed==0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "平台商品不存在");
+    }
+
+    private String normalizeProductUrl(String productUrl) {
+        return productUrl==null ? "" : productUrl.trim();
+    }
+
+    private void requireSku(long skuId) {
+        Integer count=jdbc.sql("SELECT COUNT(*) FROM product_sku WHERE id=:id AND deleted_at IS NULL")
+          .param("id",skuId).query(Integer.class).single();
+        if(count==0) throw new IllegalArgumentException("所选商品SKU不存在或已删除，请刷新商品列表后重试");
     }
 
     @DeleteMapping("/platform/{platformId}/products/{id}") @ResponseStatus(HttpStatus.NO_CONTENT) @Transactional
@@ -252,7 +266,7 @@ public class ContentAdminController {
                                @NotNull Integer sortOrder, @NotNull Integer status) {}
     public record PlatformProductRequest(@NotNull Long skuId,
         @NotNull @DecimalMin("0") BigDecimal platformPrice,String productUrl,
-        @NotNull Integer listingStatus) {}
+        @NotNull @Min(0) @Max(1) Integer listingStatus) {}
     public record SolutionProductRequest(@NotNull Long skuId,
         @Min(1) @Max(9999) int defaultQuantity, @Min(0) @Max(1) int requiredItem,
         @NotNull Integer sortOrder) {}

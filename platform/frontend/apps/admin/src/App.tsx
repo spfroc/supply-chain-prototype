@@ -2420,7 +2420,7 @@ function PortalManager({ module }: { module: Module }) {
     setRelationEditing(row);
     relationForm.resetFields();
     relationForm.setFieldsValue(
-      row || { skuId: selectableSkus[0]?.id||selectableSkus[0]?.skuId, listingStatus: 1 },
+      row || { skuId: selectableSkus[0]?.id||selectableSkus[0]?.skuId, productUrl: "", listingStatus: 1 },
     );
     setRelationEditorOpen(true);
   };

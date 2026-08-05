@@ -230,13 +230,22 @@ Case "PORTAL-PLATFORM-PRODUCT-001" "平台与商品多对多关联并保存平�
   $platformId=[long]$platformCreated.Data.id
   $sku=(Invoke-Api GET "/api/public/catalog/products?enterpriseId=1" $null @{}).Data|Select-Object -First 1
   $relation=Invoke-Api POST "/api/admin/content/platform/$platformId/products" @{
-    skuId=$sku.skuId;platformPrice=123.45;productUrl="https://example.com/item/$stamp";listingStatus=1
+    skuId=$sku.skuId;platformPrice=123.45;listingStatus=1
   } $adminHeaders
   Expect-Status $relation @(201)
   $relationId=[long]$relation.Data.id
   $public=(Invoke-Api GET "/api/public/portal/platforms/$platformId/products" $null @{}).Data
-  if($public.products.Count -ne 1 -or [decimal]$public.products[0].platformPrice -ne 123.45 -or $public.products[0].productUrl -notmatch "$stamp"){
-    throw "平台商品关联或平台字段未同步"
+  if($public.products.Count -ne 1 -or [decimal]$public.products[0].platformPrice -ne 123.45 -or $public.products[0].productUrl){
+    throw "平台商品无链接关联未正确保存"
+  }
+  $duplicate=Invoke-Api POST "/api/admin/content/platform/$platformId/products" @{
+    skuId=$sku.skuId;platformPrice=122.45;productUrl="https://example.com/item/$stamp";listingStatus=1
+  } $adminHeaders
+  Expect-Status $duplicate @(201)
+  if([long]$duplicate.Data.id -ne $relationId){throw "重复关联未复用原关联记录"}
+  $public=(Invoke-Api GET "/api/public/portal/platforms/$platformId/products" $null @{}).Data
+  if([decimal]$public.products[0].platformPrice -ne 122.45 -or $public.products[0].productUrl -notmatch "$stamp"){
+    throw "重复关联未更新平台价格和链接"
   }
   $catalogProduct=(Invoke-Api GET "/api/public/catalog/products?enterpriseId=1" $null @{}).Data |
     Where-Object skuId -eq $sku.skuId | Select-Object -First 1
