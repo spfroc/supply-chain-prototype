@@ -1,5 +1,7 @@
 package cn.govproc.supplychain.business;
 
+import cn.govproc.supplychain.common.PageResult;
+import cn.govproc.supplychain.common.PageSupport;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
@@ -19,13 +21,29 @@ public class AttributeAdminController {
     public AttributeAdminController(JdbcClient jdbc) { this.jdbc=jdbc; }
 
     @GetMapping
-    List<Map<String,Object>> definitions() {
-        var rows=jdbc.sql("""
+    Object definitions(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                       @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status,
+                       @RequestParam(required=false) Long categoryId,@RequestParam(required=false) Boolean associated) {
+        String base="""
           SELECT a.id,a.code,a.name,a.group_name AS groupName,a.attribute_type AS attributeType,
             a.input_type AS inputType,a.unit,a.required_flag AS requiredFlag,a.filterable,a.searchable,
             a.visible_flag AS visibleFlag,a.allow_custom AS allowCustom,a.sort_order AS sortOrder,a.status
-          FROM attribute_definition a WHERE a.deleted_at IS NULL ORDER BY a.sort_order,a.id
-          """).query().listOfRows();
+          FROM attribute_definition a WHERE a.deleted_at IS NULL
+          """;
+        var params=new LinkedHashMap<String,Object>();
+        if(categoryId!=null&&associated!=null) {
+            base += Boolean.TRUE.equals(associated)
+              ? " AND EXISTS(SELECT 1 FROM category_attribute ca WHERE ca.attribute_id=a.id AND ca.category_id=:categoryId)"
+              : " AND NOT EXISTS(SELECT 1 FROM category_attribute ca WHERE ca.attribute_id=a.id AND ca.category_id=:categoryId)";
+            params.put("categoryId",categoryId);
+        }
+        if(page==null) return enrich(jdbc.sql(base+" ORDER BY sortOrder,id").params(params).query().listOfRows());
+        var result=PageSupport.query(jdbc,base,"q.sortOrder,q.id",params,page,pageSize,keyword,status,
+          List.of("code","name","groupName","attributeType","inputType","unit"),"status");
+        return new PageResult<>(enrich(result.records()),result.total(),result.page(),result.pageSize());
+    }
+
+    private List<Map<String,Object>> enrich(List<Map<String,Object>> rows) {
         var result=new ArrayList<Map<String,Object>>();
         for(var source:rows) {
             var row=new LinkedHashMap<>(source);

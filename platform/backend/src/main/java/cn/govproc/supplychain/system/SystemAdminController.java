@@ -1,5 +1,6 @@
 package cn.govproc.supplychain.system;
 
+import cn.govproc.supplychain.common.PageSupport;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
@@ -57,8 +58,9 @@ public class SystemAdminController {
     }
 
     @GetMapping("/users")
-    List<Map<String, Object>> users() {
-        return jdbc.sql("""
+    Object users(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                 @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
+        String base="""
             SELECT u.id, u.username, u.real_name AS realName, u.phone, u.email, u.status,
                    DATE_FORMAT(u.last_login_at, '%Y-%m-%d %H:%i:%s') AS lastLoginAt,
                    DATE_FORMAT(u.created_at, '%Y-%m-%d %H:%i:%s') AS createdAt,
@@ -68,8 +70,9 @@ public class SystemAdminController {
             LEFT JOIN sys_admin_user_role ur ON ur.user_id = u.id
             LEFT JOIN sys_role r ON r.id = ur.role_id
             WHERE u.deleted_at IS NULL
-            GROUP BY u.id ORDER BY u.id
-            """).query().listOfRows();
+            GROUP BY u.id
+            """;
+        return pagedOrAll(base,"q.id",page,pageSize,keyword,status,List.of("username","realName","phone","email","roleNames"),"status");
     }
 
     @PostMapping("/users")
@@ -116,24 +119,28 @@ public class SystemAdminController {
     }
 
     @GetMapping("/roles")
-    List<Map<String, Object>> roles() {
-        return jdbc.sql("""
+    Object roles(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                 @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
+        String base="""
             SELECT r.id, r.role_code AS roleCode, r.name, r.description, r.status,
                    COUNT(DISTINCT ur.user_id) AS userCount,
                    GROUP_CONCAT(rp.permission_id ORDER BY rp.permission_id) AS permissionIds
             FROM sys_role r
             LEFT JOIN sys_admin_user_role ur ON ur.role_id=r.id
             LEFT JOIN sys_role_permission rp ON rp.role_id=r.id
-            GROUP BY r.id ORDER BY r.id
-            """).query().listOfRows();
+            GROUP BY r.id
+            """;
+        return pagedOrAll(base,"q.id",page,pageSize,keyword,status,List.of("roleCode","name","description"),"status");
     }
 
     @GetMapping("/permissions")
-    List<Map<String, Object>> permissions() {
-        return jdbc.sql("""
+    Object permissions(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                       @RequestParam(defaultValue="") String keyword) {
+        String base="""
             SELECT id, permission_code AS permissionCode, name, module, description
-            FROM sys_permission ORDER BY module, id
-            """).query().listOfRows();
+            FROM sys_permission
+            """;
+        return pagedOrAll(base,"q.module,q.id",page,pageSize,keyword,null,List.of("permissionCode","name","module","description"),null);
     }
 
     @PostMapping("/roles")
@@ -172,23 +179,27 @@ public class SystemAdminController {
     }
 
     @GetMapping("/logs")
-    List<Map<String, Object>> logs() {
-        return jdbc.sql("""
+    Object logs(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                @RequestParam(defaultValue="") String keyword) {
+        String base="""
             SELECT id, operator_type AS operatorType, operator_id AS operatorId, module, action,
               target_type AS targetType, target_id AS targetId, ip, request_id AS requestId, result,
               DATE_FORMAT(created_at, '%Y-%m-%d %H:%i:%s') AS createdAt
-            FROM operation_log ORDER BY id DESC LIMIT 200
-            """).query().listOfRows();
+            FROM operation_log
+            """;
+        return pagedOrAll(base,"q.id DESC",page,pageSize,keyword,null,List.of("operatorType","module","action","targetType","targetId","ip","requestId","result"),null);
     }
 
     @GetMapping("/configs")
-    List<Map<String, Object>> configs() {
-        return jdbc.sql("""
+    Object configs(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                   @RequestParam(defaultValue="") String keyword) {
+        String base="""
             SELECT id, config_key AS configKey, config_value AS configValue, value_type AS valueType,
               group_name AS groupName, description, is_public AS isPublic,
               DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updatedAt
-            FROM system_config ORDER BY group_name, id
-            """).query().listOfRows();
+            FROM system_config
+            """;
+        return pagedOrAll(base,"q.groupName,q.id",page,pageSize,keyword,null,List.of("configKey","configValue","groupName","description"),null);
     }
 
     @PutMapping("/configs/{id}")
@@ -202,24 +213,30 @@ public class SystemAdminController {
     }
 
     @GetMapping("/options")
-    List<Map<String, Object>> options(
+    Object options(
         @RequestParam(defaultValue = "LOGISTICS_COMPANY") String type,
-        @RequestParam(required = false) Boolean enabled
+        @RequestParam(required = false) Boolean enabled,
+        @RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+        @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status
     ) {
         String statusFilter = Boolean.TRUE.equals(enabled) ? " AND status=1" : "";
-        return jdbc.sql("""
+        String base="""
             SELECT id, option_type AS optionType, label, option_value AS optionValue,
               sort_order AS sortOrder, status,
               DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updatedAt
             FROM system_option
             WHERE option_type=:type AND deleted_at IS NULL
-            """ + statusFilter + " ORDER BY sort_order,id")
-            .param("type", type).query().listOfRows();
+            """ + statusFilter;
+        var params=Map.of("type",type);
+        if(page==null) return jdbc.sql(base+" ORDER BY sortOrder,id").params(params).query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.sortOrder,q.id",params,page,pageSize,keyword,status,
+          List.of("label","optionValue"),"status");
     }
 
     @GetMapping("/option-groups")
-    List<Map<String, Object>> optionGroups() {
-        return jdbc.sql("""
+    Object optionGroups(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                        @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
+        String base="""
             SELECT g.id,g.option_code AS optionCode,g.option_name AS optionName,
               g.control_type AS controlType,g.sort_order AS sortOrder,g.status,
               COUNT(o.id) AS optionCount,
@@ -227,8 +244,8 @@ public class SystemAdminController {
             FROM system_option_group g
             LEFT JOIN system_option o ON o.option_type=g.option_code AND o.deleted_at IS NULL
             GROUP BY g.id
-            ORDER BY g.sort_order,g.id
-            """).query().listOfRows();
+            """;
+        return pagedOrAll(base,"q.sortOrder,q.id",page,pageSize,keyword,status,List.of("optionCode","optionName","controlType"),"status");
     }
 
     @PostMapping("/option-groups")
@@ -312,6 +329,12 @@ public class SystemAdminController {
 
     private long count(String sql) {
         return jdbc.sql(sql).query(Long.class).single();
+    }
+
+    private Object pagedOrAll(String base,String order,Integer page,int pageSize,String keyword,Integer status,
+                              List<String> searchColumns,String statusColumn) {
+        if(page==null) return jdbc.sql(base+" ORDER BY "+order.replace("q.","")).query().listOfRows();
+        return PageSupport.query(jdbc,base,order,Map.of(),page,pageSize,keyword,status,searchColumns,statusColumn);
     }
 
     private void replaceUserRoles(long userId, List<Long> roleIds) {

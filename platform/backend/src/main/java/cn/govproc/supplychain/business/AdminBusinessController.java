@@ -1,5 +1,6 @@
 package cn.govproc.supplychain.business;
 
+import cn.govproc.supplychain.common.PageSupport;
 import cn.govproc.supplychain.order.OrderInventoryService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
@@ -33,8 +34,9 @@ public class AdminBusinessController {
     }
 
     @GetMapping("/products")
-    List<Map<String,Object>> products() {
-        return jdbc.sql("""
+    Object products(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                    @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
+        String base="""
           SELECT p.id,p.spu_code AS spuCode,p.title,p.summary,p.main_image AS mainImage,
             JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')) AS gallery,
             JSON_UNQUOTE(JSON_EXTRACT(p.attributes_json,'$.content')) AS attributes,
@@ -66,8 +68,11 @@ public class AdminBusinessController {
             WHERE o.payment_status=2 AND o.order_status<>4 AND o.refund_status=0
             GROUP BY sku.spu_id
           ) sales ON sales.spu_id=p.id
-          WHERE p.deleted_at IS NULL ORDER BY p.id DESC
-          """).query().listOfRows();
+          WHERE p.deleted_at IS NULL
+          """;
+        if(page==null) return jdbc.sql(base+" ORDER BY id DESC").query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
+          List.of("spuCode","title","summary","skuCode"),"status");
     }
 
     @PostMapping("/products") @ResponseStatus(HttpStatus.CREATED) @Transactional
@@ -179,15 +184,19 @@ public class AdminBusinessController {
     }
 
     @GetMapping("/enterprises")
-    List<Map<String,Object>> enterprises() {
-        return jdbc.sql("""
+    Object enterprises(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                       @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
+        String base="""
           SELECT e.id,e.name,e.credit_code AS creditCode,e.contact_name AS contactName,e.contact_phone AS contactPhone,
             e.address,e.status,COUNT(DISTINCT u.id) AS memberCount,MAX(a.name) AS agreementName,
             DATE_FORMAT(e.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
           FROM enterprise e LEFT JOIN enterprise_user u ON u.enterprise_id=e.id AND u.deleted_at IS NULL
           LEFT JOIN agreement a ON a.enterprise_id=e.id AND a.status=1 AND a.deleted_at IS NULL
-          WHERE e.deleted_at IS NULL GROUP BY e.id ORDER BY e.id DESC
-          """).query().listOfRows();
+          WHERE e.deleted_at IS NULL GROUP BY e.id
+          """;
+        if(page==null) return jdbc.sql(base+" ORDER BY id DESC").query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
+          List.of("name","creditCode","contactName","contactPhone","address"),"status");
     }
 
     @PostMapping("/enterprises") @ResponseStatus(HttpStatus.CREATED)
@@ -219,25 +228,34 @@ public class AdminBusinessController {
     }
 
     @GetMapping("/enterprises/{enterpriseId}/members")
-    List<Map<String,Object>> enterpriseMembers(@PathVariable long enterpriseId) {
-        return jdbc.sql("""
+    Object enterpriseMembers(@PathVariable long enterpriseId,@RequestParam(required=false) Integer page,
+                             @RequestParam(defaultValue="10") int pageSize,@RequestParam(defaultValue="") String keyword,
+                             @RequestParam(required=false) Integer status) {
+        String base="""
           SELECT id,username,real_name AS realName,phone,role_code AS roleCode,status,
             DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
           FROM enterprise_user
-          WHERE enterprise_id=:enterpriseId AND deleted_at IS NULL ORDER BY id
-          """).param("enterpriseId",enterpriseId).query().listOfRows();
+          WHERE enterprise_id=:enterpriseId AND deleted_at IS NULL
+          """;
+        var params=Map.of("enterpriseId",enterpriseId);
+        if(page==null) return jdbc.sql(base+" ORDER BY id").params(params).query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.id",params,page,pageSize,keyword,status,
+          List.of("username","realName","phone","roleCode"),"status");
     }
 
     @GetMapping("/enterprise-users")
-    List<Map<String,Object>> enterpriseUsers() {
-        return jdbc.sql("""
+    Object enterpriseUsers(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                           @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
+        String base="""
           SELECT u.id,u.enterprise_id AS enterpriseId,e.name AS enterpriseName,u.username,
             u.real_name AS realName,u.phone,u.role_code AS roleCode,u.status,
             DATE_FORMAT(u.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
           FROM enterprise_user u JOIN enterprise e ON e.id=u.enterprise_id
           WHERE u.deleted_at IS NULL AND e.deleted_at IS NULL
-          ORDER BY u.id DESC
-          """).query().listOfRows();
+          """;
+        if(page==null) return jdbc.sql(base+" ORDER BY id DESC").query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
+          List.of("enterpriseName","username","realName","phone","roleCode"),"status");
     }
 
     @PostMapping("/enterprises/{enterpriseId}/members") @ResponseStatus(HttpStatus.CREATED)
@@ -294,15 +312,19 @@ public class AdminBusinessController {
     }
 
     @GetMapping("/agreements")
-    List<Map<String,Object>> agreements() {
-        return jdbc.sql("""
+    Object agreements(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                      @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
+        String base="""
           SELECT a.id,a.agreement_no AS agreementNo,a.name,a.enterprise_id AS enterpriseId,e.name AS enterpriseName,
             a.amount,DATE_FORMAT(a.effective_date,'%Y-%m-%d') AS effectiveDate,
             DATE_FORMAT(a.expiry_date,'%Y-%m-%d') AS expiryDate,a.status,COUNT(ai.id) AS itemCount
           FROM agreement a JOIN enterprise e ON e.id=a.enterprise_id
           LEFT JOIN agreement_item ai ON ai.agreement_id=a.id AND ai.deleted_at IS NULL
-          WHERE a.deleted_at IS NULL GROUP BY a.id ORDER BY a.id DESC
-          """).query().listOfRows();
+          WHERE a.deleted_at IS NULL GROUP BY a.id
+          """;
+        if(page==null) return jdbc.sql(base+" ORDER BY id DESC").query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
+          List.of("agreementNo","name","enterpriseName"),"status");
     }
 
     @PostMapping("/agreements") @ResponseStatus(HttpStatus.CREATED) @Transactional
@@ -340,20 +362,25 @@ public class AdminBusinessController {
     }
 
     @GetMapping("/orders")
-    List<Map<String,Object>> orders() {
-        return jdbc.sql("""
+    Object orders(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                  @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
+        String base="""
           SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,o.payable_amount AS payableAmount,
             o.payment_status AS paymentStatus,o.order_status AS orderStatus,o.refund_status AS refundStatus,
             o.refund_amount AS refundAmount,
             DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,COUNT(oi.id) AS itemKinds,SUM(oi.quantity) AS itemCount
           FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id LEFT JOIN order_item oi ON oi.order_main_id=o.id
-          GROUP BY o.id ORDER BY o.id DESC
-          """).query().listOfRows();
+          GROUP BY o.id
+          """;
+        if(page==null) return jdbc.sql(base+" ORDER BY id DESC").query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
+          List.of("orderNo","enterpriseName"),"orderStatus");
     }
 
     @GetMapping("/agreement-orders")
-    List<Map<String,Object>> agreementOrders() {
-        return jdbc.sql("""
+    Object agreementOrders(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                           @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
+        String base="""
           SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,a.name AS agreementName,
             o.payable_amount AS payableAmount,o.payment_status AS paymentStatus,
             o.order_status AS orderStatus,o.refund_status AS refundStatus,o.refund_amount AS refundAmount,
@@ -361,13 +388,17 @@ public class AdminBusinessController {
             COUNT(oi.id) AS itemKinds,SUM(oi.quantity) AS itemCount
           FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id JOIN agreement a ON a.id=o.agreement_id
           LEFT JOIN order_item oi ON oi.order_main_id=o.id
-          GROUP BY o.id,a.id ORDER BY o.id DESC
-          """).query().listOfRows();
+          GROUP BY o.id,a.id
+          """;
+        if(page==null) return jdbc.sql(base+" ORDER BY id DESC").query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
+          List.of("orderNo","enterpriseName","agreementName"),"orderStatus");
     }
 
     @GetMapping("/platform-orders")
-    List<Map<String,Object>> platformOrders() {
-        return jdbc.sql("""
+    Object platformOrders(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                          @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
+        String base="""
           SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,o.payable_amount AS payableAmount,
             o.payment_status AS paymentStatus,o.order_status AS orderStatus,o.refund_status AS refundStatus,
             o.refund_amount AS refundAmount,DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,
@@ -381,8 +412,11 @@ public class AdminBusinessController {
             JOIN portal_resource pr ON pr.id=pp.platform_id AND pr.resource_type='PLATFORM' AND pr.deleted_at IS NULL
             GROUP BY oi2.order_main_id
           ) platforms ON platforms.order_main_id=o.id
-          GROUP BY o.id,platforms.platformNames ORDER BY o.id DESC
-          """).query().listOfRows();
+          GROUP BY o.id,platforms.platformNames
+          """;
+        if(page==null) return jdbc.sql(base+" ORDER BY id DESC").query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
+          List.of("orderNo","enterpriseName","platformNames"),"orderStatus");
     }
 
     @GetMapping("/orders/{id}")

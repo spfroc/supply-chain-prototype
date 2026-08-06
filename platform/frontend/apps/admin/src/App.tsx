@@ -34,6 +34,17 @@ type Row = Record<string, any>;
 
 type ManagedTableProps<T extends Row> = TableProps<T> & {
   searchPlaceholder?: string;
+  server?: {
+    total: number;
+    page: number;
+    pageSize: number;
+    keyword: string;
+    status?: string;
+    setKeyword: (value: string) => void;
+    setStatus: (value?: string) => void;
+    setPage: (page: number, pageSize: number) => void;
+    statusOptions?: { label: string; value: string }[];
+  };
 };
 
 function Table<T extends Row>({
@@ -41,6 +52,7 @@ function Table<T extends Row>({
   pagination,
   rowKey = "id",
   rowSelection,
+  server,
   searchPlaceholder = "搜索当前列表的名称、编码或关键字段",
   ...props
 }: ManagedTableProps<T>) {
@@ -69,7 +81,7 @@ function Table<T extends Row>({
     const children = Array.isArray(row.children) ? filterTree(row.children) : [];
     return matches(row) || children.length ? [{ ...row, ...(children.length ? { children } : {}) }] : [];
   });
-  const filteredRows = filterTree(source);
+  const filteredRows = server ? source : filterTree(source);
   const keyOf = (row: T, index: number): Key =>
     typeof rowKey === "function" ? rowKey(row) : (row[rowKey as string] ?? index);
   const selected = flatRows.filter((row, index) => selectedRowKeys.includes(keyOf(row, index)));
@@ -86,7 +98,9 @@ function Table<T extends Row>({
     URL.revokeObjectURL(url);
   };
   const pager = {
-    pageSize: typeof pagination === "object" ? pagination.pageSize : 10,
+    current: server?.page,
+    total: server?.total,
+    pageSize: server?.pageSize || (typeof pagination === "object" ? pagination.pageSize : 10),
     ...(typeof pagination === "object" ? pagination : {}),
     showSizeChanger: true,
     showQuickJumper: true,
@@ -98,8 +112,8 @@ function Table<T extends Row>({
   return <div className="managed-table">
     <div className="managed-table-toolbar">
       <Space wrap>
-        <Input.Search allowClear value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder={searchPlaceholder} style={{ width: 320 }} />
-        {hasStatus && <Select allowClear value={status} onChange={setStatus} placeholder="全部状态" style={{ width: 130 }} options={[{ label: "启用 / 正常 / 在售", value: "1" }, { label: "停用 / 禁用 / 下架", value: "0" }]} />}
+        <Input.Search allowClear value={server ? server.keyword : keyword} onChange={(event) => server ? server.setKeyword(event.target.value) : setKeyword(event.target.value)} placeholder={searchPlaceholder} style={{ width: 320 }} />
+        {(hasStatus || server) && <Select allowClear value={server ? server.status : status} onChange={(value) => server ? server.setStatus(value) : setStatus(value)} placeholder="全部状态" style={{ width: 150 }} options={server?.statusOptions || [{ label: "启用 / 正常 / 在售", value: "1" }, { label: "停用 / 禁用 / 下架", value: "0" }]} />}
       </Space>
       <Space>
         <span className="selection-summary">已选 {selectedRowKeys.length} 项</span>
@@ -124,6 +138,10 @@ function Table<T extends Row>({
         },
       }}
       pagination={pager}
+      onChange={(nextPagination, filters, sorter, extra) => {
+        if (server) server.setPage(nextPagination.current || 1, nextPagination.pageSize || server.pageSize);
+        props.onChange?.(nextPagination, filters, sorter, extra);
+      }}
     />
   </div>;
 }
@@ -920,14 +938,11 @@ function AdminApp({ logout }: { logout: () => void }) {
 
 function EnterpriseUsers() {
   const {message,modal}=AntApp.useApp();
-  const users=useLoad<Row[]>(()=>rootApi("/api/admin/business/enterprise-users"));
+  const users=usePagedLoad("/api/admin/business/enterprise-users",12);
   const enterprises=useLoad<Row[]>(()=>rootApi("/api/admin/business/enterprises"));
   const [form]=Form.useForm();
   const [editing,setEditing]=useState<Row>();
   const [open,setOpen]=useState(false);
-  const [keyword,setKeyword]=useState("");
-  const filtered=(users.data||[]).filter((row)=>[row.enterpriseName,row.username,row.realName,row.phone]
-    .some((value)=>String(value||"").toLowerCase().includes(keyword.trim().toLowerCase())));
   const show=(row?:Row)=>{
     setEditing(row);
     form.resetFields();
@@ -955,10 +970,9 @@ function EnterpriseUsers() {
   });
   return <>
     <Card className="data-card" title="企业用户列表" extra={<Space>
-      <Input allowClear value={keyword} onChange={(event)=>setKeyword(event.target.value)} placeholder="搜索企业、账号、姓名或手机" style={{width:300}} />
       <Button type="primary" onClick={()=>show()}>＋ 新增企业用户</Button>
     </Space>}>
-      <Table rowKey="id" loading={users.loading} dataSource={filtered} pagination={{pageSize:12,showSizeChanger:false,showTotal:(total)=>`共 ${total} 个用户`}} columns={[
+      <Table rowKey="id" loading={users.loading} dataSource={users.data} server={users.server} searchPlaceholder="搜索企业、账号、姓名或手机" columns={[
         {title:"用户",render:(_:unknown,row:Row)=><div className="user-cell"><i>{String(row.realName||"用").slice(0,1)}</i><span><strong>{row.realName}</strong><small>@{row.username}</small></span></div>},
         {title:"所属企业",dataIndex:"enterpriseName"},{title:"手机号码",dataIndex:"phone"},
         {title:"企业角色",dataIndex:"roleCode",render:(value)=>value==="ENTERPRISE_ADMIN"?<Tag color="blue">企业管理员</Tag>:<Tag>采购员</Tag>},
@@ -993,10 +1007,13 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
         : module === "agreements"
           ? "/agreements"
           : "/orders";
-  const rows = useLoad<Row[]>(
+  const regularRows = useLoad<Row[]>(
     () => rootApi(`/api/admin/business${endpointOverride||endpoint}`),
     [module,endpointOverride],
   );
+  const serverEnabled = true;
+  const pagedRows = usePagedLoad(`/api/admin/business${endpointOverride||endpoint}`, 10, [module,endpointOverride]);
+  const rows = serverEnabled ? pagedRows : regularRows;
   const enterprises = useLoad<Row[]>(() =>
     rootApi("/api/admin/business/enterprises"),
   );
@@ -1041,6 +1058,8 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
   const [memberOpen, setMemberOpen] = useState(false);
   const [memberEditing, setMemberEditing] = useState<Row>();
   const [memberEditorOpen, setMemberEditorOpen] = useState(false);
+  const agreementItemsPage = usePagedLoad(`/api/admin/agreements/${agreement?.id || 0}/items`,10,[agreement?.id],Boolean(agreement));
+  const memberPage = usePagedLoad(`/api/admin/business/enterprises/${memberEnterprise?.id || 0}/members`,10,[memberEnterprise?.id],Boolean(memberEnterprise));
   const business = async (path: string, init?: RequestInit) => {
     const r = await fetch(`/api/admin/business${path}`, {
       ...init,
@@ -1183,7 +1202,6 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
   };
   const openItems = async (row: Row) => {
     setAgreement(row);
-    setItems(await rootApi(`/api/admin/agreements/${row.id}/items`));
     setItemOpen(true);
   };
   const saveItem = async () => {
@@ -1198,7 +1216,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
         body: JSON.stringify(v),
       });
       if (!r.ok) throw new Error("协议商品保存失败");
-      setItems(await rootApi(`/api/admin/agreements/${agreement!.id}/items`));
+      void agreementItemsPage.refresh();
       setMode("entity");
       setEditing(undefined);
       form.resetFields();
@@ -1215,7 +1233,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
           method: "DELETE",
           headers: apiHeaders(),
         });
-        setItems(await rootApi(`/api/admin/agreements/${agreement!.id}/items`));
+        void agreementItemsPage.refresh();
         message.success("已移除");
       },
     });
@@ -1301,7 +1319,6 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
   };
   const loadMembers = async (enterprise: Row) => {
     setMemberEnterprise(enterprise);
-    setMembers(await business(`/enterprises/${enterprise.id}/members`));
     setMemberOpen(true);
   };
   const showMember = (row?: Row) => {
@@ -1323,9 +1340,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
           body: JSON.stringify(values),
         },
       );
-      setMembers(
-        await business(`/enterprises/${memberEnterprise!.id}/members`),
-      );
+      void memberPage.refresh();
       setMemberEditorOpen(false);
       message.success("企业成员已保存");
       void rows.refresh();
@@ -1343,9 +1358,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
             `/enterprises/${memberEnterprise!.id}/members/${row.id}`,
             { method: "DELETE" },
           );
-          setMembers(
-            await business(`/enterprises/${memberEnterprise!.id}/members`),
-          );
+          void memberPage.refresh();
           message.success("企业成员已删除");
           void rows.refresh();
         } catch (e) {
@@ -1622,6 +1635,11 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
           dataSource={rows.data}
           columns={columns}
           scroll={{ x: 1000 }}
+          server={serverEnabled ? {...pagedRows.server,statusOptions:module === "orders" ? [
+            {label:"待付款",value:"0"},{label:"待发货",value:"1"},{label:"运输中",value:"2"},{label:"已完成",value:"3"},{label:"已取消",value:"4"},{label:"部分发货",value:"5"},
+          ] : module === "agreements" ? [{label:"生效中",value:"1"},{label:"已停用",value:"2"}]
+            : module === "products" ? [{label:"在售",value:"1"},{label:"草稿",value:"0"},{label:"已下架",value:"2"}] : undefined} : undefined}
+          searchPlaceholder={module === "enterprises" ? "搜索企业名称、信用代码、联系人或手机" : module === "agreements" ? "搜索协议名称、协议号或签约企业" : module === "orders" ? "搜索订单号、企业、协议或平台" : undefined}
         />
       </Card>
       <Modal
@@ -1835,8 +1853,10 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
         )}
         <Table
           rowKey="id"
-          dataSource={items}
-          pagination={false}
+          loading={agreementItemsPage.loading}
+          dataSource={agreementItemsPage.data}
+          server={agreementItemsPage.server}
+          searchPlaceholder="搜索协议商品名称或SKU"
           columns={[
             { title: "商品", dataIndex: "title" },
             { title: "SKU", dataIndex: "skuCode" },
@@ -1887,8 +1907,10 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
         </Button>
         <Table
           rowKey="id"
-          dataSource={members}
-          pagination={false}
+          loading={memberPage.loading}
+          dataSource={memberPage.data}
+          server={memberPage.server}
+          searchPlaceholder="搜索成员账号、姓名、手机或角色"
           columns={[
             {
               title: "成员",
@@ -1922,8 +1944,6 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
                 <Space>
                   <Button type="link" onClick={() => showMember(r)}>
                     编辑
-                  </Button>
-                  <Button type="link" danger onClick={() => removeMember(r)}>
                   </Button>
                 </Space>
               ),
@@ -2264,7 +2284,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
 
 function AttributeTemplates() {
   const { message, modal } = AntApp.useApp();
-  const rows = useLoad<Row[]>(() => rootApi("/api/admin/business/attributes"));
+  const rows = usePagedLoad("/api/admin/business/attributes",10);
   const categories = useLoad<Row[]>(() => rootApi("/api/admin/business/categories"));
   const [form] = Form.useForm();
   const [optionForm] = Form.useForm();
@@ -2303,7 +2323,7 @@ function AttributeTemplates() {
   return <>
     <Card title="属性模板列表" extra={<Button type="primary" onClick={()=>{setEditing(undefined);form.resetFields();form.setFieldsValue({groupName:"规格参数",attributeType:"BASIC",inputType:"TEXT",requiredFlag:0,filterable:0,searchable:0,visibleFlag:1,allowCustom:0,sortOrder:0,status:1});setOpen(true);}}>新增属性</Button>}>
       <Alert type="info" showIcon message="属性会从一级分类向下继承；下级分类可以追加自己的属性。已被商品使用的属性只能停用。" style={{marginBottom:16}} />
-      <Table rowKey="id" dataSource={rows.data || []} columns={columns} pagination={{pageSize:10}} />
+      <Table rowKey="id" loading={rows.loading} dataSource={rows.data || []} columns={columns} server={rows.server} searchPlaceholder="搜索属性名称、编码、分组或输入方式" />
     </Card>
     <Modal open={open} title={`${editing?"编辑":"新增"}属性`} onCancel={()=>setOpen(false)} onOk={save} width={760}>
       <Form form={form} layout="vertical" className="two-column-form">
@@ -2335,7 +2355,6 @@ function AttributeTemplates() {
 function Categories() {
   const { message, modal } = AntApp.useApp();
   const rows = useLoad<Row[]>(() => rootApi("/api/admin/business/categories"));
-  const attributes = useLoad<Row[]>(() => rootApi("/api/admin/business/attributes"));
   const [form] = Form.useForm();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Row>();
@@ -2343,6 +2362,8 @@ function Categories() {
   const [selectedAttributeIds, setSelectedAttributeIds] = useState<number[]>([]);
   const [attributeAddOpen, setAttributeAddOpen] = useState(false);
   const [pendingAttributeIds, setPendingAttributeIds] = useState<number[]>([]);
+  const associatedAttributePage = usePagedLoad(`/api/admin/business/attributes?categoryId=${attributeOwner?.id || 0}&associated=true`,10,[attributeOwner?.id],Boolean(attributeOwner));
+  const unassociatedAttributePage = usePagedLoad(`/api/admin/business/attributes?categoryId=${attributeOwner?.id || 0}&associated=false`,10,[attributeOwner?.id],Boolean(attributeOwner));
   const show = (row?: Row) => {
     setEditing(row);
     form.resetFields();
@@ -2432,12 +2453,12 @@ function Categories() {
   const addAttributes = async () => {
     if (!attributeOwner) return;
     try {
-      await Promise.all((attributes.data || []).filter((attribute) => pendingAttributeIds.includes(Number(attribute.id)))
+      await Promise.all(unassociatedAttributePage.data.filter((attribute) => pendingAttributeIds.includes(Number(attribute.id)))
         .map((attribute) => updateAttributeAssociation(attribute, true)));
       message.success(`已为“${attributeOwner.name}”添加 ${pendingAttributeIds.length} 个属性`);
       setAttributeAddOpen(false);
       setPendingAttributeIds([]);
-      await attributes.refresh();
+      await Promise.all([associatedAttributePage.refresh(),unassociatedAttributePage.refresh()]);
     } catch (error) { message.error((error as Error).message); }
   };
   const detachAttributes = () => {
@@ -2446,20 +2467,14 @@ function Categories() {
       title: `取消关联 ${selectedAttributeIds.length} 个属性？`,
       content: "只取消与当前分类的直接关联，不影响属性模板及其他分类。",
       onOk: async () => {
-        await Promise.all((attributes.data || []).filter((attribute) => selectedAttributeIds.includes(Number(attribute.id)))
+        await Promise.all(associatedAttributePage.data.filter((attribute) => selectedAttributeIds.includes(Number(attribute.id)))
           .map((attribute) => updateAttributeAssociation(attribute, false)));
         message.success("已取消属性关联");
         setSelectedAttributeIds([]);
-        await attributes.refresh();
+        await Promise.all([associatedAttributePage.refresh(),unassociatedAttributePage.refresh()]);
       },
     });
   };
-  const associatedAttributes = (attributes.data || []).filter((attribute) =>
-    (attribute.categoryIds || []).map(Number).includes(Number(attributeOwner?.id)),
-  );
-  const unassociatedAttributes = (attributes.data || []).filter((attribute) =>
-    !(attribute.categoryIds || []).map(Number).includes(Number(attributeOwner?.id)),
-  );
   const columns: ColumnsType<Row> = [
     {
       title: "分类名称",
@@ -2604,7 +2619,9 @@ function Categories() {
         <Alert type="info" showIcon message="这里只显示当前分类直接关联的属性；上级分类属性仍会自动继承。" style={{ marginBottom: 16 }} />
         <Table<Row>
           rowKey="id"
-          dataSource={associatedAttributes}
+          loading={associatedAttributePage.loading}
+          dataSource={associatedAttributePage.data}
+          server={associatedAttributePage.server}
           searchPlaceholder="搜索已关联属性的名称、编码或分组"
           rowSelection={{
             selectedRowKeys: selectedAttributeIds,
@@ -2630,7 +2647,9 @@ function Categories() {
         <Alert type="info" showIcon message="以下仅列出尚未与当前分类直接关联的属性，可搜索后批量选择。" style={{ marginBottom: 16 }} />
         <Table<Row>
           rowKey="id"
-          dataSource={unassociatedAttributes}
+          loading={unassociatedAttributePage.loading}
+          dataSource={unassociatedAttributePage.data}
+          server={unassociatedAttributePage.server}
           searchPlaceholder="搜索未关联属性的名称、编码、分组或输入方式"
           rowSelection={{ selectedRowKeys: pendingAttributeIds, onChange: (keys) => setPendingAttributeIds(keys.map(Number)) }}
           columns={[
@@ -2656,8 +2675,11 @@ function PortalManager({ module }: { module: Module }) {
     contents: { title: "门户内容列表", type: "content", name: "内容" },
   };
   const current = meta[module];
+  const isBrand = module === "brands";
   const endpoint = `/api/admin/content/${current.type}`;
-  const rows = useLoad<Row[]>(() => rootApi(endpoint), [module]);
+  const resourceRows = usePagedLoad(endpoint,10,[module]);
+  const brandRows = usePagedLoad("/api/admin/content/brands/list", 10, [module]);
+  const rows = isBrand ? brandRows : resourceRows;
   const products = useLoad<Row[]>(() =>
     rootApi("/api/admin/business/products"),
   );
@@ -2677,7 +2699,8 @@ function PortalManager({ module }: { module: Module }) {
   const [solutionItemEditing, setSolutionItemEditing] = useState<Row>();
   const [solutionItemEditorOpen, setSolutionItemEditorOpen] = useState(false);
   const [solutionItemForm] = Form.useForm();
-  const isBrand = module === "brands";
+  const platformProductsPage = usePagedLoad(`/api/admin/content/platform/${platform?.id || 0}/products`,10,[platform?.id],Boolean(platform));
+  const solutionProductsPage = usePagedLoad(`/api/admin/content/solution/${solution?.id || 0}/products`,10,[solution?.id],Boolean(solution));
   const show = (row?: Row) => {
     setEditing(row);
     form.resetFields();
@@ -2725,9 +2748,6 @@ function PortalManager({ module }: { module: Module }) {
     });
   const loadPlatformProducts = async (row: Row) => {
     setPlatform(row);
-    setRelations(
-      await rootApi(`/api/admin/content/platform/${row.id}/products`),
-    );
     setProductOpen(true);
   };
   const showRelation = (row?: Row) => {
@@ -2751,9 +2771,7 @@ function PortalManager({ module }: { module: Module }) {
         const data = await response.json().catch(() => ({}));
         throw new Error(data.detail || "平台商品保存失败");
       }
-      setRelations(
-        await rootApi(`/api/admin/content/platform/${platform!.id}/products`),
-      );
+      void platformProductsPage.refresh();
       setRelationEditorOpen(false);
       message.success("平台商品已保存");
     } catch (error) {
@@ -2768,15 +2786,12 @@ function PortalManager({ module }: { module: Module }) {
           `/api/admin/content/platform/${platform!.id}/products/${row.id}`,
           { method: "DELETE", headers: apiHeaders() },
         );
-        setRelations(
-          await rootApi(`/api/admin/content/platform/${platform!.id}/products`),
-        );
+        void platformProductsPage.refresh();
         message.success("平台商品已移除");
       },
     });
   const loadSolutionProducts = async (row: Row) => {
     setSolution(row);
-    setSolutionItems(await rootApi(`/api/admin/content/solution/${row.id}/products`));
     setSolutionItemsOpen(true);
   };
   const showSolutionItem = (row?: Row) => {
@@ -2800,7 +2815,7 @@ function PortalManager({ module }: { module: Module }) {
         const data = await response.json().catch(() => ({}));
         throw new Error(data.detail || "方案商品保存失败");
       }
-      setSolutionItems(await rootApi(`/api/admin/content/solution/${solution!.id}/products`));
+      void solutionProductsPage.refresh();
       setSolutionItemEditorOpen(false);
       message.success("方案商品已保存");
     } catch (error) {
@@ -2815,7 +2830,7 @@ function PortalManager({ module }: { module: Module }) {
           method: "DELETE",
           headers: apiHeaders(),
         });
-        setSolutionItems(await rootApi(`/api/admin/content/solution/${solution!.id}/products`));
+        void solutionProductsPage.refresh();
         message.success("方案商品已移除");
       },
     });
@@ -2895,6 +2910,8 @@ function PortalManager({ module }: { module: Module }) {
           loading={rows.loading}
           dataSource={rows.data}
           columns={columns}
+          server={isBrand ? brandRows.server : resourceRows.server}
+          searchPlaceholder={isBrand ? "搜索品牌名称或说明" : `搜索${current.name}名称、说明或链接`}
         />
       </Card>
       <Modal
@@ -2993,8 +3010,10 @@ function PortalManager({ module }: { module: Module }) {
         </Space>
         <Table
           rowKey="id"
-          dataSource={relations}
-          pagination={false}
+          loading={platformProductsPage.loading}
+          dataSource={platformProductsPage.data}
+          server={platformProductsPage.server}
+          searchPlaceholder="搜索平台商品名称、SKU或平台链接"
           columns={[
             {
               title: "商品",
@@ -3100,8 +3119,10 @@ function PortalManager({ module }: { module: Module }) {
         </Space>
         <Table
           rowKey="id"
-          dataSource={solutionItems}
-          pagination={false}
+          loading={solutionProductsPage.loading}
+          dataSource={solutionProductsPage.data}
+          server={solutionProductsPage.server}
+          searchPlaceholder="搜索方案商品名称或SKU"
           columns={[
             {
               title: "商品",
@@ -3189,6 +3210,49 @@ function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []) {
   return { data, loading, refresh };
 }
 
+type PageResult<T> = { records: T[]; total: number; page: number; pageSize: number; totalPages: number };
+function usePagedLoad(endpoint: string, initialPageSize = 10, deps: unknown[] = [], enabled = true) {
+  const { message } = AntApp.useApp();
+  const [data, setData] = useState<Row[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPageValue] = useState(1);
+  const [pageSize, setPageSize] = useState(initialPageSize);
+  const [keyword, setKeywordValue] = useState("");
+  const [status, setStatusValue] = useState<string>();
+  const [loading, setLoading] = useState(true);
+  const [revision, setRevision] = useState(0);
+  const load = async () => {
+    setLoading(true);
+    try {
+      const url = new URL(endpoint, window.location.origin);
+      url.searchParams.set("page", String(page));
+      url.searchParams.set("pageSize", String(pageSize));
+      if (keyword.trim()) url.searchParams.set("keyword", keyword.trim());
+      if (status !== undefined) url.searchParams.set("status", status);
+      const result = await rootApi<PageResult<Row>>(url.pathname + url.search);
+      setData(result.records || []);
+      setTotal(Number(result.total || 0));
+      if (result.total > 0 && page > Math.max(1, result.totalPages)) setPageValue(Math.max(1, result.totalPages));
+    } catch (error) { message.error((error as Error).message); }
+    finally { setLoading(false); }
+  };
+  useEffect(() => {
+    if (!enabled) { setData([]); setTotal(0); setLoading(false); return; }
+    const timer = window.setTimeout(() => void load(), keyword ? 300 : 0);
+    return () => window.clearTimeout(timer);
+  }, [endpoint, page, pageSize, keyword, status, revision, enabled, ...deps]);
+  const server = {
+    total, page, pageSize, keyword, status,
+    setKeyword: (value: string) => { setKeywordValue(value); setPageValue(1); },
+    setStatus: (value?: string) => { setStatusValue(value); setPageValue(1); },
+    setPage: (nextPage: number, nextPageSize: number) => {
+      setPageSize(nextPageSize);
+      setPageValue(nextPageSize !== pageSize ? 1 : nextPage);
+    },
+  };
+  return { data, total, loading, server, refresh: async () => setRevision((value) => value + 1) };
+}
+
 function Overview({ go }: { go: (value: Module) => void }) {
   const { data = {}, loading } = useLoad<Row>(() => api("/summary"));
   const metrics = [
@@ -3269,7 +3333,7 @@ function Overview({ go }: { go: (value: Module) => void }) {
 function Users() {
   const { message, modal } = AntApp.useApp();
   const roles = useLoad<Row[]>(() => api("/roles"));
-  const users = useLoad<Row[]>(() => api("/users"));
+  const users = usePagedLoad("/api/admin/system/users",8);
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Row>();
   const [form] = Form.useForm();
@@ -3383,7 +3447,8 @@ function Users() {
         dataSource={users.data}
         columns={columns}
         scroll={{ x: 1050 }}
-        pagination={{ pageSize: 8, showTotal: (n) => `共 ${n} 位用户` }}
+        server={users.server}
+        searchPlaceholder="搜索后台账号、姓名、手机、邮箱或角色"
       />
       <Modal
         open={open}
@@ -3458,7 +3523,7 @@ function Users() {
 
 function Roles() {
   const { message, modal } = AntApp.useApp();
-  const roles = useLoad<Row[]>(() => api("/roles"));
+  const roles = usePagedLoad("/api/admin/system/roles",10);
   const permissions = useLoad<Row[]>(() => api("/permissions"));
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Row>();
@@ -3532,7 +3597,8 @@ function Roles() {
           rowKey="id"
           loading={roles.loading}
           dataSource={roles.data}
-          pagination={false}
+          server={roles.server}
+          searchPlaceholder="搜索角色名称、编码或说明"
           columns={[
             {
               title: "角色名称",
@@ -3628,7 +3694,7 @@ function Roles() {
 }
 
 function Permissions() {
-  const result = useLoad<Row[]>(() => api("/permissions"));
+  const result = usePagedLoad("/api/admin/system/permissions",10);
   return (
     <Card
       className="data-card"
@@ -3639,6 +3705,8 @@ function Permissions() {
         rowKey="id"
         loading={result.loading}
         dataSource={result.data}
+        server={result.server}
+        searchPlaceholder="搜索权限名称、权限编码、模块或说明"
         columns={[
           {
             title: "所属模块",
@@ -3666,7 +3734,7 @@ function Permissions() {
 }
 
 function Logs() {
-  const result = useLoad<Row[]>(() => api("/logs"));
+  const result = usePagedLoad("/api/admin/system/logs",20);
   const [detail, setDetail] = useState<Row>();
   return (
     <Card
@@ -3674,7 +3742,7 @@ function Logs() {
       title="操作日志"
       extra={
         <Space>
-          <Tag color="green">保留最近 200 条</Tag>
+          <Tag color="green">服务端分页查询</Tag>
           <Button onClick={result.refresh}>刷新</Button>
         </Space>
       }
@@ -3683,6 +3751,8 @@ function Logs() {
         rowKey="id"
         loading={result.loading}
         dataSource={result.data}
+        server={result.server}
+        searchPlaceholder="搜索模块、动作、对象、IP、请求ID或结果"
         columns={[
           { title: "操作时间", dataIndex: "createdAt", render: dateTime },
           { title: "模块", dataIndex: "module" },
@@ -3753,7 +3823,7 @@ function Logs() {
 function Configs() {
   const { message } = AntApp.useApp();
   const result = useLoad<Row[]>(() => api("/configs"));
-  const options = useLoad<Row[]>(() => api("/option-groups"));
+  const options = usePagedLoad("/api/admin/system/option-groups",10);
   const [optionForm] = Form.useForm();
   const [valueForm] = Form.useForm();
   const [optionOpen, setOptionOpen] = useState(false);
@@ -3761,12 +3831,9 @@ function Configs() {
   const [managedGroup, setManagedGroup] = useState<Row>();
   const [valueOpen, setValueOpen] = useState(false);
   const [editingValue, setEditingValue] = useState<Row>();
-  const optionValues = useLoad<Row[]>(
-    () =>
-      managedGroup
-        ? api(`/options?type=${encodeURIComponent(managedGroup.optionCode)}`)
-        : Promise.resolve([]),
-    [managedGroup?.optionCode],
+  const optionValues = usePagedLoad(
+    `/api/admin/system/options?type=${encodeURIComponent(managedGroup?.optionCode || "")}`,
+    8,[managedGroup?.optionCode],Boolean(managedGroup),
   );
   const [saving, setSaving] = useState<number>();
   const save = async (row: Row, value: any) => {
@@ -3941,7 +4008,8 @@ function Configs() {
                     rowKey="id"
                     loading={options.loading}
                     dataSource={options.data || []}
-                    pagination={false}
+                    server={options.server}
+                    searchPlaceholder="搜索选项配置名称、编码或类型"
                     columns={[
                       { title: "选项名称", dataIndex: "optionName" },
                       {
@@ -4067,13 +4135,8 @@ function Configs() {
           rowKey="id"
           loading={optionValues.loading}
           dataSource={optionValues.data || []}
-          pagination={{
-            defaultPageSize: 8,
-            showSizeChanger: true,
-            pageSizeOptions: [8, 15, 30],
-            showTotal: (total) => `共 ${total} 个选项`,
-            showQuickJumper: true,
-          }}
+          server={optionValues.server}
+          searchPlaceholder="搜索选项名称或选项值"
           columns={[
             { title: "选项名称", dataIndex: "label" },
             { title: "选项值", dataIndex: "optionValue" },

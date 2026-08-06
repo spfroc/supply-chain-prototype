@@ -1,5 +1,6 @@
 package cn.govproc.supplychain.content;
 
+import cn.govproc.supplychain.common.PageSupport;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
@@ -35,14 +37,19 @@ public class ContentAdminController {
     }
 
     @GetMapping("/{type}")
-    List<Map<String, Object>> list(@PathVariable String type) {
-        return jdbc.sql("""
+    Object list(@PathVariable String type,@RequestParam(required=false) Integer page,
+                @RequestParam(defaultValue="10") int pageSize,@RequestParam(defaultValue="") String keyword,
+                @RequestParam(required=false) Integer status) {
+        String base="""
             SELECT id,title,subtitle,description,image_url AS imageUrl,mobile_image_url AS mobileImageUrl,link_url AS linkUrl,
                    sort_order AS sortOrder,status,created_at AS createdAt,updated_at AS updatedAt
             FROM portal_resource
             WHERE resource_type=:type AND deleted_at IS NULL
-            ORDER BY sort_order,id
-            """).param("type", normalize(type)).query().listOfRows();
+            """;
+        var params=Map.of("type",normalize(type));
+        if(page==null) return jdbc.sql(base+" ORDER BY sortOrder,id").params(params).query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.sortOrder,q.id",params,page,pageSize,keyword,status,
+            List.of("title","subtitle","description","linkUrl"),"status");
     }
 
     @PostMapping("/{type}") @ResponseStatus(HttpStatus.CREATED) @Transactional
@@ -84,9 +91,11 @@ public class ContentAdminController {
     }
 
     @GetMapping("/platform/{platformId}/products")
-    List<Map<String, Object>> platformProducts(@PathVariable long platformId) {
+    Object platformProducts(@PathVariable long platformId,@RequestParam(required=false) Integer page,
+                            @RequestParam(defaultValue="10") int pageSize,@RequestParam(defaultValue="") String keyword,
+                            @RequestParam(required=false) Integer status) {
         requirePlatform(platformId);
-        return jdbc.sql("""
+        String base="""
             SELECT pp.id,pp.platform_id AS platformId,pp.sku_id AS skuId,p.title,s.sku_code AS skuCode,
                    pp.platform_price AS platformPrice,pp.product_url AS productUrl,
                    pp.listing_status AS listingStatus,pp.click_count AS clickCount,pp.updated_at AS updatedAt
@@ -94,8 +103,11 @@ public class ContentAdminController {
             JOIN product_sku s ON s.id=pp.sku_id AND s.deleted_at IS NULL
             JOIN product_spu p ON p.id=s.spu_id AND p.deleted_at IS NULL
             WHERE pp.platform_id=:platformId AND pp.deleted_at IS NULL
-            ORDER BY pp.id DESC
-            """).param("platformId", platformId).query().listOfRows();
+            """;
+        var params=Map.of("platformId",platformId);
+        if(page==null) return jdbc.sql(base+" ORDER BY id DESC").params(params).query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.id DESC",params,page,pageSize,keyword,status,
+          List.of("title","skuCode","productUrl"),"listingStatus");
     }
 
     @PostMapping("/platform/{platformId}/products") @ResponseStatus(HttpStatus.CREATED) @Transactional
@@ -147,9 +159,10 @@ public class ContentAdminController {
     }
 
     @GetMapping("/solution/{solutionId}/products")
-    List<Map<String, Object>> solutionProducts(@PathVariable long solutionId) {
+    Object solutionProducts(@PathVariable long solutionId,@RequestParam(required=false) Integer page,
+                            @RequestParam(defaultValue="10") int pageSize,@RequestParam(defaultValue="") String keyword) {
         requireSolution(solutionId);
-        return jdbc.sql("""
+        String base="""
             SELECT si.id,si.solution_id AS solutionId,si.sku_id AS skuId,p.title,
                    COALESCE(NULLIF(p.main_image,''),SUBSTRING_INDEX(JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')),'\n',1)) AS mainImage,
                    s.sku_code AS skuCode,s.member_price AS price,
@@ -159,8 +172,11 @@ public class ContentAdminController {
             JOIN product_sku s ON s.id=si.sku_id AND s.deleted_at IS NULL
             JOIN product_spu p ON p.id=s.spu_id AND p.deleted_at IS NULL
             WHERE si.solution_id=:solutionId AND si.deleted_at IS NULL
-            ORDER BY si.sort_order,si.id
-            """).param("solutionId", solutionId).query().listOfRows();
+            """;
+        var params=Map.of("solutionId",solutionId);
+        if(page==null) return jdbc.sql(base+" ORDER BY sortOrder,id").params(params).query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.sortOrder,q.id",params,page,pageSize,keyword,null,
+          List.of("title","skuCode"),null);
     }
 
     @PostMapping("/solution/{solutionId}/products") @ResponseStatus(HttpStatus.CREATED) @Transactional
@@ -201,11 +217,17 @@ public class ContentAdminController {
     }
 
     @GetMapping("/brands/list")
-    List<Map<String, Object>> brands() {
-        return jdbc.sql("""
+    Object brands(@RequestParam(required=false) Integer page,
+                  @RequestParam(defaultValue="10") int pageSize,
+                  @RequestParam(defaultValue="") String keyword,
+                  @RequestParam(required=false) Integer status) {
+        String base="""
             SELECT id,name,logo,description,sort_order AS sortOrder,status,created_at AS createdAt
-            FROM brand WHERE deleted_at IS NULL ORDER BY sort_order,id
-            """).query().listOfRows();
+            FROM brand WHERE deleted_at IS NULL
+            """;
+        if(page==null) return jdbc.sql(base+" ORDER BY sortOrder,id").query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.sortOrder,q.id",Map.of(),page,pageSize,keyword,status,
+            List.of("name","description"),"status");
     }
 
     @PostMapping("/brands/list") @ResponseStatus(HttpStatus.CREATED) @Transactional
