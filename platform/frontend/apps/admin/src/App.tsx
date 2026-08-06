@@ -281,7 +281,7 @@ function ProductImageUpload({
   value?: string;
   onChange?: (value: string) => void;
   multiple?: boolean;
-  kind?: "main" | "gallery" | "brand" | "banner" | "portal" | "solutionMobile";
+  kind?: "main" | "gallery" | "brand" | "banner" | "portal" | "contentIcon" | "solutionMobile";
 }) {
   const { message } = AntApp.useApp();
   const [uploadError, setUploadError] = useState("");
@@ -292,6 +292,7 @@ function ProductImageUpload({
     brand: { minWidth: 300, minHeight: 300, maxWidth: 2000, maxHeight: 2000, ratio: 1, ratioLabel: "1:1", maxMb: 2, title: "Logo" },
     banner: { minWidth: 1200, minHeight: 400, maxWidth: 3840, maxHeight: 1280, ratio: 3, ratioLabel: "3:1", maxMb: 5, title: "轮播图" },
     portal: { minWidth: 800, minHeight: 450, maxWidth: 3840, maxHeight: 2160, ratio: 16 / 9, ratioLabel: "16:9", maxMb: 5, title: "展示图" },
+    contentIcon: { minWidth: 128, minHeight: 128, maxWidth: 1024, maxHeight: 1024, ratio: 1, ratioLabel: "1:1", maxMb: 2, title: "文章图标" },
     solutionMobile: { minWidth: 720, minHeight: 1280, maxWidth: 2160, maxHeight: 3840, ratio: 9 / 16, ratioLabel: "9:16", maxMb: 5, title: "H5竖版海报" },
   };
   const profile = profiles[kind];
@@ -2956,9 +2957,14 @@ function PortalManager({ module }: { module: Module }) {
               <Input.TextArea rows={5} placeholder="说明方案目标、设备组合、实施建议等" />
             </Form.Item>
           )}
+          {module === "contents" && (
+            <Form.Item name="description" label="文章正文" className="full">
+              <RichTextEditor />
+            </Form.Item>
+          )}
           <Form.Item
             name={isBrand ? "logo" : "imageUrl"}
-            label={isBrand ? "品牌 Logo" : module === "solutions" ? "Web端横版宣传海报（16:9）" : "展示图片"}
+            label={isBrand ? "品牌 Logo" : module === "solutions" ? "Web端横版宣传海报（16:9）" : module === "contents" ? "文章图标（1:1）" : "展示图片"}
             className="full"
             rules={
               ["banners", "solutions"].includes(module)
@@ -2970,6 +2976,8 @@ function PortalManager({ module }: { module: Module }) {
               kind={
                 isBrand
                   ? "brand"
+                  : module === "contents"
+                    ? "contentIcon"
                   : module === "banners"
                     ? "banner"
                     : "portal"

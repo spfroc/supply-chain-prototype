@@ -568,20 +568,43 @@ function App() {
         />
       )}
       <footer className="footer">
-        <div>
-          <strong>{siteName}</strong>
-          <span>{hasAgreement ? "企业协议价 · 自营库存 · 银行转账 · 全国配送" : "自营库存 · 银行转账 · 全国配送"}</span>
-        </div>
-        <div className="footer-meta">
-          <p>服务电话 {servicePhone}　工作日 09:00–18:00</p>
-          {(icpFiling || policeFiling) && (
-            <nav>
-              <span className="filing-prefix">备案号：</span>
-              {policeFiling && <a className="police-filing" href="https://www.beian.gov.cn/portal/registerSystemInfo" target="_blank" rel="noreferrer"><PoliceFilingIcon />{policeFiling}</a>}
-              {icpFiling && <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">{icpFiling}</a>}
-            </nav>
-          )}
-        </div>
+        <section className="footer-services">
+          {[
+            ["正品保障", "自营商品，品质保证"],
+            ["授信守信", "协议价格，统一对账"],
+            ["专属服务", "企业客户，一对一服务"],
+            ["全国配送", "多地址拆分，物流可查"],
+          ].map(([title, text], index) => <article key={title}>
+            <FooterServiceIcon index={index}/><div><strong>{title}</strong><span>{text}</span></div>
+          </article>)}
+        </section>
+        <section className="footer-main">
+          <div className="footer-brand">
+            <strong>{siteName}</strong>
+            <span>{hasAgreement ? "企业协议价 · 自营库存 · 银行转账 · 全国配送" : "自营库存 · 银行转账 · 全国配送"}</span>
+            <p>服务电话 {servicePhone}<br/>工作日 09:00–18:00</p>
+          </div>
+          <nav className="footer-articles">
+            <h3>服务与帮助</h3>
+            <div>{(portal.content || []).slice(0, 8).map((row: Row, index: number) => {
+              const genericContentLink = !row.linkUrl || row.linkUrl === "/web/?view=content" || row.linkUrl === "/web/content";
+              return <a key={row.id} href={genericContentLink ? `/web/content#content-${row.id}` : row.linkUrl}>
+                {row.imageUrl ? <img src={row.imageUrl} alt=""/> : <FooterServiceIcon index={index % 4}/>}<span>{row.title}</span>
+              </a>;
+            })}</div>
+          </nav>
+          <div className="footer-meta">
+            <h3>平台信息</h3>
+            <p>企业采购服务平台<br/>自营商品 · 协议定价 · 统一结算</p>
+            {(icpFiling || policeFiling) && (
+              <nav>
+                <span className="filing-prefix">备案号：</span>
+                {policeFiling && <a className="police-filing" href="https://www.beian.gov.cn/portal/registerSystemInfo" target="_blank" rel="noreferrer"><PoliceFilingIcon />{policeFiling}</a>}
+                {icpFiling && <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">{icpFiling}</a>}
+              </nav>
+            )}
+          </div>
+        </section>
       </footer>
       {toast && <div className="toast">✓ {toast}</div>}
       {authOpen && !current && (
@@ -603,6 +626,16 @@ function App() {
 
 function PoliceFilingIcon() {
   return <svg viewBox="0 0 20 20" aria-hidden="true"><path fill="#2b65ad" d="M10 1.2c2.1 1.5 4.2 2.1 6.7 2.3v5.4c0 4.4-2.8 7.7-6.7 9.9-3.9-2.2-6.7-5.5-6.7-9.9V3.5C5.8 3.3 7.9 2.7 10 1.2Z"/><circle cx="10" cy="8.8" r="4.6" fill="#d63832"/><path fill="#ffd34f" d="m10 5 1 2.1 2.3.3-1.7 1.7.4 2.3-2-1.1-2 1.1.4-2.3-1.7-1.7L9 7.1Z"/><path fill="none" stroke="#f5c34b" strokeWidth=".8" d="M6.2 12.7c1.2 1 2.4 1.5 3.8 2.3 1.4-.8 2.6-1.3 3.8-2.3"/></svg>;
+}
+
+function FooterServiceIcon({ index }: { index: number }) {
+  const paths = [
+    <><path d="M12 3 5 6v5c0 4.8 2.7 8.1 7 10 4.3-1.9 7-5.2 7-10V6l-7-3Z"/><path d="m8.5 12 2.2 2.2 4.8-5"/></>,
+    <><circle cx="12" cy="8" r="4"/><path d="M5 21c.7-4.2 3-6.3 7-6.3s6.3 2.1 7 6.3M18 8h3v7h-3"/></>,
+    <><path d="M4 13a8 8 0 0 1 16 0M4 13v5h3v-6H4m16 1v5h-3v-6h3M9 20h6"/></>,
+    <><path d="m3 12 4-3 4 3 3-2 7 4-5 6-5-3-3 2-5-4Z"/><path d="m8 11 3 2 3-2m-6 4 3 2"/></>,
+  ];
+  return <svg className="footer-service-icon" viewBox="0 0 24 24" aria-hidden="true">{paths[index % paths.length]}</svg>;
 }
 
 function AuthPage({
@@ -1124,12 +1157,31 @@ function PortalList({
   back: () => void;
   openSolution: (id: number) => void;
 }) {
+  useEffect(() => {
+    if (type !== "content" || !rows.length || !location.hash) return;
+    requestAnimationFrame(() => document.querySelector(location.hash)?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }, [type, rows]);
   const title =
     type === "solutions"
       ? "场景方案"
       : type === "platforms"
         ? "平台比价"
         : "内容中心";
+  if (type === "content") return (
+    <main className="page content-center">
+      <div className="breadcrumb"><button onClick={back}>首页</button>　/　内容中心</div>
+      <header className="content-center-head"><span>SERVICE &amp; HELP</span><h1>服务与帮助</h1><p>采购指南、付款开票、配送及售后说明均由管理后台统一维护。</p></header>
+      <div className="content-article-list">
+        {rows.map((row, index) => <article id={`content-${row.id}`} key={row.id}>
+          <div className="content-article-icon">{row.imageUrl ? <img src={row.imageUrl} alt=""/> : <FooterServiceIcon index={index}/>}</div>
+          <div><h2>{row.title}</h2><p className="content-summary">{row.subtitle || "平台服务说明"}</p>
+            {row.description ? <div className="content-body" dangerouslySetInnerHTML={{__html: row.description}}/> : <p className="content-empty">正文可在管理后台“内容管理”中补充。</p>}
+            {row.linkUrl && !["/web/?view=content", "/web/content"].includes(row.linkUrl) && <a className="content-more" href={row.linkUrl}>查看相关页面 →</a>}
+          </div>
+        </article>)}
+      </div>
+    </main>
+  );
   return (
     <main className="page">
       <div className="breadcrumb">

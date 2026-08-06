@@ -43,6 +43,7 @@ public class ProductImageController {
             case "brand" -> new ImageProfile(300, 300, 2000, 2000, 1.0, 2);
             case "banner" -> new ImageProfile(1200, 400, 3840, 1280, 3.0, 5);
             case "portal" -> new ImageProfile(800, 450, 3840, 2160, 16.0 / 9.0, 5);
+            case "contentIcon" -> new ImageProfile(128, 128, 1024, 1024, 1.0, 2);
             case "solutionMobile" -> new ImageProfile(720, 1280, 2160, 3840, 9.0 / 16.0, 5);
             case "rich" -> new ImageProfile(300, 200, 3840, 3840, 0, 8);
             default -> throw new IllegalArgumentException("未知图片用途");
