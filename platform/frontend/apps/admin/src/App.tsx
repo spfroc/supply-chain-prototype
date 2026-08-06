@@ -3091,9 +3091,25 @@ function PortalManager({ module }: { module: Module }) {
               <ProductImageUpload kind="solutionMobile" />
             </Form.Item>
           )}
+          {module === "navigations" && (
+            <Form.Item label="内置页面" className="full" extra="“我的协议商品”仅对已登录且存在生效协议的企业账号显示。">
+              <Select
+                allowClear
+                placeholder="选择后自动填充跳转链接"
+                onChange={(value) => value && form.setFieldValue("linkUrl", value)}
+                options={[
+                  { value: "/web/", label: "首页" },
+                  { value: "/web/products", label: "办公集采" },
+                  { value: "/web/agreement-products", label: "我的协议商品（按协议状态自动显隐）" },
+                  { value: "/web/solutions", label: "场景方案" },
+                  { value: "/web/platforms", label: "平台比价" },
+                ]}
+              />
+            </Form.Item>
+          )}
           {!isBrand && (
             <Form.Item name="linkUrl" label="跳转链接" className="full">
-              <Input placeholder="/web/?view=products 或 https://..." />
+              <Input placeholder="/web/products 或 https://..." />
             </Form.Item>
           )}
           <Form.Item name="status" label="状态">

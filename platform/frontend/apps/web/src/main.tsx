@@ -8,6 +8,7 @@ import "./categories.css";
 type View =
   | "home"
   | "products"
+  | "agreement-products"
   | "solutions"
   | "solution-detail"
   | "platforms"
@@ -78,6 +79,7 @@ const orderStatus = ["待付款", "待发货", "运输中", "已完成", "已取
 const routeViews: View[] = [
   "home",
   "products",
+  "agreement-products",
   "detail",
   "solutions",
   "solution-detail",
@@ -93,6 +95,7 @@ const routeViews: View[] = [
   "members",
 ];
 const protectedViews = new Set<View>([
+  "agreement-products",
   "cart",
   "checkout",
   "orders",
@@ -107,7 +110,7 @@ const parseRoute = (url = new URL(location.href)) => {
   const solution = path.match(/^\/web\/solutions\/(\d+)$/);
   const platform = path.match(/^\/web\/platforms\/(\d+)\/products$/);
   const route: Record<string, View> = {
-    "/web": "home", "/web/products": "products", "/web/solutions": "solutions",
+    "/web": "home", "/web/products": "products", "/web/agreement-products": "agreement-products", "/web/solutions": "solutions",
     "/web/platforms": "platforms", "/web/content": "content", "/web/cart": "cart",
     "/web/checkout": "checkout", "/web/orders": "orders", "/web/account": "profile",
     "/web/account/addresses": "addresses", "/web/account/invoices": "invoices",
@@ -130,7 +133,7 @@ const pathFor = (view: View, platformId?: number, solutionId?: number, productId
   if (view === "detail" && productId) return `/web/products/${productId}`;
   if (view === "solution-detail" && solutionId) return `/web/solutions/${solutionId}`;
   if (view === "platform-products" && platformId) return `/web/platforms/${platformId}/products`;
-  return ({ home: "/web/", products: "/web/products", solutions: "/web/solutions",
+  return ({ home: "/web/", products: "/web/products", "agreement-products": "/web/agreement-products", solutions: "/web/solutions",
     platforms: "/web/platforms", content: "/web/content", cart: "/web/cart",
     checkout: "/web/checkout", orders: "/web/orders", profile: "/web/account",
     addresses: "/web/account/addresses", invoices: "/web/account/invoices",
@@ -381,10 +384,25 @@ function App() {
     void loadProducts();
     navigate("home");
   };
-  if (!authReady)
-    return <div className="auth-loading">正在加载企业采购平台…</div>;
   const hasAgreement = Boolean(current && profile.agreementName);
   const displayView = !current && protectedViews.has(view) ? "home" : view;
+  useEffect(() => {
+    if (!authReady || view !== "agreement-products" || !current || hasAgreement) return;
+    applyNavigation("products");
+    notify("当前账号暂无生效协议，已为您展示全部商品");
+  }, [authReady, view, current, hasAgreement]);
+  const visibleNavigation = (portal.navigation || [
+    { title: "首页" },
+    { title: "办公集采" },
+    { title: "场景方案" },
+    { title: "平台比价" },
+  ]).filter((item: Row) => {
+    if (!item.linkUrl) return true;
+    const configured = new URL(item.linkUrl, location.origin);
+    return configured.pathname.replace(/\/$/, "") !== "/web/agreement-products" || hasAgreement;
+  });
+  if (!authReady)
+    return <div className="auth-loading">正在加载企业采购平台…</div>;
   return (
     <div className="shop">
       <div className="topbar">
@@ -422,14 +440,7 @@ function App() {
         </button>
       </header>
       <nav className="nav">
-        {(
-          portal.navigation || [
-            { title: "首页" },
-            { title: "办公集采" },
-            { title: "场景方案" },
-            { title: "平台比价" },
-          ]
-        ).map((item: Row, index: number) => {
+        {visibleNavigation.map((item: Row, index: number) => {
           const fallback: View =
             index === 0
               ? "home"
@@ -492,7 +503,7 @@ function App() {
           loggedIn={Boolean(current)}
         />
       )}
-      {displayView === "products" && (
+      {(displayView === "products" || displayView === "agreement-products") && (
         <Products
           products={products}
           categories={categories}
@@ -511,6 +522,7 @@ function App() {
           add={add}
           hasAgreement={hasAgreement}
           loggedIn={Boolean(current)}
+          forceAgreement={displayView === "agreement-products"}
         />
       )}
       {(["solutions", "platforms", "content"] as View[]).includes(displayView) && (
@@ -1002,6 +1014,7 @@ function Products({
   add,
   hasAgreement,
   loggedIn,
+  forceAgreement = false,
 }: {
   products: Row[];
   categories: Row[];
@@ -1012,6 +1025,7 @@ function Products({
   add: (r: Row) => void;
   hasAgreement: boolean;
   loggedIn: boolean;
+  forceAgreement?: boolean;
 }) {
   const [keyword, setKeyword] = useState(initialKeyword || "");
   const [active, setActive] = useState<number | undefined>(initialCategory);
@@ -1052,7 +1066,7 @@ function Products({
       (p) =>
         (!active || ids.includes(Number(p.categoryId))) &&
         (!onlyStock || Number(p.availableStock)>0) &&
-        (!onlyAgreement || p.agreementPrice != null) &&
+        (!(forceAgreement || onlyAgreement) || p.agreementPrice != null) &&
         (active || !brand || String(p.brandName||"")===brand) &&
         (!active || Object.entries(attributeFilters).every(([code,values])=>!values.length||structuredSpecs(p.structuredAttributes)
           .some((item)=>String(item.code)===code&&values.includes(String(item.value))))) &&
@@ -1143,7 +1157,7 @@ function Products({
           <div className="listing-head">
             <div>
               <h1>
-                {categories.find((x) => Number(x.id) === active)?.name ||
+                {forceAgreement ? "我的协议商品" : categories.find((x) => Number(x.id) === active)?.name ||
                   "办公集采"}
               </h1>
               <p>共 {filtered.length} 款自营商品</p>
@@ -1164,7 +1178,7 @@ function Products({
               </select>
             </label>}
             <label className="search-check"><input type="checkbox" checked={onlyStock} onChange={(e)=>setOnlyStock(e.target.checked)}/> 仅看有货</label>
-            {hasAgreement && <label className="search-check"><input type="checkbox" checked={onlyAgreement} onChange={(e)=>setOnlyAgreement(e.target.checked)}/> 企业协议商品</label>}
+            {hasAgreement && !forceAgreement && <label className="search-check"><input type="checkbox" checked={onlyAgreement} onChange={(e)=>setOnlyAgreement(e.target.checked)}/> 企业协议商品</label>}
             {active && filterDefinitions.map((definition)=><div className="product-attribute-filter" key={definition.code}>
               <span>{definition.name}{definition.unit?`（${definition.unit}）`:""}</span>
               <div>{filterOptions(String(definition.code)).map((value)=><label key={value}>
