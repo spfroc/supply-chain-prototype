@@ -1301,7 +1301,6 @@ function ProductCard({
   return (
     <article className="product-card" onClick={() => open(product)}>
       <div className={`product-image p${index % 5}`}>
-        <span>{platformTitle ? "平台商品" : "自营"}</span>
         {product.mainImage ? (
           <img src={product.mainImage} alt={product.title} />
         ) : (
@@ -1310,16 +1309,19 @@ function ProductCard({
         <em>{platformTitle || "协议专享"}</em>
       </div>
       <div className="product-info">
-        <small>{platformTitle || "企业协议商品"}</small>
-        {!platformTitle && product.platformNames && (
-          <div className="platform-tags">
+        <div className="platform-tags">
+          {Number(product.selfOperated) === 1 && <span className="self-operated-tag">自营</span>}
+          {platformTitle && <span>{platformTitle}</span>}
+          {!platformTitle && product.platformNames && (
+            <>
             {String(product.platformNames)
               .split("、")
               .map((name: string) => (
                 <span key={name}>{name}</span>
               ))}
-          </div>
-        )}
+            </>
+          )}
+        </div>
         <h3>{product.title}</h3>
         <p>{product.summary || "政企采购自营商品，全国配送"}</p>
         <div className="price">
@@ -1420,7 +1422,7 @@ function Detail({
           )}
         </div>
         <div className="detail-main">
-          <span className="self">自营商品</span>
+          <div className="platform-tags detail-tags">{Number(product.selfOperated) === 1 && <span className="self-operated-tag">自营</span>}{product.platformNames && String(product.platformNames).split("、").map((name:string)=><span key={name}>{name}</span>)}</div>
           <h1>{product.title}</h1>
           <p>{product.summary}</p>
           <div className="agreement-price">

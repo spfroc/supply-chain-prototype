@@ -17,3 +17,5 @@
 @media(max-width:1100px){.category-flyout{width:360px}}
 .platform-tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
 .platform-tags span{display:inline-block;padding:3px 7px;border-radius:4px;background:#fff0e5;color:#c85b12;font-size:11px;line-height:1.2}
+.platform-tags .self-operated-tag{background:#e8f2ff;color:#1767d2}
+.detail-tags{margin:0 0 10px}

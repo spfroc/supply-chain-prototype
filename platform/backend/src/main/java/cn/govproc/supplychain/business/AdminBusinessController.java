@@ -37,7 +37,7 @@ public class AdminBusinessController {
     Object products(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
                     @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
         String base="""
-          SELECT p.id,p.spu_code AS spuCode,p.title,p.summary,p.main_image AS mainImage,
+          SELECT p.id,p.spu_code AS spuCode,p.title,p.summary,p.main_image AS mainImage,p.self_operated AS selfOperated,
             JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')) AS gallery,
             JSON_UNQUOTE(JSON_EXTRACT(p.attributes_json,'$.content')) AS attributes,
             p.detail_html AS detailHtml,p.delivery_description AS deliveryDescription,
@@ -80,12 +80,13 @@ public class AdminBusinessController {
         String suffix=uniqueProductCodeSuffix();
         String spuCode="SPU-"+suffix, skuCode="SKU-"+suffix;
         jdbc.sql("""
-          INSERT INTO product_spu(spu_code,title,category_id,brand_id,main_image,gallery_json,attributes_json,
+          INSERT INTO product_spu(spu_code,title,category_id,brand_id,self_operated,main_image,gallery_json,attributes_json,
             summary,detail_html,delivery_description,after_sales_html,status)
-          VALUES(:code,:title,:categoryId,:brandId,:mainImage,JSON_OBJECT('content',:gallery),
+          VALUES(:code,:title,:categoryId,:brandId,:selfOperated,:mainImage,JSON_OBJECT('content',:gallery),
             JSON_OBJECT('content',:attributes),:summary,:detailHtml,:deliveryDescription,:afterSalesHtml,:status)
           """)
           .param("code",spuCode).param("title",r.title()).param("categoryId",r.categoryId()).param("brandId",r.brandId())
+          .param("selfOperated",r.selfOperatedValue())
           .param("mainImage",value(r.mainImage())).param("gallery",value(r.gallery())).param("attributes",value(r.attributes()))
           .param("summary",value(r.summary())).param("detailHtml",value(r.detailHtml()))
           .param("deliveryDescription",value(r.deliveryDescription())).param("afterSalesHtml",value(r.afterSalesHtml()))
@@ -99,13 +100,14 @@ public class AdminBusinessController {
     @PutMapping("/products/{id}") @Transactional
     void updateProduct(@PathVariable long id,@Valid @RequestBody ProductRequest r) {
         require(jdbc.sql("""
-          UPDATE product_spu SET title=:title,category_id=:categoryId,brand_id=:brandId,
+          UPDATE product_spu SET title=:title,category_id=:categoryId,brand_id=:brandId,self_operated=:selfOperated,
           main_image=:mainImage,gallery_json=JSON_OBJECT('content',:gallery),
           attributes_json=JSON_OBJECT('content',:attributes),summary=:summary,detail_html=:detailHtml,
           delivery_description=:deliveryDescription,after_sales_html=:afterSalesHtml,
           status=:status WHERE id=:id AND deleted_at IS NULL
           """)
           .param("id",id).param("title",r.title()).param("categoryId",r.categoryId()).param("brandId",r.brandId())
+          .param("selfOperated",r.selfOperatedValue())
           .param("mainImage",value(r.mainImage())).param("gallery",value(r.gallery()))
           .param("attributes",value(r.attributes())).param("summary",value(r.summary()))
           .param("detailHtml",value(r.detailHtml())).param("deliveryDescription",value(r.deliveryDescription()))
@@ -679,7 +681,7 @@ public class AdminBusinessController {
         if(password!=null&&!password.isBlank()&&(password.length()<8||password.length()>72))
             throw new IllegalArgumentException("密码长度必须为8至72位");
     }
-    public record ProductRequest(@NotBlank String title,@NotNull Long categoryId,@NotNull Long brandId,
+    public record ProductRequest(@NotBlank String title,@NotNull Long categoryId,@NotNull Long brandId,Integer selfOperated,
         @NotBlank String mainImage,String gallery,String attributes,String summary,String detailHtml,
         String deliveryDescription,String afterSalesHtml,String spec,
       @NotNull @DecimalMin("0") BigDecimal marketPrice,@NotNull @DecimalMin("0") BigDecimal memberPrice,@Min(0) int stock,int status,
@@ -688,6 +690,7 @@ public class AdminBusinessController {
             long galleryCount=gallery==null?0:gallery.lines().filter(line->!line.isBlank()).count();
             if(galleryCount>6) throw new IllegalArgumentException("商品配图最多上传6张");
         }
+        public int selfOperatedValue() { return selfOperated==null ? 1 : (selfOperated==0 ? 0 : 1); }
     }
     public record SkuRequest(Long id,String skuCode,Map<String,Object> specValues,String skuImage,
       BigDecimal marketPrice,BigDecimal memberPrice,int stock,int status){}

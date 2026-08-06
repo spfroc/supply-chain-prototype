@@ -1,5 +1,6 @@
 .m-platform-tags{display:flex;align-items:center;gap:4px;height:18px;min-height:18px;margin:0 10px 7px;overflow:hidden}
 .m-platform-tags span{flex:none;padding:2px 5px;border-radius:4px;background:#fff0e5;color:#c85b12;font-size:9px}
+.m-platform-tags .self-operated-tag{background:#e8f2ff;color:#1767d2}
 .m-product{display:flex;flex-direction:column;height:250px}
 .m-product h3{height:18px;line-height:18px}
 .m-product p{height:14px;line-height:14px;margin-top:0;margin-bottom:7px}

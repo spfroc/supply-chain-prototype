@@ -8,6 +8,7 @@ function Request([string]$path){Invoke-RestMethod "$BaseUrl$path" -Headers $head
 
 $products=Request -path '/api/admin/business/products?page=1&pageSize=3'
 Check "PAGE-001 product page structure" { $products.records.Count -le 3 -and $products.total -ge $products.records.Count -and $products.totalPages -ge 1 }
+Check "PAGE-001A product ownership field" { $products.records.Count -gt 0 -and $null -ne $products.records[0].selfOperated }
 $page2=Request -path '/api/admin/business/products?page=2&pageSize=3'
 Check "PAGE-002 product page navigation" { $page2.page -eq 2 -and $page2.pageSize -eq 3 }
 $search=Request -path '/api/admin/business/products?page=1&pageSize=10&keyword=%E5%85%AC%E7%89%9B'

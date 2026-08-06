@@ -1092,6 +1092,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
                 (x) => Number(x.level) === 3,
               )?.id,
               brandId: (brands.data || []).find((x)=>Number(x.status)===1)?.id,
+              selfOperated: 1,
               status: 1,
               stock: 0,
               skus:[{skuCode:"",specification:"规格=标准",skuImage:"",marketPrice:0,memberPrice:0,stock:0,status:1}],
@@ -1388,7 +1389,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
             </span>
             <span>
               <strong>{r.title}</strong>
-              <small>{r.spuCode} · {Number(r.skuCount||1)} 个 SKU</small>
+              <small>{r.spuCode} · {Number(r.skuCount||1)} 个 SKU {Number(r.selfOperated) === 1 && <Tag color="blue">自营</Tag>}</small>
             </span>
           </div>
         ),
@@ -1605,7 +1606,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
   });
   const defaultListTitle =
     module === "products"
-      ? "自营商品列表"
+      ? "商品列表"
       : module === "enterprises"
         ? "企业客户列表"
         : module === "agreements"
@@ -1667,6 +1668,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
                 <Form.Item name="title" label="商品标题" className="full" rules={[{ required: true }]}><Input /></Form.Item>
                 <Form.Item name="categoryId" label="三级分类" rules={[{ required: true, message: "请选择三级分类" }]}><Select options={(categories.data || []).filter((x) => Number(x.level) === 3 && Number(x.status) === 1).map((x) => ({ value: x.id, label: `${x.parentName || ""} / ${x.name}` }))} /></Form.Item>
                 <Form.Item name="brandId" label="品牌" rules={[{required:true,message:"请选择品牌"}]}><Select loading={brands.loading} showSearch optionFilterProp="label" options={(brands.data||[]).filter((x)=>Number(x.status)===1).map((x)=>({ value:x.id,label:x.name }))} placeholder="请选择已启用品牌" /></Form.Item>
+                <Form.Item name="selfOperated" label="经营类型" rules={[{required:true,message:"请选择经营类型"}]}><Radio.Group options={[{value:1,label:"自营"},{value:0,label:"非自营"}]} /></Form.Item>
                 <Form.Item name="status" label="状态"><Select options={[{ value: 1, label: "在售" },{ value: 0, label: "草稿" },{ value: 2, label: "下架" }]} /></Form.Item>
                 <Form.Item name="summary" label="商品摘要" className="full"><Input.TextArea rows={3} /></Form.Item>
               </div> },

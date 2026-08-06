@@ -84,7 +84,7 @@ public class PortalController {
             org.springframework.http.HttpStatus.NOT_FOUND,"平台不存在");
         var platform=platforms.getFirst();
         var products=jdbc.sql("""
-            SELECT pp.id AS relationId,pp.sku_id AS skuId,p.title,p.main_image AS mainImage,p.summary,
+            SELECT pp.id AS relationId,pp.sku_id AS skuId,p.title,p.main_image AS mainImage,p.summary,p.self_operated AS selfOperated,
                    s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
                    s.stock-s.reserved_stock AS availableStock,pp.platform_price AS platformPrice,
                    pp.product_url AS productUrl,pp.click_count AS clickCount

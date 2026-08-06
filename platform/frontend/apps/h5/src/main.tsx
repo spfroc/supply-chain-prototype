@@ -747,6 +747,7 @@ function Product({
       <h3>{row.title}</h3>
       <p>{row.summary}</p>
       <div className="m-platform-tags">
+        {Number(row.selfOperated) === 1 && <span className="self-operated-tag">自营</span>}
         {row.platformNames &&
           String(row.platformNames)
             .split("、")
@@ -1002,7 +1003,7 @@ function ProductDetail({
         <p>{product.summary}</p>
         <small>已售 {product.soldCount || 0} 件</small>
         <section>
-          <span>自营正品</span>
+          {Number(product.selfOperated) === 1 && <span>自营正品</span>}
           <span>协议专价</span>
           <span>全国配送</span>
         </section>
