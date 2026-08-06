@@ -373,11 +373,12 @@ function App() {
   };
   if (!authReady)
     return <div className="auth-loading">正在加载企业采购平台…</div>;
+  const hasAgreement = Boolean(current && profile.agreementName);
   const displayView = !current && protectedViews.has(view) ? "home" : view;
   return (
     <div className="shop">
       <div className="topbar">
-        <span>{siteName} · 自营正品 · 协议价格</span>
+        <span>{siteName} · 自营正品 · 全国配送</span>
         <div>
           {current ? (
             <>
@@ -446,7 +447,7 @@ function App() {
             </button>
           );
         })}
-        <span>{current ? "企业协议已生效" : "游客浏览"}</span>
+        <span>{hasAgreement ? "企业协议已生效" : current ? "企业采购账号" : "游客浏览"}</span>
       </nav>
       {displayView === "home" && (
         <Home
@@ -456,6 +457,7 @@ function App() {
           open={goProduct}
           add={add}
           all={(id?: number) => navigate("products", id)}
+          hasAgreement={hasAgreement}
         />
       )}
       {displayView === "products" && (
@@ -475,6 +477,7 @@ function App() {
           }}
           open={goProduct}
           add={add}
+          hasAgreement={hasAgreement}
         />
       )}
       {(["solutions", "platforms", "content"] as View[]).includes(displayView) && (
@@ -546,7 +549,7 @@ function App() {
       <footer className="footer">
         <div>
           <strong>{siteName}</strong>
-          <span>企业协议价 · 自营库存 · 银行转账 · 全国配送</span>
+          <span>{hasAgreement ? "企业协议价 · 自营库存 · 银行转账 · 全国配送" : "自营库存 · 银行转账 · 全国配送"}</span>
         </div>
         <div className="footer-meta">
           <p>服务电话 {servicePhone}　工作日 09:00–18:00</p>
@@ -644,9 +647,9 @@ function AuthPage({
         <i>政</i>
         <span>政企采购供应链</span>
         <h1>企业采购，从登录开始</h1>
-        <p>协议专价、自营库存、多地址配送和统一订单管理。</p>
+        <p>自营库存、多地址配送和统一订单管理。</p>
         <div>
-          <b>✓</b> 企业协议自动匹配
+          <b>✓</b> 商品价格清晰透明
         </div>
         <div>
           <b>✓</b> 线下银行转账
@@ -768,6 +771,7 @@ function Home({
   open,
   add,
   all,
+  hasAgreement,
 }: {
   products: Row[];
   categories: Row[];
@@ -775,6 +779,7 @@ function Home({
   open: (r: Row) => void;
   add: (r: Row) => void;
   all: (id?: number) => void;
+  hasAgreement: boolean;
 }) {
   const roots = categories.filter((x) => Number(x.level) === 1).slice(0, 7);
   const banner = portal.banner?.[0];
@@ -789,7 +794,7 @@ function Home({
             <b>一站配齐</b>
           </h1>
           <p>
-            {banner?.subtitle || "企业协议专属价格 · 自营库存 · 多地址配送"}
+            {hasAgreement ? (banner?.subtitle || "企业协议专属价格 · 自营库存 · 多地址配送") : "自营库存 · 多地址配送 · 统一对账"}
           </p>
           <button onClick={() => all()}>立即选购　›</button>
         </div>
@@ -803,8 +808,8 @@ function Home({
             {products.length || 2}
             <small>款</small>
           </strong>
-          <span>协议精选商品</span>
-          <em>低于会员价，协议期内可随时调整</em>
+          <span>{hasAgreement ? "协议精选商品" : "品质精选商品"}</span>
+          <em>{hasAgreement ? "当前企业协议专属价格" : "自营库存，支持全国配送"}</em>
         </aside>
       </section>
       <section className="category-strip">
@@ -819,14 +824,14 @@ function Home({
       <section className="section">
         <div className="section-head">
           <div>
-            <span>AGREEMENT PICKS</span>
-            <h2>协议精选</h2>
-            <p>已自动匹配当前企业有效协议价格</p>
+            <span>{hasAgreement ? "AGREEMENT PICKS" : "FEATURED PRODUCTS"}</span>
+            <h2>{hasAgreement ? "协议精选" : "精选商品"}</h2>
+            <p>{hasAgreement ? "已自动匹配当前企业有效协议价格" : "精选自营商品，按商品原价展示"}</p>
           </div>
           <button onClick={() => all()}>查看全部商品 →</button>
         </div>
         <div className="product-grid">
-          {products.slice(0, 4).map((p, i) => (
+          {(hasAgreement ? products.filter((p)=>p.agreementPrice != null) : products).slice(0, 4).map((p, i) => (
             <ProductCard
               key={p.skuId}
               product={p}
@@ -845,7 +850,7 @@ function Home({
             <br />
             更是解决实际场景
           </h2>
-          <p>从设备选型、协议采购到配送验收，一站式完成。</p>
+          <p>从设备选型、采购下单到配送验收，一站式完成。</p>
         </div>
         {(portal.solution || []).slice(0, 3).map((x: Row) => (
           <article key={x.id}>
@@ -875,6 +880,7 @@ function Products({
   routeChanged,
   open,
   add,
+  hasAgreement,
 }: {
   products: Row[];
   categories: Row[];
@@ -883,6 +889,7 @@ function Products({
   routeChanged: (categoryId: number | undefined, keyword: string) => void;
   open: (r: Row) => void;
   add: (r: Row) => void;
+  hasAgreement: boolean;
 }) {
   const [keyword, setKeyword] = useState(initialKeyword || "");
   const [active, setActive] = useState<number | undefined>(initialCategory);
@@ -1002,7 +1009,7 @@ function Products({
           })}
           <h3>商品状态</h3>
           <label><input type="checkbox" checked={onlyStock} onChange={(e)=>setOnlyStock(e.target.checked)}/> 仅看有货</label>
-          <label><input type="checkbox" checked={onlyAgreement} onChange={(e)=>setOnlyAgreement(e.target.checked)}/> 企业协议商品</label>
+          {hasAgreement && <label><input type="checkbox" checked={onlyAgreement} onChange={(e)=>setOnlyAgreement(e.target.checked)}/> 企业协议商品</label>}
           {filterDefinitions.map((definition)=><div className="dynamic-filter" key={definition.code}>
             <h3>{definition.name}{definition.unit?`（${definition.unit}）`:""}</h3>
             {filterOptions(String(definition.code)).map((value)=><label key={value}>
@@ -1045,7 +1052,7 @@ function Products({
             >
               价格 ↑
             </button>
-            <span>协议价优先展示</span>
+            <span>{hasAgreement ? "协议价优先展示" : "商品原价展示"}</span>
           </div>
           <div className="product-grid">
             {filtered.map((p, i) => (
@@ -1306,7 +1313,7 @@ function ProductCard({
         ) : (
           <i>{["💻", "📄", "🖨️", "🖥️", "📦"][index % 5]}</i>
         )}
-        <em>{platformTitle || "协议专享"}</em>
+        <em>{platformTitle || (product.agreementPrice != null ? "协议专享" : "品质精选")}</em>
       </div>
       <div className="product-info">
         <div className="platform-tags">
@@ -1328,7 +1335,7 @@ function ProductCard({
           <strong>
             {money(platformTitle ? product.platformPrice : productPrice(product))}
           </strong>
-          <del>{money(product.marketPrice)}</del>
+          {Number(platformTitle ? product.platformPrice : productPrice(product)) !== Number(product.marketPrice) && <del>{money(product.marketPrice)}</del>}
         </div>
         <div className="stock">
           <span>库存 {product.availableStock} · 已售 {product.soldCount || 0}{platformTitle ? ` · 浏览 ${product.clickCount || 0}` : ""}</span>
@@ -1404,7 +1411,7 @@ function Detail({
             ) : (
               <i>暂无商品图片</i>
             )}
-            <span>协议价商品</span>
+            <span>{product.agreementPrice != null ? "协议价商品" : "自营商品"}</span>
           </div>
           {galleryImages.length > 0 && (
             <nav>
@@ -1501,14 +1508,14 @@ function Detail({
                 <h2>政企采购自营商品</h2>
                 <p>
                   {product.summary ||
-                    "商品由平台统一采购、统一库存和统一配送，支持企业协议专属价格。"}
+                    "商品由平台统一采购、统一库存和统一配送。"}
                 </p>
               </>
             )}
           <div className="feature-grid">
             {[
               ["正", "自营正品", "严格供应链审核"],
-              ["价", "协议专价", "按企业有效协议计价"],
+              ["价", product.agreementPrice != null ? "协议专价" : "原价结算", product.agreementPrice != null ? "按企业有效协议计价" : "按商品市场原价计价"],
               ["配", "多地配送", "同一 SKU 可拆分到多个地址"],
               ["票", "发票记录", "第三方开具，平台留档"],
             ].map((x) => (
@@ -2051,7 +2058,7 @@ function Orders({ go }: { go: (v: View) => void }) {
                 <strong>
                   {row.itemKinds} 种商品，共 {row.itemCount} 件
                 </strong>
-                <small>企业协议采购 · 银行转账</small>
+                <small>企业采购 · 银行转账</small>
               </span>
               <p>
                 <small>订单金额</small>
@@ -2192,10 +2199,10 @@ function Profile({
               <strong>{money(summary.monthlyPurchase)}</strong>
               <small>本月采购</small>
             </span>
-            <span>
+            {profile.agreementName && <span>
               <strong>{money(summary.totalSavings)}</strong>
               <small>累计协议节省</small>
-            </span>
+            </span>}
             <span>
               <strong>{summary.activeOrders || 0}</strong>
               <small>进行中订单</small>
@@ -2203,7 +2210,7 @@ function Profile({
           </article>
         </div>
         <div className="profile-grid">
-          <section>
+          {profile.agreementName && <section>
             <header>
               <h2>当前采购协议</h2>
               <span>{profile.agreementName ? "生效中" : "未配置"}</span>
@@ -2222,7 +2229,7 @@ function Profile({
                 企业成员 <b>{summary.memberCount || 0}</b> 人
               </span>
             </div>
-          </section>
+          </section>}
           <section>
             <header>
               <h2>待办事项</h2>

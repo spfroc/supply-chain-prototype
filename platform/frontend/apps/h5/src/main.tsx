@@ -251,6 +251,7 @@ function App() {
     navigateTab("home");
   };
   if (!authReady) return <div className="m-auth-loading">正在加载…</div>;
+  const hasAgreement = Boolean(current && profile.agreementName);
   if (solutionId)
     return (
       <>
@@ -305,7 +306,7 @@ function App() {
             <strong>{siteName}</strong>
             <small>
               {current
-                ? `${profile.enterpriseName || "企业采购账号"} · 协议生效中`
+                ? `${profile.enterpriseName || "企业采购账号"}${hasAgreement ? " · 协议生效中" : ""}`
                 : "游客浏览 · 登录后使用企业采购功能"}
             </small>
           </span>
@@ -327,6 +328,7 @@ function App() {
               history.pushState({}, "", `${location.pathname}?solutionId=${id}`);
             }}
             allSolutions={() => setSolutionsOpen(true)}
+            hasAgreement={hasAgreement}
           />
         )}
         {tab === "category" && (
@@ -335,6 +337,7 @@ function App() {
             categories={categories}
             keyword={categoryKeyword}
             open={openProduct}
+            hasAgreement={hasAgreement}
           />
         )}
         {tab === "cart" && (
@@ -489,7 +492,7 @@ function MobileAuth({
         <h1>{mode === "login" ? "欢迎登录" : "注册企业账号"}</h1>
         <p>
           {mode === "login"
-            ? "登录后查看企业协议、订单和购物车"
+            ? "登录后查看订单、购物车和企业采购信息"
             : "企业不存在时将自动创建，首个账号为企业主账号"}
         </p>
         {mode === "register" && (
@@ -635,6 +638,7 @@ function Home({
   category,
   openSolution,
   allSolutions,
+  hasAgreement,
 }: {
   products: Row[];
   solutions: Row[];
@@ -643,6 +647,7 @@ function Home({
   category: (keyword?: string) => void;
   openSolution: (id: number) => void;
   allSolutions: () => void;
+  hasAgreement: boolean;
 }) {
   const [keyword,setKeyword]=useState("");
   return (
@@ -660,7 +665,7 @@ function Home({
           <br />
           <b>一站配齐</b>
         </h1>
-        <p>协议专属价格 · 自营正品保障</p>
+        <p>{hasAgreement ? "协议专属价格 · 自营正品保障" : "自营正品保障 · 全国配送"}</p>
         <button onClick={()=>category()}>立即选购　›</button>
         <i>💻</i>
         <em>🖨️</em>
@@ -685,13 +690,13 @@ function Home({
       <section className="m-section">
         <header>
           <div>
-            <span>AGREEMENT PICKS</span>
-            <h2>协议精选</h2>
+            <span>{hasAgreement ? "AGREEMENT PICKS" : "FEATURED PRODUCTS"}</span>
+            <h2>{hasAgreement ? "协议精选" : "精选商品"}</h2>
           </div>
           <button onClick={()=>category()}>全部 ›</button>
         </header>
         <DragScroll className="product-scroll">
-          {products.map((p, i) => (
+          {(hasAgreement ? products.filter((p)=>p.agreementPrice != null) : products).map((p, i) => (
             <Product key={p.skuId} row={p} index={i} open={open} add={add} />
           ))}
         </DragScroll>
@@ -742,7 +747,7 @@ function Product({
             }}
           />
         )}
-        <span>协议价</span>
+        {row.agreementPrice != null && <span>协议价</span>}
         <i>{["💻", "📄", "🖨️", "📦"][index % 4]}</i>
       </div>
       <h3>{row.title}</h3>
@@ -759,7 +764,7 @@ function Product({
       <small className="m-product-sales">已售 {row.soldCount || 0} 件</small>
       <div>
         <strong>{money(productPrice(row))}</strong>
-        <del>{money(row.marketPrice)}</del>
+        {Number(productPrice(row)) !== Number(row.marketPrice) && <del>{money(row.marketPrice)}</del>}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -777,11 +782,13 @@ function Category({
   categories,
   keyword,
   open,
+  hasAgreement,
 }: {
   products: Row[];
   categories: Row[];
   keyword: string;
   open: (r: Row) => void;
+  hasAgreement: boolean;
 }) {
   const roots = categories.filter((x) => Number(x.level) === 1);
   const [active, setActive] = useState<number>();
@@ -840,7 +847,7 @@ function Category({
               {categories.find((x) => Number(x.id) === active)?.name ||
                 "全部商品"}
             </strong>
-            <small>协议商品专属优惠</small>
+            <small>{hasAgreement ? "协议商品专属优惠" : "自营商品品质保障"}</small>
           </div>
           {filterDefinitions.length>0&&<div className="m-attribute-filters">
             {filterDefinitions.map((definition)=>{
@@ -861,7 +868,7 @@ function Category({
               </button>
             ))}
           </div>
-          <h2>协议商品</h2>
+          <h2>{hasAgreement ? "协议商品" : "全部商品"}</h2>
           {visible.map((p, i) => (
             <button
               className="category-product"
@@ -1024,7 +1031,7 @@ function ProductDetail({
         ) : (
           <p>
             {product.summary ||
-              "政企采购平台自营商品，支持企业协议价格、统一对账和多地址配送。"}
+              "政企采购平台自营商品，支持统一对账和多地址配送。"}
           </p>
         )}
         <h2>规格参数</h2>
@@ -1483,7 +1490,7 @@ function Orders() {
               <strong>
                 {r.itemKinds} 种商品，共 {r.itemCount} 件
               </strong>
-              <small>企业协议采购 · 银行转账</small>
+              <small>企业采购 · 银行转账</small>
             </span>
             <b>{money(r.payableAmount)}</b>
           </div>
@@ -1555,7 +1562,7 @@ function Mine({
           ))}
         </div>
       </section>
-      <section className="agreement-card">
+      {profile.agreementName && <section className="agreement-card">
         <span>● 协议生效中</span>
         <strong>{profile.agreementName || "暂无生效协议"}</strong>
         <small>
@@ -1563,7 +1570,7 @@ function Mine({
             ? `有效期至 ${profile.agreementExpiry}`
             : "请联系企业管理员配置协议"}
         </small>
-      </section>
+      </section>}
       <section className="mine-menu">
         {[
           ["址", "地址管理", "维护多地址配送信息", "addresses"],
