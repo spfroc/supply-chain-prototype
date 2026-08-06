@@ -34,12 +34,13 @@ public class CatalogController {
         Long enterpriseId=auth.optionalCurrent().map(ClientAuthService.CurrentUser::enterpriseId).orElse(null);
         return jdbc.sql("""
             SELECT p.id AS product_id,s.id AS sku_id, p.spu_code, s.sku_code, p.title, COALESCE(NULLIF(s.sku_image,''),p.main_image) AS main_image,p.category_id,p.self_operated,
-                   b.name AS brand_name,
+                   b.id AS brand_id,b.name AS brand_name,
                    JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')) AS gallery,
                    JSON_UNQUOTE(JSON_EXTRACT(p.attributes_json,'$.content')) AS attributes,
                    p.summary,p.detail_html,p.delivery_description,p.after_sales_html,
                    s.market_price, s.member_price, s.stock - s.reserved_stock AS available_stock,
                    ai.agreement_price,COALESCE(sales.sold_count,0) AS sold_count,
+                   COALESCE((SELECT SUM(pp.click_count) FROM product_platform pp WHERE pp.sku_id=s.id AND pp.deleted_at IS NULL),0) AS click_count,
                    COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('id',ad.id,'code',ad.code,'name',ad.name,'groupName',ad.group_name,
                      'value',pav.value_text,'unit',ad.unit,'filterable',ad.filterable,'searchable',ad.searchable,'sortOrder',ad.sort_order))
                      FROM product_attribute_value pav JOIN attribute_definition ad ON ad.id=pav.attribute_id
@@ -76,15 +77,15 @@ public class CatalogController {
                 rs.getLong("product_id"),rs.getLong("sku_id"), rs.getString("spu_code"), rs.getString("sku_code"),
                 rs.getString("title"), rs.getString("main_image"),rs.getString("gallery"),
                 rs.getString("attributes"),rs.getString("summary"),rs.getString("detail_html"),
-                rs.getString("delivery_description"),rs.getString("after_sales_html"),rs.getLong("category_id"),rs.getInt("self_operated"),rs.getString("brand_name"),
+                rs.getString("delivery_description"),rs.getString("after_sales_html"),rs.getLong("category_id"),rs.getInt("self_operated"),rs.getLong("brand_id"),rs.getString("brand_name"),
                 rs.getBigDecimal("market_price"), rs.getBigDecimal("member_price"),
-                rs.getBigDecimal("agreement_price"), rs.getInt("available_stock"),rs.getLong("sold_count"),rs.getString("structured_attributes"),rs.getString("platform_names"),rs.getString("variants")
+                rs.getBigDecimal("agreement_price"), rs.getInt("available_stock"),rs.getLong("sold_count"),rs.getLong("click_count"),rs.getString("structured_attributes"),rs.getString("platform_names"),rs.getString("variants")
             )).list();
     }
 
     public record ProductSummary(
         long id,long skuId, String spuCode, String skuCode, String title, String mainImage,String gallery,
-        String attributes,String summary,String detailHtml,String deliveryDescription,String afterSalesHtml,long categoryId,int selfOperated,String brandName,
-        BigDecimal marketPrice, BigDecimal memberPrice, BigDecimal agreementPrice, int availableStock,long soldCount,String structuredAttributes,String platformNames,String variants
+        String attributes,String summary,String detailHtml,String deliveryDescription,String afterSalesHtml,long categoryId,int selfOperated,long brandId,String brandName,
+        BigDecimal marketPrice, BigDecimal memberPrice, BigDecimal agreementPrice, int availableStock,long soldCount,long clickCount,String structuredAttributes,String platformNames,String variants
     ) {}
 }

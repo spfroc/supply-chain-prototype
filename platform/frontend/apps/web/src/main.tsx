@@ -818,6 +818,40 @@ function AuthPage({
   );
 }
 
+function floorProducts(floor: Row, products: Row[], portal: Row, hasAgreement: boolean) {
+  let rows = [...products];
+  const rule = String(floor.selectionRule || "LATEST");
+  const ids = String(floor.contentIds || "").split(",").map(Number).filter(Boolean);
+  if (rule === "MANUAL") rows = ids.map((id) => rows.find((row) => Number(row.skuId) === id)).filter(Boolean) as Row[];
+  if (rule === "AGREEMENT") rows = hasAgreement ? rows.filter((row) => row.agreementPrice != null) : [];
+  if (rule === "CATEGORY") rows = rows.filter((row) => Number(row.categoryId) === Number(floor.referenceId));
+  if (rule === "BRAND") rows = rows.filter((row) => Number(row.brandId) === Number(floor.referenceId));
+  if (rule === "PLATFORM") {
+    const platform = (portal.platform || []).find((row: Row) => Number(row.id) === Number(floor.referenceId));
+    rows = rows.filter((row) => platform && String(row.platformNames || "").split("、").includes(platform.title));
+  }
+  if (rule === "SALES") rows.sort((a,b) => Number(b.soldCount||0)-Number(a.soldCount||0));
+  if (rule === "VIEWS") rows.sort((a,b) => Number(b.clickCount||0)-Number(a.clickCount||0));
+  if (rule === "LATEST") rows.sort((a,b) => Number(b.id)-Number(a.id));
+  return rows.slice(0, Number(floor.displayCount || 4));
+}
+
+function HomeFloor({ floor, products, categories, portal, hasAgreement, open, add, all }: { floor: Row; products: Row[]; categories: Row[]; portal: Row; hasAgreement: boolean; open: (row: Row) => void; add: (row: Row) => void; all: (id?:number) => void }) {
+  if (floor.contentType === "PRODUCT") {
+    const rows = floorProducts(floor, products, portal, hasAgreement);
+    if (!rows.length) return null;
+    return <section className="section home-floor">
+      <div className="section-head"><div><span>{floor.selectionRule === "LATEST" ? "NEW ARRIVALS" : "CURATED PICKS"}</span><h2>{floor.title}</h2><p>{floor.subtitle}</p></div><button onClick={() => floor.linkUrl ? location.href=floor.linkUrl : all()}>查看全部 →</button></div>
+      <div className="product-grid">{rows.map((row,index)=><ProductCard key={row.skuId} product={row} index={index} open={open} add={add} />)}</div>
+    </section>;
+  }
+  const source = floor.contentType === "SOLUTION" ? portal.solution || [] : floor.contentType === "CONTENT" ? portal.content || [] : floor.contentType === "CATEGORY" ? categories : [];
+  const ids = String(floor.contentIds || "").split(",").map(Number).filter(Boolean);
+  const rows = (floor.selectionRule === "MANUAL" ? ids.map((id)=>source.find((row:Row)=>Number(row.id)===id)).filter(Boolean) : source).slice(0,Number(floor.displayCount||3));
+  if (!rows.length) return null;
+  return <section className="solutions home-floor"><div><span>{floor.contentType === "SOLUTION" ? "SCENE SOLUTION" : floor.contentType === "CATEGORY" ? "PRODUCT CATEGORY" : "PORTAL CONTENT"}</span><h2>{floor.title}</h2><p>{floor.subtitle}</p></div>{rows.map((row:Row)=><article key={row.id} style={row.imageUrl?{backgroundImage:`linear-gradient(135deg,#15365de8,#1f6ac9d9),url(${row.imageUrl})`,backgroundSize:"cover"}:undefined}><i>{String(row.title||row.name).slice(0,1)}</i><strong>{row.title||row.name}</strong><small>{row.subtitle||"查看分类商品"}</small><button onClick={()=>floor.contentType==="CATEGORY"?all(Number(row.id)):location.href=row.linkUrl||(floor.contentType==="SOLUTION"?`/web/solutions/${row.id}`:`/web/content`)}>查看详情 →</button></article>)}</section>;
+}
+
 function Home({
   products,
   categories,
@@ -875,7 +909,7 @@ function Home({
           </button>
         ))}
       </section>
-      <section className="section">
+      {!(portal.floors || []).length && <section className="section">
         <div className="section-head">
           <div>
             <span>{hasAgreement ? "AGREEMENT PICKS" : "FEATURED PRODUCTS"}</span>
@@ -895,8 +929,8 @@ function Home({
             />
           ))}
         </div>
-      </section>
-      <section className="solutions">
+      </section>}
+      {!(portal.floors || []).length && <section className="solutions">
         <div>
           <span>SCENE SOLUTION</span>
           <h2>
@@ -921,7 +955,8 @@ function Home({
             </button>
           </article>
         ))}
-      </section>
+      </section>}
+      {(portal.floors || []).filter((floor:Row)=>["ALL","WEB"].includes(floor.targetScope)).map((floor:Row)=><HomeFloor key={floor.id} floor={floor} products={products} categories={categories} portal={portal} hasAgreement={hasAgreement} open={open} add={add} all={all} />)}
     </main>
   );
 }

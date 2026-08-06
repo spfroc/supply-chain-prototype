@@ -156,6 +156,7 @@ type Module =
   | "platformOrders"
   | "navigations"
   | "banners"
+  | "homeFloors"
   | "solutions"
   | "solutionProducts"
   | "contents"
@@ -652,6 +653,7 @@ const navItems = [
     children: [
       { key: "navigations", label: "导航栏管理", icon: <MenuIcon name="navigation" /> },
       { key: "banners", label: "首页轮播图", icon: <MenuIcon name="banner" /> },
+      { key: "homeFloors", label: "首页楼层管理", icon: <MenuIcon name="content" /> },
       { key: "contents", label: "内容管理", icon: <MenuIcon name="content" /> },
     ],
   },
@@ -672,6 +674,7 @@ const modulePermission: Partial<Record<Module, string>> = {
   attributes: "product:manage", brands: "product:manage", platforms: "product:manage",
   platformProducts: "product:manage", platformOrders: "order:manage",
   navigations: "product:manage", banners: "product:manage", solutions: "product:manage",
+  homeFloors: "product:manage",
   contents: "product:manage", enterprises: "enterprise:manage", enterpriseUsers: "enterprise:manage",
   agreements: "agreement:manage", agreementProducts: "agreement:manage", agreementOrders: "order:manage",
   solutionProducts: "product:manage",
@@ -819,6 +822,7 @@ function AdminApp({ logout }: { logout: () => void }) {
       "配置 Web 客户端顶部导航名称、链接、排序与状态",
     ],
     banners: ["首页轮播图管理", "配置 Web 与 H5 首页活动内容、图片和跳转链接"],
+    homeFloors: ["首页楼层管理", "配置 Web 与 H5 首页商品、方案、分类和内容楼层"],
     solutions: ["方案管理", "维护企业采购场景方案及客户端展示内容"],
     solutionProducts: ["方案商品管理", "按采购方案维护必选商品、可选商品、数量与排序"],
     contents: ["内容管理", "维护采购指南、服务说明及其他门户内容"],
@@ -914,6 +918,7 @@ function AdminApp({ logout }: { logout: () => void }) {
           {module === "enterpriseUsers" && <EnterpriseUsers />}
           {module === "categories" && <Categories />}
           {module === "attributes" && <AttributeTemplates />}
+          {module === "homeFloors" && <HomeFloors />}
           {(
             [
               "brands",
@@ -2665,6 +2670,95 @@ function Categories() {
       </Modal>
     </>
   );
+}
+
+function HomeFloors() {
+  const { message } = AntApp.useApp();
+  const rows = usePagedLoad("/api/admin/content/home-floors", 10);
+  const products = useLoad<Row[]>(() => rootApi("/api/admin/business/products"));
+  const selectableSkus = expandProductSkus(products.data || []).filter((row) => Number(row.status) === 1);
+  const [form] = Form.useForm();
+  const [itemForm] = Form.useForm();
+  const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Row>();
+  const [floor, setFloor] = useState<Row>();
+  const [items, setItems] = useState<Row[]>([]);
+  const [itemsOpen, setItemsOpen] = useState(false);
+  const selectionRule = Form.useWatch("selectionRule", form);
+  const contentType = Form.useWatch("contentType", form);
+  const show = (row?: Row) => {
+    setEditing(row);
+    form.resetFields();
+    form.setFieldsValue(row || { contentType: "PRODUCT", selectionRule: "LATEST", displayCount: 4, targetScope: "ALL", sortOrder: 0, status: 1 });
+    setOpen(true);
+  };
+  const save = async () => {
+    try {
+      const values = await form.validateFields();
+      const response = await fetch(`/api/admin/content/home-floors${editing ? `/${editing.id}` : ""}`, {
+        method: editing ? "PUT" : "POST", headers: apiHeaders(), body: JSON.stringify(values),
+      });
+      if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.detail || "楼层保存失败"); }
+      setOpen(false); message.success("首页楼层已保存"); void rows.refresh();
+    } catch (error) { if (error instanceof Error) message.error(error.message); }
+  };
+  const manageItems = async (row: Row) => {
+    setFloor(row); setItemsOpen(true); itemForm.resetFields();
+    const result = await rootApi<Row[]>(`/api/admin/content/home-floors/${row.id}/items`); setItems(result);
+  };
+  const addItem = async () => {
+    try {
+      const values = await itemForm.validateFields();
+      const response = await fetch(`/api/admin/content/home-floors/${floor!.id}/items`, { method: "POST", headers: apiHeaders(), body: JSON.stringify(values) });
+      if (!response.ok) throw new Error("内容添加失败");
+      await manageItems(floor!); itemForm.resetFields(); message.success("楼层内容已添加");
+    } catch (error) { if (error instanceof Error) message.error(error.message); }
+  };
+  const removeItem = async (row: Row) => {
+    await fetch(`/api/admin/content/home-floors/${floor!.id}/items/${row.id}`, { method: "DELETE", headers: apiHeaders() });
+    await manageItems(floor!); message.success("已从楼层移除");
+  };
+  const typeLabels: Record<string,string> = { PRODUCT: "商品", SOLUTION: "方案", CATEGORY: "分类", CONTENT: "文章" };
+  const ruleLabels: Record<string,string> = { MANUAL: "手动选择", LATEST: "最新上架", SALES: "销量排行", VIEWS: "浏览排行", CATEGORY: "指定分类", BRAND: "指定品牌", PLATFORM: "指定平台", AGREEMENT: "协议商品" };
+  return <>
+    <Card className="data-card" title="首页楼层列表" extra={<Button type="primary" onClick={() => show()}>＋ 新增楼层</Button>}>
+      <Table rowKey="id" loading={rows.loading} dataSource={rows.data} server={rows.server} searchPlaceholder="搜索楼层名称、副标题或选品规则" columns={[
+        { title: "楼层", render: (_, row) => <><strong>{row.title}</strong><small className="subline">{row.subtitle || "—"}</small></> },
+        { title: "内容", render: (_, row) => `${typeLabels[row.contentType] || row.contentType} · ${ruleLabels[row.selectionRule] || row.selectionRule}` },
+        { title: "数量", dataIndex: "displayCount", width: 80 },
+        { title: "展示端", dataIndex: "targetScope", width: 90, render: (v) => ({ALL:"Web + H5",WEB:"Web",H5:"H5"} as Row)[v] || v },
+        { title: "排序", dataIndex: "sortOrder", width: 80 },
+        { title: "状态", dataIndex: "status", width: 90, render: (v) => <Tag color={Number(v)===1?"green":"default"}>{Number(v)===1?"启用":"停用"}</Tag> },
+        { title: "操作", width: 210, render: (_, row) => <Space>{row.selectionRule === "MANUAL" && <Button type="link" onClick={() => void manageItems(row)}>内容管理</Button>}<Button type="link" onClick={() => show(row)}>编辑</Button></Space> },
+      ]} />
+    </Card>
+    <Modal open={open} title={`${editing?"编辑":"新增"}首页楼层`} width={720} onCancel={() => setOpen(false)} onOk={() => void save()}>
+      <Form form={form} layout="vertical" className="two-column-form">
+        <Form.Item name="title" label="楼层名称" rules={[{required:true}]}><Input placeholder="例如：最新上架" /></Form.Item>
+        <Form.Item name="subtitle" label="楼层副标题"><Input /></Form.Item>
+        <Form.Item name="contentType" label="内容类型" rules={[{required:true}]}><Select options={Object.entries(typeLabels).map(([value,label])=>({value,label}))} /></Form.Item>
+        <Form.Item name="selectionRule" label="选取规则" rules={[{required:true}]}><Select options={Object.entries(ruleLabels).filter(([value])=>contentType==="PRODUCT"||["MANUAL","LATEST"].includes(value)).map(([value,label])=>({value,label}))} /></Form.Item>
+        {["CATEGORY","BRAND","PLATFORM"].includes(selectionRule) && <Form.Item name="referenceId" label="条件对象 ID" rules={[{required:true}]}><InputNumber min={1} style={{width:"100%"}} placeholder="填写分类/品牌/平台 ID" /></Form.Item>}
+        <Form.Item name="displayCount" label="展示数量" rules={[{required:true}]}><InputNumber min={1} max={50} style={{width:"100%"}} /></Form.Item>
+        <Form.Item name="targetScope" label="展示端" rules={[{required:true}]}><Select options={[{value:"ALL",label:"Web + H5"},{value:"WEB",label:"仅 Web"},{value:"H5",label:"仅 H5"}]} /></Form.Item>
+        <Form.Item name="linkUrl" label="查看全部跳转链接" className="full"><Input placeholder="/web/products" /></Form.Item>
+        <Form.Item name="sortOrder" label="楼层排序"><InputNumber min={0} style={{width:"100%"}} /></Form.Item>
+        <Form.Item name="status" label="状态"><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]} /></Form.Item>
+      </Form>
+    </Modal>
+    <Modal open={itemsOpen} title={`${floor?.title||""} · 内容管理`} width={820} footer={null} onCancel={() => setItemsOpen(false)}>
+      <Form form={itemForm}><Space.Compact style={{width:"100%",marginBottom:16}}>
+        <Form.Item name="contentId" noStyle rules={[{required:true,message:"请选择或输入内容"}]}>
+          {floor?.contentType==="PRODUCT"
+            ? <Select showSearch optionFilterProp="label" style={{flex:1}} placeholder="选择商品 SKU" options={selectableSkus.map(row=>({value:Number(row.id||row.skuId),label:`${row.title} · ${row.skuCode}`}))} />
+            : <InputNumber min={1} style={{flex:1,width:"100%"}} placeholder="输入方案、分类或文章 ID" />}
+        </Form.Item>
+        <Form.Item name="sortOrder" noStyle initialValue={0}><InputNumber min={0} placeholder="排序" /></Form.Item>
+        <Button type="primary" onClick={() => void addItem()}>添加</Button>
+      </Space.Compact></Form>
+      <Table rowKey="id" pagination={false} dataSource={items} columns={[{title:"内容",render:(_,row)=><><strong>{row.title||`内容 #${row.contentId}`}</strong><small className="subline">{row.subtitle}</small></>},{title:"排序",dataIndex:"sortOrder",width:90},{title:"操作",width:90,render:(_,row)=><Button type="link" danger onClick={()=>void removeItem(row)}>移除</Button>}]} />
+    </Modal>
+  </>;
 }
 
 function PortalManager({ module }: { module: Module }) {

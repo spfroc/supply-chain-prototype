@@ -320,6 +320,8 @@ function App() {
           <Home
             products={products}
             solutions={portal.solution || []}
+            portal={portal}
+            categories={categories}
             open={openProduct}
             add={add}
             category={(keyword="") => navigateTab("category",keyword)}
@@ -633,6 +635,8 @@ function MobileSolutionDetail({ solutionId, back, requireAuth, reloadCart, check
 function Home({
   products,
   solutions,
+  portal,
+  categories,
   open,
   add,
   category,
@@ -642,6 +646,8 @@ function Home({
 }: {
   products: Row[];
   solutions: Row[];
+  portal: Row;
+  categories: Row[];
   open: (r: Row) => void;
   add: (r: Row) => void;
   category: (keyword?: string) => void;
@@ -687,7 +693,7 @@ function Home({
           </button>
         ))}
       </div>
-      <section className="m-section">
+      {!(portal.floors || []).length && <section className="m-section">
         <header>
           <div>
             <span>{hasAgreement ? "AGREEMENT PICKS" : "FEATURED PRODUCTS"}</span>
@@ -700,8 +706,8 @@ function Home({
             <Product key={p.skuId} row={p} index={i} open={open} add={add} />
           ))}
         </DragScroll>
-      </section>
-      <section className="m-section">
+      </section>}
+      {!(portal.floors || []).length && <section className="m-section">
         <header>
           <div>
             <span>SCENE SOLUTION</span>
@@ -719,7 +725,27 @@ function Home({
             </article>
           ))}
         </DragScroll>
-      </section>
+      </section>}
+      {(portal.floors || []).filter((floor:Row)=>["ALL","H5"].includes(floor.targetScope)).map((floor:Row)=>{
+        if(floor.contentType === "PRODUCT"){
+          let rows=[...products]; const rule=String(floor.selectionRule||"LATEST");
+          const ids=String(floor.contentIds||"").split(",").map(Number).filter(Boolean);
+          if(rule==="MANUAL")rows=ids.map(id=>rows.find(row=>Number(row.skuId)===id)).filter(Boolean) as Row[];
+          if(rule==="AGREEMENT")rows=hasAgreement?rows.filter(row=>row.agreementPrice!=null):[];
+          if(rule==="CATEGORY")rows=rows.filter(row=>Number(row.categoryId)===Number(floor.referenceId));
+          if(rule==="BRAND")rows=rows.filter(row=>Number(row.brandId)===Number(floor.referenceId));
+          if(rule==="PLATFORM"){const platform=(portal.platform||[]).find((row:Row)=>Number(row.id)===Number(floor.referenceId));rows=rows.filter(row=>platform&&String(row.platformNames||"").split("、").includes(platform.title));}
+          if(rule==="SALES")rows.sort((a,b)=>Number(b.soldCount||0)-Number(a.soldCount||0));
+          if(rule==="VIEWS")rows.sort((a,b)=>Number(b.clickCount||0)-Number(a.clickCount||0));
+          if(rule==="LATEST")rows.sort((a,b)=>Number(b.id)-Number(a.id));
+          rows=rows.slice(0,Number(floor.displayCount||4)); if(!rows.length)return null;
+          return <section className="m-section" key={floor.id}><header><div><span>{rule==="LATEST"?"NEW ARRIVALS":"CURATED PICKS"}</span><h2>{floor.title}</h2><small>{floor.subtitle}</small></div><button onClick={()=>category()}>全部 ›</button></header><DragScroll className="product-scroll">{rows.map((row,index)=><Product key={row.skuId} row={row} index={index} open={open} add={add}/>)}</DragScroll></section>;
+        }
+        const source=floor.contentType==="SOLUTION"?solutions:floor.contentType==="CONTENT"?(portal.content||[]):floor.contentType==="CATEGORY"?categories:[];
+        const ids=String(floor.contentIds||"").split(",").map(Number).filter(Boolean);
+        const rows=(floor.selectionRule==="MANUAL"?ids.map(id=>source.find((row:Row)=>Number(row.id)===id)).filter(Boolean):source).slice(0,Number(floor.displayCount||3)); if(!rows.length)return null;
+        return <section className="m-section" key={floor.id}><header><div><span>{floor.contentType==="SOLUTION"?"SCENE SOLUTION":floor.contentType==="CATEGORY"?"PRODUCT CATEGORY":"PORTAL CONTENT"}</span><h2>{floor.title}</h2><small>{floor.subtitle}</small></div><button onClick={floor.contentType==="SOLUTION"?allSolutions:()=>category()}>全部 ›</button></header><DragScroll className="solution-scroll">{rows.map((row:Row)=><article key={row.id} onClick={()=>floor.contentType==="SOLUTION"?openSolution(Number(row.id)):floor.contentType==="CATEGORY"?category():row.linkUrl&&(location.href=row.linkUrl)} style={row.imageUrl?{backgroundImage:`linear-gradient(135deg,#15365de8,#1f6ac9d9),url(${row.imageUrl})`,backgroundSize:"cover"}:undefined}><span>{floor.contentType==="SOLUTION"?"SCENE SOLUTION":floor.contentType==="CATEGORY"?"PRODUCT CATEGORY":"PORTAL CONTENT"}</span><strong>{row.title||row.name}</strong><small>{row.subtitle||"查看分类商品"}</small><b>查看详情 ›</b></article>)}</DragScroll></section>;
+      })}
     </div>
   );
 }
