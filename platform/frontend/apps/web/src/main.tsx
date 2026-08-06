@@ -428,19 +428,28 @@ function App() {
                 : item.title.includes("平台")
                   ? "platforms"
                   : "products";
-          const configured = item.linkUrl
-            ? (new URL(item.linkUrl, location.origin).searchParams.get(
-                "view",
-              ) as View)
+          const configuredUrl = item.linkUrl
+            ? new URL(item.linkUrl, location.origin)
+            : null;
+          const configuredRoute = configuredUrl
+            ? parseRoute(configuredUrl)
             : null;
           const target =
-            configured && routeViews.includes(configured)
-              ? configured
+            configuredRoute && routeViews.includes(configuredRoute.view)
+              ? configuredRoute.view
               : fallback;
+          const active =
+            displayView === target &&
+            (target !== "platform-products" ||
+              Number(configuredRoute?.platformId) === Number(platformId)) &&
+            (target !== "solution-detail" ||
+              Number(configuredRoute?.solutionId) === Number(solutionId)) &&
+            (target !== "detail" ||
+              Number(configuredRoute?.productId) === Number(selected?.id));
           return (
             <button
               key={item.id || item.title}
-              className={displayView === target ? "active" : ""}
+              className={active ? "active" : ""}
               onClick={() => openNavigation(item, index)}
             >
               {item.title}
