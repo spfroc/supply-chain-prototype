@@ -1451,6 +1451,7 @@ function PlatformProducts({
                 index={index}
                 open={(product) => void openProduct(product)}
                 platformTitle={data.platform?.title}
+                platformPricePrefix={data.platform?.pricePrefix}
                 loggedIn={loggedIn}
               />
             ))}
@@ -1473,6 +1474,7 @@ function ProductCard({
   open,
   add,
   platformTitle,
+  platformPricePrefix,
   loggedIn = false,
 }: {
   product: Row;
@@ -1480,6 +1482,7 @@ function ProductCard({
   open: (r: Row) => void;
   add?: (r: Row) => void;
   platformTitle?: string;
+  platformPricePrefix?: string;
   loggedIn?: boolean;
 }) {
   const salePrice=customerPrice(product,loggedIn);
@@ -1513,6 +1516,7 @@ function ProductCard({
         <h3>{product.title}</h3>
         <p>{product.summary || "政企采购自营商品，全国配送"}</p>
         <div className="price">
+          {platformTitle && <span style={{ color: "#b35b00", fontSize: 14, fontWeight: 700, marginRight: 5 }}>{platformPricePrefix || platformTitle}价：</span>}
           <strong>{money(platformTitle ? product.platformPrice : salePrice)}</strong>
           {!platformTitle && loggedIn && <del>{money(product.marketPrice)}</del>}
           {!platformTitle && loggedIn && <small>{product.agreementPrice != null ? "协议价" : "会员价"}</small>}

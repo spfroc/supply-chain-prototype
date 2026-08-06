@@ -41,7 +41,7 @@ public class ContentAdminController {
                 @RequestParam(defaultValue="10") int pageSize,@RequestParam(defaultValue="") String keyword,
                 @RequestParam(required=false) Integer status) {
         String base="""
-            SELECT id,title,subtitle,description,image_url AS imageUrl,mobile_image_url AS mobileImageUrl,link_url AS linkUrl,
+            SELECT id,title,subtitle,description,price_prefix AS pricePrefix,image_url AS imageUrl,mobile_image_url AS mobileImageUrl,link_url AS linkUrl,
                    sort_order AS sortOrder,status,created_at AS createdAt,updated_at AS updatedAt
             FROM portal_resource
             WHERE resource_type=:type AND deleted_at IS NULL
@@ -55,11 +55,12 @@ public class ContentAdminController {
     @PostMapping("/{type}") @ResponseStatus(HttpStatus.CREATED) @Transactional
     Map<String, Object> create(@PathVariable String type, @Valid @RequestBody ResourceRequest request) {
         jdbc.sql("""
-            INSERT INTO portal_resource(resource_type,title,subtitle,description,image_url,mobile_image_url,link_url,sort_order,status)
-            VALUES(:type,:title,:subtitle,:description,:imageUrl,:mobileImageUrl,:linkUrl,:sortOrder,:status)
+            INSERT INTO portal_resource(resource_type,title,subtitle,description,price_prefix,image_url,mobile_image_url,link_url,sort_order,status)
+            VALUES(:type,:title,:subtitle,:description,:pricePrefix,:imageUrl,:mobileImageUrl,:linkUrl,:sortOrder,:status)
             """).param("type", normalize(type)).param("title", request.title())
             .param("subtitle", request.subtitle()).param("description", request.description()).param("imageUrl", request.imageUrl())
             .param("mobileImageUrl", request.mobileImageUrl())
+            .param("pricePrefix", pricePrefix(type, request))
             .param("linkUrl", request.linkUrl()).param("sortOrder", request.sortOrder())
             .param("status", request.status()).update();
         long id = jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single();
@@ -70,12 +71,13 @@ public class ContentAdminController {
     void update(@PathVariable String type, @PathVariable long id, @Valid @RequestBody ResourceRequest request) {
         int changed = jdbc.sql("""
             UPDATE portal_resource SET title=:title,subtitle=:subtitle,description=:description,image_url=:imageUrl,
-                mobile_image_url=:mobileImageUrl,
+                mobile_image_url=:mobileImageUrl,price_prefix=:pricePrefix,
                 link_url=:linkUrl,sort_order=:sortOrder,status=:status
             WHERE id=:id AND resource_type=:type AND deleted_at IS NULL
             """).param("id", id).param("type", normalize(type)).param("title", request.title())
             .param("subtitle", request.subtitle()).param("description", request.description()).param("imageUrl", request.imageUrl())
             .param("mobileImageUrl", request.mobileImageUrl())
+            .param("pricePrefix", pricePrefix(type, request))
             .param("linkUrl", request.linkUrl()).param("sortOrder", request.sortOrder())
             .param("status", request.status()).update();
         if (changed == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "记录不存在");
@@ -281,7 +283,17 @@ public class ContentAdminController {
         if (count == 0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "方案不存在");
     }
 
-    public record ResourceRequest(@NotBlank String title, String subtitle, String description, String imageUrl,
+    private String pricePrefix(String type, ResourceRequest request) {
+        if (!"PLATFORM".equals(normalize(type))) return null;
+        String configured = request.pricePrefix() == null ? "" : request.pricePrefix().trim();
+        if (!configured.isEmpty()) return configured;
+        String derived = request.title().trim()
+            .replace("企业采购", "").replace("企业购", "")
+            .replace("采购平台", "").replace("平台", "").replace("商城", "").trim();
+        return derived.isEmpty() ? request.title().trim() : derived;
+    }
+
+    public record ResourceRequest(@NotBlank String title, String subtitle, String description, String pricePrefix, String imageUrl,
                                   String mobileImageUrl, String linkUrl,
                                   @NotNull Integer sortOrder, @NotNull Integer status) {}
     public record BrandRequest(@NotBlank String name, String logo, String description,

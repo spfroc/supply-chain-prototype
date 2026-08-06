@@ -2958,6 +2958,11 @@ function PortalManager({ module }: { module: Module }) {
         ]),
     ...(module === "platforms"
       ? [{
+          title: "价格显示",
+          dataIndex: "pricePrefix",
+          width: 120,
+          render: (value: string, row: Row) => `${value || row.title || "平台"}价`,
+        }, {
           title: "内部跳转链接",
           width: 290,
           render: (_: unknown, row: Row) => {
@@ -3049,6 +3054,16 @@ function PortalManager({ module }: { module: Module }) {
           >
             <Input.TextArea rows={3} />
           </Form.Item>
+          {module === "platforms" && (
+            <Form.Item
+              name="pricePrefix"
+              label="价格显示前缀"
+              className="full"
+              extra="例如填写“国网”，Web/H5 平台商品列表显示“国网价”；留空时按平台名称自动生成。"
+            >
+              <Input maxLength={30} placeholder="例如：国网、军采、京东" suffix="价" />
+            </Form.Item>
+          )}
           {module === "solutions" && (
             <Form.Item name="description" label="方案说明" className="full">
               <Input.TextArea rows={5} placeholder="说明方案目标、设备组合、实施建议等" />

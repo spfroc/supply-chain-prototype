@@ -30,7 +30,7 @@ public class PortalController {
         var result = new LinkedHashMap<String, Object>();
         for (String type : List.of("NAVIGATION", "BANNER", "PLATFORM", "SOLUTION", "CONTENT")) {
             result.put(type.toLowerCase(), jdbc.sql("""
-                SELECT id,title,subtitle,description,image_url AS imageUrl,mobile_image_url AS mobileImageUrl,
+                SELECT id,title,subtitle,description,price_prefix AS pricePrefix,image_url AS imageUrl,mobile_image_url AS mobileImageUrl,
                        link_url AS linkUrl,sort_order AS sortOrder
                 FROM portal_resource
                 WHERE resource_type=:type AND status=1 AND deleted_at IS NULL
@@ -89,7 +89,7 @@ public class PortalController {
     Map<String, Object> platformProducts(@PathVariable long platformId) {
         Long enterpriseId=auth.optionalCurrent().map(ClientAuthService.CurrentUser::enterpriseId).orElse(null);
         var platforms=jdbc.sql("""
-            SELECT id,title,subtitle FROM portal_resource
+            SELECT id,title,subtitle,price_prefix AS pricePrefix FROM portal_resource
             WHERE id=:id AND resource_type='PLATFORM' AND status=1 AND deleted_at IS NULL
             """).param("id",platformId).query().listOfRows();
         if(platforms.isEmpty()) throw new org.springframework.web.server.ResponseStatusException(
