@@ -916,6 +916,7 @@ function Products({
   const [active, setActive] = useState<number | undefined>(initialCategory);
   const [onlyStock,setOnlyStock]=useState(false);
   const [onlyAgreement,setOnlyAgreement]=useState(false);
+  const [brand,setBrand]=useState("");
   const [attributeFilters,setAttributeFilters]=useState<Record<string,string[]>>({});
   const [hovered, setHovered] = useState<number>();
   const [sort, setSort] = useState<"default" | "price">("default");
@@ -933,19 +934,27 @@ function Products({
       ]
     : [];
   const categoryProducts=products.filter((p)=>!active||ids.includes(Number(p.categoryId)));
-  const filterDefinitions=Array.from(new Map(categoryProducts.flatMap((p)=>structuredSpecs(p.structuredAttributes))
+  const filterDefinitions=active ? Array.from(new Map(categoryProducts.flatMap((p)=>structuredSpecs(p.structuredAttributes))
     .filter((item)=>Number(item.filterable)===1&&item.value)
-    .map((item)=>[String(item.code),item])).values());
+    .map((item)=>[String(item.code),item])).values()) : [];
   const filterOptions=(code:string)=>Array.from(new Set(categoryProducts.flatMap((p)=>structuredSpecs(p.structuredAttributes))
     .filter((item)=>String(item.code)===code).map((item)=>String(item.value))));
+  const brands=Array.from(new Set(products.map((p)=>String(p.brandName||"")).filter(Boolean))).sort();
+  const chooseCategory=(next:number|undefined)=>{
+    setActive(next);
+    setBrand("");
+    setAttributeFilters({});
+    routeChanged(next,keyword);
+  };
   const filtered = products
     .filter(
       (p) =>
         (!active || ids.includes(Number(p.categoryId))) &&
         (!onlyStock || Number(p.availableStock)>0) &&
         (!onlyAgreement || p.agreementPrice != null) &&
-        Object.entries(attributeFilters).every(([code,values])=>!values.length||structuredSpecs(p.structuredAttributes)
-          .some((item)=>String(item.code)===code&&values.includes(String(item.value)))) &&
+        (active || !brand || String(p.brandName||"")===brand) &&
+        (!active || Object.entries(attributeFilters).every(([code,values])=>!values.length||structuredSpecs(p.structuredAttributes)
+          .some((item)=>String(item.code)===code&&values.includes(String(item.value))))) &&
         (`${p.title || ""} ${p.summary || ""} ${p.brandName || ""} ${p.skuCode || ""}`
           .toLowerCase().includes(keyword.toLowerCase())),
     )
@@ -963,7 +972,7 @@ function Products({
           <h3>商品分类</h3>
           <button
             className={!active ? "active" : ""}
-            onClick={() => { setActive(undefined); routeChanged(undefined,keyword); }}
+            onClick={() => chooseCategory(undefined)}
           >
             全部商品<span>›</span>
           </button>
@@ -980,7 +989,7 @@ function Products({
               >
                 <button
                   className={active === Number(root.id) ? "active" : ""}
-                  onClick={() => { setActive(Number(root.id)); routeChanged(Number(root.id),keyword); }}
+                  onClick={() => chooseCategory(Number(root.id))}
                 >
                   {root.name}
                   <span>›</span>
@@ -989,7 +998,7 @@ function Products({
                   <div className="category-flyout">
                     <header>
                       <strong>{root.name}</strong>
-                      <button onClick={() => { setActive(Number(root.id)); routeChanged(Number(root.id),keyword); }}>
+                      <button onClick={() => chooseCategory(Number(root.id))}>
                         查看全部
                       </button>
                     </header>
@@ -1003,7 +1012,7 @@ function Products({
                             className={
                               active === Number(level2.id) ? "active" : ""
                             }
-                            onClick={() => { setActive(Number(level2.id)); routeChanged(Number(level2.id),keyword); }}
+                            onClick={() => chooseCategory(Number(level2.id))}
                           >
                             {level2.name}
                           </button>
@@ -1014,7 +1023,7 @@ function Products({
                                   active === Number(item.id) ? "active" : ""
                                 }
                                 key={item.id}
-                                onClick={() => { setActive(Number(item.id)); routeChanged(Number(item.id),keyword); }}
+                                onClick={() => chooseCategory(Number(item.id))}
                               >
                                 {item.name}
                               </button>
@@ -1028,19 +1037,6 @@ function Products({
               </div>
             );
           })}
-          <h3>商品状态</h3>
-          <label><input type="checkbox" checked={onlyStock} onChange={(e)=>setOnlyStock(e.target.checked)}/> 仅看有货</label>
-          {hasAgreement && <label><input type="checkbox" checked={onlyAgreement} onChange={(e)=>setOnlyAgreement(e.target.checked)}/> 企业协议商品</label>}
-          {filterDefinitions.map((definition)=><div className="dynamic-filter" key={definition.code}>
-            <h3>{definition.name}{definition.unit?`（${definition.unit}）`:""}</h3>
-            {filterOptions(String(definition.code)).map((value)=><label key={value}>
-              <input type="checkbox" checked={(attributeFilters[String(definition.code)]||[]).includes(value)}
-                onChange={(e)=>setAttributeFilters((current)=>{
-                  const values=current[String(definition.code)]||[];
-                  return {...current,[String(definition.code)]:e.target.checked?[...values,value]:values.filter((item)=>item!==value)};
-                })}/>{value}
-            </label>)}
-          </div>)}
         </aside>
         <section className="listing">
           <div className="listing-head">
@@ -1051,14 +1047,33 @@ function Products({
               </h1>
               <p>共 {filtered.length} 款自营商品</p>
             </div>
-            <label>
-              ⌕{" "}
-              <input
-                value={keyword}
+          </div>
+          <div className="product-search-panel">
+            <label className="product-keyword">
+              <span>关键词</span>
+              <input value={keyword}
                 onChange={(e) => { setKeyword(e.target.value); routeChanged(active,e.target.value); }}
-                placeholder="在结果中搜索"
-              />
+                placeholder={active ? "搜索当前分类商品" : "搜索商品名称、品牌、型号或编码"}/>
             </label>
+            {!active && <label>
+              <span>品牌</span>
+              <select value={brand} onChange={(e)=>setBrand(e.target.value)}>
+                <option value="">全部品牌</option>
+                {brands.map((item)=><option key={item} value={item}>{item}</option>)}
+              </select>
+            </label>}
+            <label className="search-check"><input type="checkbox" checked={onlyStock} onChange={(e)=>setOnlyStock(e.target.checked)}/> 仅看有货</label>
+            {hasAgreement && <label className="search-check"><input type="checkbox" checked={onlyAgreement} onChange={(e)=>setOnlyAgreement(e.target.checked)}/> 企业协议商品</label>}
+            {active && filterDefinitions.map((definition)=><div className="product-attribute-filter" key={definition.code}>
+              <span>{definition.name}{definition.unit?`（${definition.unit}）`:""}</span>
+              <div>{filterOptions(String(definition.code)).map((value)=><label key={value}>
+                <input type="checkbox" checked={(attributeFilters[String(definition.code)]||[]).includes(value)}
+                  onChange={(e)=>setAttributeFilters((current)=>{
+                    const values=current[String(definition.code)]||[];
+                    return {...current,[String(definition.code)]:e.target.checked?[...values,value]:values.filter((item)=>item!==value)};
+                  })}/>{value}
+              </label>)}</div>
+            </div>)}
           </div>
           <div className="sort">
             <button
