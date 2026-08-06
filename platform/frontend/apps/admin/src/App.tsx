@@ -2335,7 +2335,7 @@ function AttributeTemplates() {
         <Form.Item name="attributeType" label="属性用途" rules={[{required:true}]}><Radio.Group options={[{label:"基础属性",value:"BASIC"},{label:"销售规格",value:"SPEC"},{label:"扩展属性",value:"EXTENDED"}]} /></Form.Item>
         <Form.Item name="inputType" label="输入组件" rules={[{required:true}]}><Select options={[{label:"文本",value:"TEXT"},{label:"数字",value:"NUMBER"},{label:"下拉单选",value:"SELECT"},{label:"Radio单选",value:"RADIO"},{label:"Checkbox多选",value:"CHECKBOX"},{label:"开关",value:"SWITCH"},{label:"日期",value:"DATE"}]} /></Form.Item>
         <Form.Item name="unit" label="单位"><Input placeholder="GB、W、米、个月" /></Form.Item>
-        <Form.Item name="categoryIds" label="适用分类" className="full" rules={[{required:true,message:"至少选择一个分类"}]}><Select mode="multiple" showSearch optionFilterProp="label" options={(categories.data||[]).map(c=>({value:Number(c.id),label:`${"　".repeat(Number(c.level)-1)}${c.name}（${c.level}级）`}))} /></Form.Item>
+        <Form.Item name="categoryIds" label="适用分类" className="full" extra="可留空；留空时保留属性模板，但不关联任何分类"><Select mode="multiple" showSearch optionFilterProp="label" options={(categories.data||[]).map(c=>({value:Number(c.id),label:`${"　".repeat(Number(c.level)-1)}${c.name}（${c.level}级）`}))} /></Form.Item>
         <Form.Item name="requiredFlag" label="是否必填"><Radio.Group options={[{label:"必填",value:1},{label:"选填",value:0}]} /></Form.Item>
         <Form.Item name="visibleFlag" label="前台展示"><Radio.Group options={[{label:"展示",value:1},{label:"隐藏",value:0}]} /></Form.Item>
         <Form.Item name="filterable" label="参与筛选"><Radio.Group options={[{label:"是",value:1},{label:"否",value:0}]} /></Form.Item>

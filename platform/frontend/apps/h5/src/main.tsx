@@ -57,6 +57,7 @@ function DragScroll({ className, children }: { className: string; children: Reac
 }
 const money = (v: any) =>
   `¥${Number(v || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const productPrice = (row: Row) => row.agreementPrice != null ? row.agreementPrice : row.marketPrice;
 const dateTime = (value: string) =>
   value
     ? new Intl.DateTimeFormat("zh-CN", {
@@ -591,7 +592,7 @@ function MobileSolutionDetail({ solutionId, back, requireAuth, reloadCart, check
     }).catch((error) => Toast.show(error.message));
   }, [solutionId]);
   const chosen = (data.products || []).filter((row: Row) => Number(row.requiredItem) === 1 || selectedItems[row.skuId]);
-  const total = chosen.reduce((sum: number, row: Row) => sum + Number(row.memberPrice || 0) * Number(quantities[row.skuId] || 1), 0);
+  const total = chosen.reduce((sum: number, row: Row) => sum + Number(row.marketPrice || 0) * Number(quantities[row.skuId] || 1), 0);
   const submit = () => requireAuth(async () => {
     try {
       await Promise.all(chosen.map((row: Row) => api("/api/client/cart", { method: "POST", body: JSON.stringify({ skuId: row.skuId, solutionId, quantity: quantities[row.skuId] || 1 }) })));
@@ -617,7 +618,7 @@ function MobileSolutionDetail({ solutionId, back, requireAuth, reloadCart, check
           return <article key={row.relationId} className={!checked ? "off" : ""}>
             <label><input type="checkbox" checked={checked} disabled={required} onChange={(event) => setSelectedItems({ ...selectedItems, [row.skuId]: event.target.checked })} /><em>{required ? "必选" : "可选"}</em></label>
             <div className="m-solution-image">{row.mainImage ? <img src={row.mainImage} alt={row.title} loading="lazy" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : null}<span>{row.title?.slice(0, 1) || "商"}</span></div>
-            <div className="m-solution-product"><strong>{row.title}</strong><small>{money(row.memberPrice)}</small><div><button disabled={!checked} onClick={() => setQuantities({ ...quantities, [row.skuId]: Math.max(1, (quantities[row.skuId] || 1) - 1) })}>−</button><b>{quantities[row.skuId] || 1}</b><button disabled={!checked} onClick={() => setQuantities({ ...quantities, [row.skuId]: Math.min(Number(row.availableStock), (quantities[row.skuId] || 1) + 1) })}>＋</button></div></div>
+            <div className="m-solution-product"><strong>{row.title}</strong><small>{money(row.marketPrice)}</small><div><button disabled={!checked} onClick={() => setQuantities({ ...quantities, [row.skuId]: Math.max(1, (quantities[row.skuId] || 1) - 1) })}>−</button><b>{quantities[row.skuId] || 1}</b><button disabled={!checked} onClick={() => setQuantities({ ...quantities, [row.skuId]: Math.min(Number(row.availableStock), (quantities[row.skuId] || 1) + 1) })}>＋</button></div></div>
           </article>;
         })}
       </section>
@@ -757,7 +758,7 @@ function Product({
       </div>
       <small className="m-product-sales">已售 {row.soldCount || 0} 件</small>
       <div>
-        <strong>{money(row.agreementPrice || row.memberPrice)}</strong>
+        <strong>{money(productPrice(row))}</strong>
         <del>{money(row.marketPrice)}</del>
         <button
           onClick={(e) => {
@@ -872,7 +873,7 @@ function Category({
               </i>
               <span>
                 <strong>{p.title}</strong>
-                <small>{money(p.agreementPrice || p.memberPrice)}</small>
+                <small>{money(productPrice(p))}</small>
               </span>
               <em>›</em>
             </button>
@@ -919,7 +920,7 @@ function ProductDetail({
   const share = async () => {
     const data = {
       title: product.title,
-      text: `${product.title} ${money(current.agreementPrice || current.memberPrice)}`,
+      text: `${product.title} ${money(productPrice(current))}`,
       url: location.href,
     };
     try {
@@ -994,17 +995,17 @@ function ProductDetail({
       <article className="detail-info">
         <div>
           <strong>
-            {money(current.agreementPrice || current.memberPrice)}
+            {money(productPrice(current))}
           </strong>
-          <del>{money(current.marketPrice)}</del>
-          <em>企业协议价</em>
+          {current.agreementPrice != null && <del>{money(current.marketPrice)}</del>}
+          <em>{current.agreementPrice != null ? "企业协议价" : "商品原价"}</em>
         </div>
         <h1>{product.title}</h1>
         <p>{product.summary}</p>
         <small>已售 {product.soldCount || 0} 件</small>
         <section>
           {Number(product.selfOperated) === 1 && <span>自营正品</span>}
-          <span>协议专价</span>
+          <span>{current.agreementPrice != null ? "协议专价" : "原价结算"}</span>
           <span>全国配送</span>
         </section>
       </article>
@@ -1099,7 +1100,7 @@ function Cart({
         <h1>购物车</h1>
         <button>管理</button>
       </header>
-      <div className="agreement-tip">✓ 当前商品均已匹配企业协议最优价格</div>
+      <div className="agreement-tip">{selected.some((row)=>Number(row.agreementPriced)===1) ? "协议商品按协议价结算，其他商品按原价结算" : "当前无协议价格，商品按原价结算"}</div>
       {rows.map((r) => (
         <article key={r.id}>
           <input
@@ -1139,7 +1140,7 @@ function Cart({
         <div className="m-empty">
           <i>🛒</i>
           <h2>购物车为空</h2>
-          <p>选择协议商品后再来结算</p>
+          <p>选择商品后再来结算</p>
         </div>
       )}
       <footer className="checkout">

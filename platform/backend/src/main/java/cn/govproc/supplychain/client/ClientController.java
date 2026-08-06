@@ -186,7 +186,8 @@ public class ClientController {
             SELECT c.id, c.sku_id AS skuId, c.solution_id AS solutionId,c.quantity, c.selected, p.title, p.main_image AS mainImage,
               s.sku_code AS skuCode, s.spec_json AS specJson, s.stock-s.reserved_stock AS availableStock,
               s.market_price AS marketPrice, s.member_price AS memberPrice,
-              COALESCE(ai.agreement_price,s.member_price) AS salePrice
+              COALESCE(ai.agreement_price,s.market_price) AS salePrice,
+              CASE WHEN ai.id IS NULL THEN 0 ELSE 1 END AS agreementPriced
             FROM cart_item c
             JOIN product_sku s ON s.id=c.sku_id
             JOIN product_spu p ON p.id=s.spu_id
@@ -301,23 +302,23 @@ public class ClientController {
             .params(Map.of("enterpriseId", enterpriseId(), "key", idempotencyKey)).query().listOfRows();
         if (!existing.isEmpty()) return existing.getFirst();
 
-        long agreementId = jdbc.sql("""
+        Long agreementId = jdbc.sql("""
             SELECT id FROM agreement WHERE enterprise_id=:enterpriseId AND status=1 AND deleted_at IS NULL
               AND CURRENT_DATE BETWEEN effective_date AND expiry_date ORDER BY id DESC LIMIT 1
             """).param("enterpriseId", enterpriseId()).query(Long.class)
-            .optional().orElseThrow(() -> new IllegalArgumentException("企业当前没有生效协议，无法下单"));
+            .optional().orElse(null);
         List<Map<String, Object>> lines = jdbc.sql("""
             SELECT c.id AS cartId,c.sku_id AS skuId,c.quantity,p.title,s.sku_code AS skuCode,
               CAST(s.spec_json AS CHAR) AS skuSpecs,COALESCE(NULLIF(s.sku_image,''),p.main_image,'') AS skuImage,
               COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('name',ad.name,'value',pav.value_text,'unit',ad.unit))
                 FROM product_attribute_value pav JOIN attribute_definition ad ON ad.id=pav.attribute_id
                 WHERE pav.product_id=p.id AND ad.visible_flag=1),JSON_ARRAY()) AS attributeSnapshot,
-              s.stock-s.reserved_stock AS availableStock,COALESCE(ai.agreement_price,s.member_price) AS unitPrice
+              s.stock-s.reserved_stock AS availableStock,COALESCE(ai.agreement_price,s.market_price) AS unitPrice
             FROM cart_item c JOIN product_sku s ON s.id=c.sku_id JOIN product_spu p ON p.id=s.spu_id
             LEFT JOIN agreement_item ai ON ai.agreement_id=:agreementId AND ai.sku_id=s.id
               AND ai.status=1 AND ai.deleted_at IS NULL
             WHERE c.user_id=:userId AND c.selected=1
-            """).params(Map.of("agreementId", agreementId, "userId", userId())).query().listOfRows();
+            """).param("agreementId",agreementId).param("userId",userId()).query().listOfRows();
         if (lines.isEmpty()) throw new IllegalArgumentException("请先选择需要结算的商品");
         for (var line : lines) {
             if (((Number) line.get("quantity")).intValue() > ((Number) line.get("availableStock")).intValue()) {
@@ -381,8 +382,9 @@ public class ClientController {
             INSERT INTO order_main(order_no,enterprise_id,user_id,agreement_id,item_amount,freight_amount,
               payable_amount,payment_status,order_status,price_version,idempotency_key,payment_due_at)
             VALUES(:orderNo,:enterpriseId,:userId,:agreementId,:amount,0,:amount,0,0,:priceVersion,:key,DATE_ADD(NOW(),INTERVAL 48 HOUR))
-            """).params(Map.of("orderNo", orderNo, "enterpriseId", enterpriseId(), "userId", userId(),
-                "agreementId", agreementId, "amount", amount, "priceVersion", UUID.randomUUID().toString(), "key", idempotencyKey)).update();
+            """).param("orderNo",orderNo).param("enterpriseId",enterpriseId()).param("userId",userId())
+            .param("agreementId",agreementId).param("amount",amount).param("priceVersion",UUID.randomUUID().toString())
+            .param("key",idempotencyKey).update();
         long orderId = jdbc.sql("SELECT id FROM order_main WHERE order_no=:orderNo").param("orderNo", orderNo).query(Long.class).single();
         Map<Long, Long> subOrderByAddress = new HashMap<>();
         for (var allocation : allocations) {

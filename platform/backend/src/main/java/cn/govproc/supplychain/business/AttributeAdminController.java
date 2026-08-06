@@ -4,7 +4,6 @@ import cn.govproc.supplychain.common.PageResult;
 import cn.govproc.supplychain.common.PageSupport;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotEmpty;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -132,9 +131,9 @@ public class AttributeAdminController {
     }
 
     private List<Map<String,Object>> options(long id){return jdbc.sql("SELECT id,option_code AS optionCode,option_label AS optionLabel,color_value AS colorValue,sort_order AS sortOrder,status FROM attribute_option WHERE attribute_id=:id AND deleted_at IS NULL ORDER BY sort_order,id").param("id",id).query().listOfRows();}
-    private void saveCategories(long id,List<Long> categoryIds){for(long categoryId:categoryIds) jdbc.sql("INSERT INTO category_attribute(category_id,attribute_id,sort_order) VALUES(:categoryId,:id,0)").params(Map.of("categoryId",categoryId,"id",id)).update();}
+    private void saveCategories(long id,List<Long> categoryIds){if(categoryIds==null)return;for(long categoryId:categoryIds) jdbc.sql("INSERT INTO category_attribute(category_id,attribute_id,sort_order) VALUES(:categoryId,:id,0)").params(Map.of("categoryId",categoryId,"id",id)).update();}
     private Map<String,Object> params(AttributeRequest r){var p=new LinkedHashMap<String,Object>();p.put("code",r.code().trim().toUpperCase());p.put("name",r.name());p.put("groupName",r.groupName());p.put("attributeType",r.attributeType());p.put("inputType",r.inputType());p.put("unit",value(r.unit()));p.put("requiredFlag",r.requiredFlag());p.put("filterable",r.filterable());p.put("searchable",r.searchable());p.put("visibleFlag",r.visibleFlag());p.put("allowCustom",r.allowCustom());p.put("sortOrder",r.sortOrder());p.put("status",r.status());return p;}
     private static String value(String value){return value==null?"":value;}
-    public record AttributeRequest(@NotBlank String code,@NotBlank String name,@NotBlank String groupName,@NotBlank String attributeType,@NotBlank String inputType,String unit,int requiredFlag,int filterable,int searchable,int visibleFlag,int allowCustom,int sortOrder,int status,@NotEmpty List<Long> categoryIds){}
+    public record AttributeRequest(@NotBlank String code,@NotBlank String name,@NotBlank String groupName,@NotBlank String attributeType,@NotBlank String inputType,String unit,int requiredFlag,int filterable,int searchable,int visibleFlag,int allowCustom,int sortOrder,int status,List<Long> categoryIds){}
     public record OptionRequest(@NotBlank String optionCode,@NotBlank String optionLabel,String colorValue,int sortOrder,int status){}
 }

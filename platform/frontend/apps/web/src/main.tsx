@@ -30,6 +30,7 @@ const structuredSpecs = (value: unknown): Row[] => {
 };
 const money = (value: any) =>
   `¥${Number(value || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const productPrice = (row: Row) => row.agreementPrice != null ? row.agreementPrice : row.marketPrice;
 const dateTime = (value: string) =>
   value
     ? new Intl.DateTimeFormat("zh-CN", {
@@ -922,8 +923,7 @@ function Products({
     )
     .sort((a, b) =>
       sort === "price"
-        ? Number(a.agreementPrice || a.memberPrice) -
-          Number(b.agreementPrice || b.memberPrice)
+        ? Number(productPrice(a)) - Number(productPrice(b))
         : 0,
     );
   const roots = categories.filter((x) => Number(x.level) === 1);
@@ -1153,7 +1153,7 @@ function SolutionDetail({
     }).catch((error) => notify(error.message));
   }, [solutionId]);
   const chosen = (data.products || []).filter((row: Row) => Number(row.requiredItem) === 1 || selectedItems[row.skuId]);
-  const total = chosen.reduce((sum: number, row: Row) => sum + Number(row.memberPrice || 0) * Number(quantities[row.skuId] || 1), 0);
+  const total = chosen.reduce((sum: number, row: Row) => sum + Number(row.marketPrice || 0) * Number(quantities[row.skuId] || 1), 0);
   const submit = () => requireAuth(async () => {
     if (!chosen.length) return notify("请至少选择一件方案商品");
     setSubmitting(true);
@@ -1197,7 +1197,7 @@ function SolutionDetail({
               </label>
               <div className="solution-product-image">{row.mainImage ? <img src={row.mainImage} alt={row.title} loading="lazy" onError={(event) => { event.currentTarget.style.display = "none"; }} /> : null}<span>{row.title?.slice(0, 1) || "商"}<small>{row.mainImage ? "图片加载失败" : "暂无主图"}</small></span></div>
               <div><strong>{row.title}</strong><small>{row.skuCode}</small><p>{row.summary}</p></div>
-              <b>{money(row.memberPrice)}</b>
+              <b>{money(row.marketPrice)}</b>
               <div className="solution-counter">
                 <button disabled={!checked} onClick={() => setQuantities({ ...quantities, [row.skuId]: Math.max(1, (quantities[row.skuId] || 1) - 1) })}>−</button>
                 <input disabled={!checked} type="number" min="1" max={row.availableStock} value={quantities[row.skuId] || 1} onChange={(event) => setQuantities({ ...quantities, [row.skuId]: Math.max(1, Number(event.target.value) || 1) })} />
@@ -1326,7 +1326,7 @@ function ProductCard({
         <p>{product.summary || "政企采购自营商品，全国配送"}</p>
         <div className="price">
           <strong>
-            {money(platformTitle ? product.platformPrice : product.agreementPrice || product.memberPrice)}
+            {money(platformTitle ? product.platformPrice : productPrice(product))}
           </strong>
           <del>{money(product.marketPrice)}</del>
         </div>
@@ -1426,12 +1426,12 @@ function Detail({
           <h1>{product.title}</h1>
           <p>{product.summary}</p>
           <div className="agreement-price">
-            <label>企业协议价</label>
+            <label>{current.agreementPrice != null ? "企业协议价" : "商品原价"}</label>
             <strong>
-              {money(current.agreementPrice || current.memberPrice)}
+              {money(productPrice(current))}
             </strong>
-            <del>市场价 {money(current.marketPrice)}</del>
-            <em>已为山东高速数字科技匹配有效协议</em>
+            {current.agreementPrice != null && <del>市场价 {money(current.marketPrice)}</del>}
+            <em>{current.agreementPrice != null ? "已匹配当前企业有效协议" : "当前无协议价格，按商品原价结算"}</em>
           </div>
           {variants.length>1&&<div className="sku-selector"><strong>选择规格</strong><div>
             {variants.map((item)=><button key={item.skuId} className={Number(item.skuId)===Number(current.skuId)?"active":""}
@@ -1624,7 +1624,7 @@ function Cart({
       </div>
       <div className="cart-title">
         <h1>购物车</h1>
-        <p>所选商品已匹配企业协议最优价格</p>
+        <p>{selected.some((row)=>Number(row.agreementPriced)===1) ? "协议商品按协议价结算，其他商品按原价结算" : "当前无协议价格，商品按原价结算"}</p>
       </div>
       {!rows.length ? (
         <div className="empty">
@@ -1639,7 +1639,7 @@ function Cart({
             <header>
               <span>选择</span>
               <span>商品信息</span>
-              <span>协议单价</span>
+              <span>结算单价</span>
               <span>数量</span>
               <span>小计</span>
               <span>操作</span>
@@ -1658,7 +1658,7 @@ function Cart({
                   <span>
                     <strong>{row.title}</strong>
                     <small>{row.skuCode}</small>
-                    <em>企业协议商品</em>
+                    <em>{Number(row.agreementPriced)===1 ? "企业协议价" : "商品原价"}</em>
                   </span>
                 </div>
                 <strong>
@@ -1696,7 +1696,7 @@ function Cart({
               <span>
                 已选择 <b>{selected.length}</b> 种商品
               </span>
-              <small>协议价格不可与优惠券叠加</small>
+              <small>{selected.some((row)=>Number(row.agreementPriced)===1) ? "协议价格不可与优惠券叠加" : "当前按商品原价结算"}</small>
             </div>
             <div>
               <span>合计（不含运费）</span>
