@@ -438,14 +438,26 @@ function App() {
             configuredRoute && routeViews.includes(configuredRoute.view)
               ? configuredRoute.view
               : fallback;
-          const active =
-            displayView === target &&
-            (target !== "platform-products" ||
-              Number(configuredRoute?.platformId) === Number(platformId)) &&
-            (target !== "solution-detail" ||
-              Number(configuredRoute?.solutionId) === Number(solutionId)) &&
-            (target !== "detail" ||
-              Number(configuredRoute?.productId) === Number(selected?.id));
+          const matchesCurrentRoute = (candidate: ReturnType<typeof parseRoute>) =>
+            displayView === candidate.view &&
+            (candidate.view !== "products" ||
+              Number(candidate.categoryId) === Number(categoryId)) &&
+            (candidate.view !== "platform-products" ||
+              Number(candidate.platformId) === Number(platformId)) &&
+            (candidate.view !== "solution-detail" ||
+              Number(candidate.solutionId) === Number(solutionId)) &&
+            (candidate.view !== "detail" ||
+              Number(candidate.productId) === Number(selected?.id));
+          const hasConfiguredMatch = (portal.navigation || []).some((row: Row) => {
+            if (!row.linkUrl) return false;
+            const candidateUrl = new URL(row.linkUrl, location.origin);
+            return candidateUrl.origin === location.origin &&
+              matchesCurrentRoute(parseRoute(candidateUrl));
+          });
+          const active = configuredRoute
+            ? configuredUrl?.origin === location.origin &&
+              matchesCurrentRoute(configuredRoute)
+            : displayView === fallback && !hasConfiguredMatch;
           return (
             <button
               key={item.id || item.title}
