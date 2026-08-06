@@ -2853,11 +2853,21 @@ function PortalManager({ module }: { module: Module }) {
       ? []
       : [
           {
-            title: "跳转链接",
+            title: module === "platforms" ? "配置跳转链接" : "跳转链接",
             dataIndex: "linkUrl",
             render: (v: string) => v || "—",
           },
         ]),
+    ...(module === "platforms"
+      ? [{
+          title: "内部跳转链接",
+          width: 290,
+          render: (_: unknown, row: Row) => {
+            const internalUrl = `/web/platforms/${row.id}/products`;
+            return <Typography.Text code copyable={{ text: internalUrl, tooltips: ["复制链接", "已复制"] }}>{internalUrl}</Typography.Text>;
+          },
+        }]
+      : []),
     { title: "排序", dataIndex: "sortOrder", width: 90 },
     {
       title: "状态",
@@ -3004,10 +3014,10 @@ function PortalManager({ module }: { module: Module }) {
           </Button>
           <Typography.Text
             copyable={{
-              text: `/web/?view=platform-products&platformId=${platform?.id}`,
+              text: `/web/platforms/${platform?.id}/products`,
             }}
           >
-            导航入口：/web/?view=platform-products&amp;platformId={platform?.id}
+            导航入口：/web/platforms/{platform?.id}/products
           </Typography.Text>
         </Space>
         <Table
