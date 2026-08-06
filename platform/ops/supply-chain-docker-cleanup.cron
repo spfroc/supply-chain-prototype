@@ -1,0 +1,2 @@
+# Clean rebuildable Docker artifacts every day at 03:20.
+20 3 * * * /home/spf/bin/supply-chain-docker-cleanup >>/home/spf/supply-chain-docker-cleanup.log 2>&1
