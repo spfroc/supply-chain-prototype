@@ -441,13 +441,13 @@ function App() {
           const matchesCurrentRoute = (candidate: ReturnType<typeof parseRoute>) =>
             displayView === candidate.view &&
             (candidate.view !== "products" ||
-              Number(candidate.categoryId) === Number(categoryId)) &&
+              (candidate.categoryId ?? null) === (categoryId ?? null)) &&
             (candidate.view !== "platform-products" ||
-              Number(candidate.platformId) === Number(platformId)) &&
+              (candidate.platformId ?? null) === (platformId ?? null)) &&
             (candidate.view !== "solution-detail" ||
-              Number(candidate.solutionId) === Number(solutionId)) &&
+              (candidate.solutionId ?? null) === (solutionId ?? null)) &&
             (candidate.view !== "detail" ||
-              Number(candidate.productId) === Number(selected?.id));
+              (candidate.productId ?? null) === (selected?.id ?? null));
           const hasConfiguredMatch = (portal.navigation || []).some((row: Row) => {
             if (!row.linkUrl) return false;
             const candidateUrl = new URL(row.linkUrl, location.origin);
