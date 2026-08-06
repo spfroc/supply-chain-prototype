@@ -2676,6 +2676,9 @@ function HomeFloors() {
   const { message } = AntApp.useApp();
   const rows = usePagedLoad("/api/admin/content/home-floors", 10);
   const products = useLoad<Row[]>(() => rootApi("/api/admin/business/products"));
+  const categories = useLoad<Row[]>(() => rootApi("/api/admin/business/categories"));
+  const brands = useLoad<Row[]>(() => rootApi("/api/admin/content/brands/list"));
+  const platforms = useLoad<Row[]>(() => rootApi("/api/admin/content/platform"));
   const selectableSkus = expandProductSkus(products.data || []).filter((row) => Number(row.status) === 1);
   const [form] = Form.useForm();
   const [itemForm] = Form.useForm();
@@ -2738,7 +2741,7 @@ function HomeFloors() {
         <Form.Item name="subtitle" label="楼层副标题"><Input /></Form.Item>
         <Form.Item name="contentType" label="内容类型" rules={[{required:true}]}><Select options={Object.entries(typeLabels).map(([value,label])=>({value,label}))} /></Form.Item>
         <Form.Item name="selectionRule" label="选取规则" rules={[{required:true}]}><Select options={Object.entries(ruleLabels).filter(([value])=>contentType==="PRODUCT"||["MANUAL","LATEST"].includes(value)).map(([value,label])=>({value,label}))} /></Form.Item>
-        {["CATEGORY","BRAND","PLATFORM"].includes(selectionRule) && <Form.Item name="referenceId" label="条件对象 ID" rules={[{required:true}]}><InputNumber min={1} style={{width:"100%"}} placeholder="填写分类/品牌/平台 ID" /></Form.Item>}
+        {["CATEGORY","BRAND","PLATFORM"].includes(selectionRule) && <Form.Item name="referenceId" label={selectionRule==="CATEGORY"?"指定分类":selectionRule==="BRAND"?"指定品牌":"指定平台"} rules={[{required:true}]}><Select showSearch optionFilterProp="label" placeholder="请选择" options={(selectionRule==="CATEGORY"?categories.data||[]:selectionRule==="BRAND"?brands.data||[]:platforms.data||[]).map(row=>({value:Number(row.id),label:selectionRule==="CATEGORY"?`${"　".repeat(Math.max(0,Number(row.level)-1))}${row.name}`:row.name||row.title}))} /></Form.Item>}
         <Form.Item name="displayCount" label="展示数量" rules={[{required:true}]}><InputNumber min={1} max={50} style={{width:"100%"}} /></Form.Item>
         <Form.Item name="targetScope" label="展示端" rules={[{required:true}]}><Select options={[{value:"ALL",label:"Web + H5"},{value:"WEB",label:"仅 Web"},{value:"H5",label:"仅 H5"}]} /></Form.Item>
         <Form.Item name="linkUrl" label="查看全部跳转链接" className="full"><Input placeholder="/web/products" /></Form.Item>

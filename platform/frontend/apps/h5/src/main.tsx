@@ -732,7 +732,11 @@ function Home({
           const ids=String(floor.contentIds||"").split(",").map(Number).filter(Boolean);
           if(rule==="MANUAL")rows=ids.map(id=>rows.find(row=>Number(row.skuId)===id)).filter(Boolean) as Row[];
           if(rule==="AGREEMENT")rows=hasAgreement?rows.filter(row=>row.agreementPrice!=null):[];
-          if(rule==="CATEGORY")rows=rows.filter(row=>Number(row.categoryId)===Number(floor.referenceId));
+          if(rule==="CATEGORY"){
+            const categoryIds=new Set<number>([Number(floor.referenceId)]); let changed=true;
+            while(changed){changed=false;categories.forEach(row=>{if(categoryIds.has(Number(row.parentId))&&!categoryIds.has(Number(row.id))){categoryIds.add(Number(row.id));changed=true;}});}
+            rows=rows.filter(row=>categoryIds.has(Number(row.categoryId)));
+          }
           if(rule==="BRAND")rows=rows.filter(row=>Number(row.brandId)===Number(floor.referenceId));
           if(rule==="PLATFORM"){const platform=(portal.platform||[]).find((row:Row)=>Number(row.id)===Number(floor.referenceId));rows=rows.filter(row=>platform&&String(row.platformNames||"").split("、").includes(platform.title));}
           if(rule==="SALES")rows.sort((a,b)=>Number(b.soldCount||0)-Number(a.soldCount||0));

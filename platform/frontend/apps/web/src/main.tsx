@@ -818,13 +818,27 @@ function AuthPage({
   );
 }
 
-function floorProducts(floor: Row, products: Row[], portal: Row, hasAgreement: boolean) {
+function categoryTreeIds(categories: Row[], rootId: number) {
+  const ids = new Set<number>([rootId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    categories.forEach((row) => {
+      if (ids.has(Number(row.parentId)) && !ids.has(Number(row.id))) { ids.add(Number(row.id)); changed = true; }
+    });
+  }
+  return ids;
+}
+function floorProducts(floor: Row, products: Row[], categories: Row[], portal: Row, hasAgreement: boolean) {
   let rows = [...products];
   const rule = String(floor.selectionRule || "LATEST");
   const ids = String(floor.contentIds || "").split(",").map(Number).filter(Boolean);
   if (rule === "MANUAL") rows = ids.map((id) => rows.find((row) => Number(row.skuId) === id)).filter(Boolean) as Row[];
   if (rule === "AGREEMENT") rows = hasAgreement ? rows.filter((row) => row.agreementPrice != null) : [];
-  if (rule === "CATEGORY") rows = rows.filter((row) => Number(row.categoryId) === Number(floor.referenceId));
+  if (rule === "CATEGORY") {
+    const categoryIds = categoryTreeIds(categories, Number(floor.referenceId));
+    rows = rows.filter((row) => categoryIds.has(Number(row.categoryId)));
+  }
   if (rule === "BRAND") rows = rows.filter((row) => Number(row.brandId) === Number(floor.referenceId));
   if (rule === "PLATFORM") {
     const platform = (portal.platform || []).find((row: Row) => Number(row.id) === Number(floor.referenceId));
@@ -838,7 +852,7 @@ function floorProducts(floor: Row, products: Row[], portal: Row, hasAgreement: b
 
 function HomeFloor({ floor, products, categories, portal, hasAgreement, open, add, all }: { floor: Row; products: Row[]; categories: Row[]; portal: Row; hasAgreement: boolean; open: (row: Row) => void; add: (row: Row) => void; all: (id?:number) => void }) {
   if (floor.contentType === "PRODUCT") {
-    const rows = floorProducts(floor, products, portal, hasAgreement);
+    const rows = floorProducts(floor, products, categories, portal, hasAgreement);
     if (!rows.length) return null;
     return <section className="section home-floor">
       <div className="section-head"><div><span>{floor.selectionRule === "LATEST" ? "NEW ARRIVALS" : "CURATED PICKS"}</span><h2>{floor.title}</h2><p>{floor.subtitle}</p></div><button onClick={() => floor.linkUrl ? location.href=floor.linkUrl : all()}>查看全部 →</button></div>
