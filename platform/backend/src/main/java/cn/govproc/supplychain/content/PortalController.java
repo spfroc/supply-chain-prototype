@@ -12,14 +12,17 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
+import cn.govproc.supplychain.auth.ClientAuthService;
 
 @RestController
 @RequestMapping("/api/public/portal")
 public class PortalController {
     private final JdbcClient jdbc;
+    private final ClientAuthService auth;
 
-    public PortalController(JdbcClient jdbc) {
+    public PortalController(JdbcClient jdbc, ClientAuthService auth) {
         this.jdbc = jdbc;
+        this.auth = auth;
     }
 
     @GetMapping
@@ -84,6 +87,7 @@ public class PortalController {
 
     @GetMapping("/platforms/{platformId}/products")
     Map<String, Object> platformProducts(@PathVariable long platformId) {
+        Long enterpriseId=auth.optionalCurrent().map(ClientAuthService.CurrentUser::enterpriseId).orElse(null);
         var platforms=jdbc.sql("""
             SELECT id,title,subtitle FROM portal_resource
             WHERE id=:id AND resource_type='PLATFORM' AND status=1 AND deleted_at IS NULL
@@ -93,13 +97,16 @@ public class PortalController {
         var platform=platforms.getFirst();
         var products=jdbc.sql("""
             SELECT pp.id AS relationId,pp.sku_id AS skuId,p.title,p.main_image AS mainImage,p.summary,p.self_operated AS selfOperated,
-                   s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
+                   s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,ai.agreement_price AS agreementPrice,
                    s.stock-s.reserved_stock AS availableStock,pp.platform_price AS platformPrice,
                    pp.product_url AS productUrl,pp.click_count AS clickCount
                    ,COALESCE(sales.soldCount,0) AS soldCount
             FROM product_platform pp
             JOIN product_sku s ON s.id=pp.sku_id AND s.status=1 AND s.deleted_at IS NULL
             JOIN product_spu p ON p.id=s.spu_id AND p.status=1 AND p.deleted_at IS NULL
+            LEFT JOIN agreement a ON a.enterprise_id=:enterpriseId AND a.status=1
+              AND CURRENT_DATE BETWEEN a.effective_date AND a.expiry_date AND a.deleted_at IS NULL
+            LEFT JOIN agreement_item ai ON ai.agreement_id=a.id AND ai.sku_id=s.id AND ai.status=1 AND ai.deleted_at IS NULL
             LEFT JOIN (
                 SELECT oi.sku_id,SUM(oi.quantity) AS soldCount
                 FROM order_item oi JOIN order_main o ON o.id=oi.order_main_id
@@ -108,7 +115,7 @@ public class PortalController {
             ) sales ON sales.sku_id=s.id
             WHERE pp.platform_id=:platformId AND pp.listing_status=1 AND pp.deleted_at IS NULL
             ORDER BY pp.id DESC
-            """).param("platformId",platformId).query().listOfRows();
+            """).param("platformId",platformId).param("enterpriseId",enterpriseId).query().listOfRows();
         return Map.of("platform",platform,"products",products);
     }
 

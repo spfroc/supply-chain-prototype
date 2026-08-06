@@ -58,6 +58,12 @@ function DragScroll({ className, children }: { className: string; children: Reac
 const money = (v: any) =>
   `¥${Number(v || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const productPrice = (row: Row) => row.agreementPrice != null ? row.agreementPrice : row.marketPrice;
+const customerPrice = (row: Row, loggedIn: boolean) => !loggedIn ? row.marketPrice : row.agreementPrice != null ? row.agreementPrice : row.memberPrice ?? row.marketPrice;
+const copyText = async (text:string) => {
+  if(navigator.clipboard?.writeText)return navigator.clipboard.writeText(text);
+  const area=document.createElement("textarea");area.value=text;area.style.position="fixed";area.style.opacity="0";document.body.appendChild(area);area.select();document.execCommand("copy");area.remove();
+};
+const shareContent=async(title:string,text:string)=>{try{if(navigator.share)await navigator.share({title,text,url:location.href});else{await copyText(`${text} ${location.href}`);Toast.show("分享链接已复制");}}catch(error){if((error as Error).name!=="AbortError")Toast.show("暂时无法分享");}};
 const dateTime = (value: string) =>
   value
     ? new Intl.DateTimeFormat("zh-CN", {
@@ -283,6 +289,7 @@ function App() {
           back={() => history.back()}
           add={add}
           buyNow={buyNow}
+          loggedIn={Boolean(current)}
         />
         {authOpen && !current && (
           <div className="m-auth-modal">
@@ -331,6 +338,7 @@ function App() {
             }}
             allSolutions={() => setSolutionsOpen(true)}
             hasAgreement={hasAgreement}
+            loggedIn={Boolean(current)}
           />
         )}
         {tab === "category" && (
@@ -340,6 +348,7 @@ function App() {
             keyword={categoryKeyword}
             open={openProduct}
             hasAgreement={hasAgreement}
+            loggedIn={Boolean(current)}
           />
         )}
         {tab === "cart" && (
@@ -608,7 +617,7 @@ function MobileSolutionDetail({ solutionId, back, requireAuth, reloadCart, check
   });
   return (
     <div className="mobile-app m-solution-detail">
-      <header className="sub-header"><button onClick={back}>‹ 返回</button><h2>方案详情</h2><button onClick={() => navigator.clipboard?.writeText(location.href).then(() => Toast.show("分享链接已复制"))}>分享</button></header>
+      <header className="sub-header"><button onClick={back}>‹ 返回</button><h2>方案详情</h2><button onClick={() => void shareContent(data.solution?.title||"场景方案",data.solution?.subtitle||"查看企业采购场景方案")}>分享</button></header>
       <section className="m-solution-poster">
         {data.solution?.mobileImageUrl || data.solution?.imageUrl ? <img src={data.solution.mobileImageUrl || data.solution.imageUrl} alt={`${data.solution.title}宣传海报`} /> : <div>请上传9:16方案宣传海报</div>}
       </section>
@@ -643,6 +652,7 @@ function Home({
   openSolution,
   allSolutions,
   hasAgreement,
+  loggedIn,
 }: {
   products: Row[];
   solutions: Row[];
@@ -654,6 +664,7 @@ function Home({
   openSolution: (id: number) => void;
   allSolutions: () => void;
   hasAgreement: boolean;
+  loggedIn: boolean;
 }) {
   const [keyword,setKeyword]=useState("");
   return (
@@ -703,7 +714,7 @@ function Home({
         </header>
         <DragScroll className="product-scroll">
           {(hasAgreement ? products.filter((p)=>p.agreementPrice != null) : products).map((p, i) => (
-            <Product key={p.skuId} row={p} index={i} open={open} add={add} />
+            <Product key={p.skuId} row={p} index={i} open={open} add={add} loggedIn={loggedIn} />
           ))}
         </DragScroll>
       </section>}
@@ -743,7 +754,7 @@ function Home({
           if(rule==="VIEWS")rows.sort((a,b)=>Number(b.clickCount||0)-Number(a.clickCount||0));
           if(rule==="LATEST")rows.sort((a,b)=>Number(b.id)-Number(a.id));
           rows=rows.slice(0,Number(floor.displayCount||4)); if(!rows.length)return null;
-          return <section className="m-section" key={floor.id}><header><div><span>{rule==="LATEST"?"NEW ARRIVALS":"CURATED PICKS"}</span><h2>{floor.title}</h2><small>{floor.subtitle}</small></div><button onClick={()=>category()}>全部 ›</button></header><DragScroll className="product-scroll">{rows.map((row,index)=><Product key={row.skuId} row={row} index={index} open={open} add={add}/>)}</DragScroll></section>;
+          return <section className="m-section" key={floor.id}><header><div><span>{rule==="LATEST"?"NEW ARRIVALS":"CURATED PICKS"}</span><h2>{floor.title}</h2><small>{floor.subtitle}</small></div><button onClick={()=>category()}>全部 ›</button></header><DragScroll className="product-scroll">{rows.map((row,index)=><Product key={row.skuId} row={row} index={index} open={open} add={add} loggedIn={loggedIn}/>)}</DragScroll></section>;
         }
         const source=floor.contentType==="SOLUTION"?solutions:floor.contentType==="CONTENT"?(portal.content||[]):floor.contentType==="CATEGORY"?categories:[];
         const ids=String(floor.contentIds||"").split(",").map(Number).filter(Boolean);
@@ -758,11 +769,13 @@ function Product({
   index,
   open,
   add,
+  loggedIn,
 }: {
   row: Row;
   index: number;
   open: (r: Row) => void;
   add: (r: Row) => void;
+  loggedIn: boolean;
 }) {
   return (
     <article className="m-product" onClick={() => open(row)}>
@@ -793,8 +806,8 @@ function Product({
       </div>
       <small className="m-product-sales">已售 {row.soldCount || 0} 件</small>
       <div>
-        <strong>{money(productPrice(row))}</strong>
-        {Number(productPrice(row)) !== Number(row.marketPrice) && <del>{money(row.marketPrice)}</del>}
+        <strong>{money(customerPrice(row,loggedIn))}</strong>
+        {loggedIn && <del>{money(row.marketPrice)}</del>}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -813,12 +826,14 @@ function Category({
   keyword,
   open,
   hasAgreement,
+  loggedIn,
 }: {
   products: Row[];
   categories: Row[];
   keyword: string;
   open: (r: Row) => void;
   hasAgreement: boolean;
+  loggedIn: boolean;
 }) {
   const roots = categories.filter((x) => Number(x.level) === 1);
   const [active, setActive] = useState<number>();
@@ -910,7 +925,7 @@ function Category({
               </i>
               <span>
                 <strong>{p.title}</strong>
-                <small>{money(productPrice(p))}</small>
+                <small>{money(customerPrice(p,loggedIn))}{loggedIn&&<del>{money(p.marketPrice)}</del>}</small>
               </span>
               <em>›</em>
             </button>
@@ -931,11 +946,13 @@ function ProductDetail({
   back,
   add,
   buyNow,
+  loggedIn,
 }: {
   product: Row;
   back: () => void;
   add: (r: Row) => void;
   buyNow: (r: Row) => void;
+  loggedIn: boolean;
 }) {
   const variants:Row[]=typeof product.variants==="string"?JSON.parse(product.variants||"[]"):(product.variants||[]);
   const [selectedSku,setSelectedSku]=useState(Number(product.skuId));
@@ -954,22 +971,7 @@ function ProductDetail({
     else localStorage.removeItem(favoriteKey);
     Toast.show(next ? "已收藏" : "已取消收藏");
   };
-  const share = async () => {
-    const data = {
-      title: product.title,
-      text: `${product.title} ${money(productPrice(current))}`,
-      url: location.href,
-    };
-    try {
-      if (navigator.share) await navigator.share(data);
-      else {
-        await navigator.clipboard.writeText(`${data.text} ${data.url}`);
-        Toast.show("商品链接已复制");
-      }
-    } catch (e) {
-      if ((e as Error).name !== "AbortError") Toast.show("暂时无法分享");
-    }
-  };
+  const share = () => shareContent(product.title,`${product.title} ${money(customerPrice(current,loggedIn))}`);
   const configuredSpecifications = structuredSpecs(product.structuredAttributes).map((item) => [
     item.name,
     `${item.value}${item.unit || ""}`,
@@ -1032,10 +1034,10 @@ function ProductDetail({
       <article className="detail-info">
         <div>
           <strong>
-            {money(productPrice(current))}
+            {money(customerPrice(current,loggedIn))}
           </strong>
-          {current.agreementPrice != null && <del>{money(current.marketPrice)}</del>}
-          <em>{current.agreementPrice != null ? "企业协议价" : "商品原价"}</em>
+          {loggedIn && <del>{money(current.marketPrice)}</del>}
+          <em>{!loggedIn?"商品原价":current.agreementPrice != null ? "企业协议价" : "企业会员价"}</em>
         </div>
         <h1>{product.title}</h1>
         <p>{product.summary}</p>

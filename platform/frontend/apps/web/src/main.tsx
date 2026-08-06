@@ -31,6 +31,16 @@ const structuredSpecs = (value: unknown): Row[] => {
 const money = (value: any) =>
   `¥${Number(value || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const productPrice = (row: Row) => row.agreementPrice != null ? row.agreementPrice : row.marketPrice;
+const customerPrice = (row: Row, loggedIn: boolean) => !loggedIn ? row.marketPrice : row.agreementPrice != null ? row.agreementPrice : row.memberPrice ?? row.marketPrice;
+const copyText = async (text: string) => {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
+  const area=document.createElement("textarea"); area.value=text; area.style.position="fixed"; area.style.opacity="0";
+  document.body.appendChild(area); area.select(); document.execCommand("copy"); area.remove();
+};
+const sharePage = async (title: string, text: string, notify: (value:string)=>void) => {
+  try { if (navigator.share) await navigator.share({title,text,url:location.href}); else { await copyText(`${text} ${location.href}`); notify("分享链接已复制"); } }
+  catch(error){ if((error as Error).name!=="AbortError") notify("分享失败，请稍后重试"); }
+};
 const dateTime = (value: string) =>
   value
     ? new Intl.DateTimeFormat("zh-CN", {
@@ -479,6 +489,7 @@ function App() {
           add={add}
           all={(id?: number) => navigate("products", id)}
           hasAgreement={hasAgreement}
+          loggedIn={Boolean(current)}
         />
       )}
       {displayView === "products" && (
@@ -499,6 +510,7 @@ function App() {
           open={goProduct}
           add={add}
           hasAgreement={hasAgreement}
+          loggedIn={Boolean(current)}
         />
       )}
       {(["solutions", "platforms", "content"] as View[]).includes(displayView) && (
@@ -528,7 +540,7 @@ function App() {
         />
       )}
       {displayView === "platform-products" && platformId && (
-        <PlatformProducts platformId={platformId} open={goProduct} />
+        <PlatformProducts platformId={platformId} open={goProduct} loggedIn={Boolean(current)} />
       )}
       {displayView === "detail" && selected && (
         <Detail
@@ -536,6 +548,8 @@ function App() {
           back={() => setView("products")}
           add={add}
           buyNow={buyNow}
+          loggedIn={Boolean(current)}
+          notify={notify}
         />
       )}
       {displayView === "cart" && (
@@ -850,13 +864,13 @@ function floorProducts(floor: Row, products: Row[], categories: Row[], portal: R
   return rows.slice(0, Number(floor.displayCount || 4));
 }
 
-function HomeFloor({ floor, products, categories, portal, hasAgreement, open, add, all }: { floor: Row; products: Row[]; categories: Row[]; portal: Row; hasAgreement: boolean; open: (row: Row) => void; add: (row: Row) => void; all: (id?:number) => void }) {
+function HomeFloor({ floor, products, categories, portal, hasAgreement, loggedIn, open, add, all }: { floor: Row; products: Row[]; categories: Row[]; portal: Row; hasAgreement: boolean; loggedIn:boolean; open: (row: Row) => void; add: (row: Row) => void; all: (id?:number) => void }) {
   if (floor.contentType === "PRODUCT") {
     const rows = floorProducts(floor, products, categories, portal, hasAgreement);
     if (!rows.length) return null;
     return <section className="section home-floor">
       <div className="section-head"><div><span>{floor.selectionRule === "LATEST" ? "NEW ARRIVALS" : "CURATED PICKS"}</span><h2>{floor.title}</h2><p>{floor.subtitle}</p></div><button onClick={() => floor.linkUrl ? location.href=floor.linkUrl : all()}>查看全部 →</button></div>
-      <div className="product-grid">{rows.map((row,index)=><ProductCard key={row.skuId} product={row} index={index} open={open} add={add} />)}</div>
+      <div className="product-grid">{rows.map((row,index)=><ProductCard key={row.skuId} product={row} index={index} open={open} add={add} loggedIn={loggedIn} />)}</div>
     </section>;
   }
   const source = floor.contentType === "SOLUTION" ? portal.solution || [] : floor.contentType === "CONTENT" ? portal.content || [] : floor.contentType === "CATEGORY" ? categories : [];
@@ -874,6 +888,7 @@ function Home({
   add,
   all,
   hasAgreement,
+  loggedIn,
 }: {
   products: Row[];
   categories: Row[];
@@ -882,6 +897,7 @@ function Home({
   add: (r: Row) => void;
   all: (id?: number) => void;
   hasAgreement: boolean;
+  loggedIn: boolean;
 }) {
   const roots = categories.filter((x) => Number(x.level) === 1).slice(0, 7);
   const banner = portal.banner?.[0];
@@ -940,6 +956,7 @@ function Home({
               index={i}
               open={open}
               add={add}
+              loggedIn={loggedIn}
             />
           ))}
         </div>
@@ -970,7 +987,7 @@ function Home({
           </article>
         ))}
       </section>}
-      {(portal.floors || []).filter((floor:Row)=>["ALL","WEB"].includes(floor.targetScope)).map((floor:Row)=><HomeFloor key={floor.id} floor={floor} products={products} categories={categories} portal={portal} hasAgreement={hasAgreement} open={open} add={add} all={all} />)}
+      {(portal.floors || []).filter((floor:Row)=>["ALL","WEB"].includes(floor.targetScope)).map((floor:Row)=><HomeFloor key={floor.id} floor={floor} products={products} categories={categories} portal={portal} hasAgreement={hasAgreement} loggedIn={loggedIn} open={open} add={add} all={all} />)}
     </main>
   );
 }
@@ -984,6 +1001,7 @@ function Products({
   open,
   add,
   hasAgreement,
+  loggedIn,
 }: {
   products: Row[];
   categories: Row[];
@@ -993,6 +1011,7 @@ function Products({
   open: (r: Row) => void;
   add: (r: Row) => void;
   hasAgreement: boolean;
+  loggedIn: boolean;
 }) {
   const [keyword, setKeyword] = useState(initialKeyword || "");
   const [active, setActive] = useState<number | undefined>(initialCategory);
@@ -1180,6 +1199,7 @@ function Products({
                 index={i}
                 open={open}
                 add={add}
+                loggedIn={loggedIn}
               />
             ))}
           </div>
@@ -1327,6 +1347,7 @@ function SolutionDetail({
           <h3>{data.solution?.subtitle}</h3>
           <p>{data.solution?.description || "根据场景需求搭配设备组合，可按实际需要调整数量后直接下单。"}</p>
         </div>
+        <button className="share-button" onClick={()=>void sharePage(data.solution?.title||"场景方案",data.solution?.subtitle||"查看企业采购场景方案",notify)}>分享方案</button>
       </section>
       <section className="solution-products">
         <header><div><h2>设备组合</h2><p>必选商品不可取消；可选配件按实际需求勾选，数量可在下单前确认。</p></div><b>已选 {chosen.length} 项</b></header>
@@ -1360,9 +1381,11 @@ function SolutionDetail({
 function PlatformProducts({
   platformId,
   open,
+  loggedIn,
 }: {
   platformId: number;
   open: (r: Row) => void;
+  loggedIn: boolean;
 }) {
   const [data, setData] = useState<Row>({ products: [] });
   const [loading, setLoading] = useState(true);
@@ -1414,6 +1437,7 @@ function PlatformProducts({
                 index={index}
                 open={(product) => void openProduct(product)}
                 platformTitle={data.platform?.title}
+                loggedIn={loggedIn}
               />
             ))}
           </div>
@@ -1435,13 +1459,19 @@ function ProductCard({
   open,
   add,
   platformTitle,
+  loggedIn = false,
 }: {
   product: Row;
   index: number;
   open: (r: Row) => void;
   add?: (r: Row) => void;
   platformTitle?: string;
+  loggedIn?: boolean;
 }) {
+  const salePrice=customerPrice(product,loggedIn);
+  const platformCost=loggedIn&&product.agreementPrice!=null?product.agreementPrice:product.memberPrice??product.marketPrice;
+  const platformPrice=Number(product.platformPrice||0);
+  const profitRate=platformPrice>0?(platformPrice-Number(platformCost||0))/platformPrice*100:0;
   return (
     <article className="product-card" onClick={() => open(product)}>
       <div className={`product-image p${index % 5}`}>
@@ -1469,10 +1499,10 @@ function ProductCard({
         <h3>{product.title}</h3>
         <p>{product.summary || "政企采购自营商品，全国配送"}</p>
         <div className="price">
-          <strong>
-            {money(platformTitle ? product.platformPrice : productPrice(product))}
-          </strong>
-          {Number(platformTitle ? product.platformPrice : productPrice(product)) !== Number(product.marketPrice) && <del>{money(product.marketPrice)}</del>}
+          <strong>{money(platformTitle ? product.platformPrice : salePrice)}</strong>
+          {!platformTitle && loggedIn && <del>{money(product.marketPrice)}</del>}
+          {!platformTitle && loggedIn && <small>{product.agreementPrice != null ? "协议价" : "会员价"}</small>}
+          {platformTitle && <small className="platform-profit">{loggedIn&&product.agreementPrice!=null?"协议价":"会员价"} {money(platformCost)} · 利润率 {profitRate.toFixed(2)}%</small>}
         </div>
         <div className="stock">
           <span>库存 {product.availableStock} · 已售 {product.soldCount || 0}{platformTitle ? ` · 浏览 ${product.clickCount || 0}` : ""}</span>
@@ -1492,11 +1522,15 @@ function Detail({
   back,
   add,
   buyNow,
+  loggedIn,
+  notify,
 }: {
   product: Row;
   back: () => void;
   add: (r: Row, n: number) => void;
   buyNow: (r: Row, n: number) => void;
+  loggedIn: boolean;
+  notify: (text:string)=>void;
 }) {
   const [qty, setQty] = useState(1);
   const variants:Row[]=typeof product.variants==="string"?JSON.parse(product.variants||"[]"):(product.variants||[]);
@@ -1535,6 +1569,7 @@ function Detail({
     });
   const skuSpecifications=Object.entries(typeof current.specValues==="string"?JSON.parse(current.specValues||"{}"):current.specValues||{});
   const specifications = [...skuSpecifications,...(configuredSpecifications.length ? configuredSpecifications : legacySpecifications)];
+  const salePrice=customerPrice(current,loggedIn);
   return (
     <main className="page">
       <div className="breadcrumb">
@@ -1567,15 +1602,15 @@ function Detail({
         </div>
         <div className="detail-main">
           <div className="platform-tags detail-tags">{Number(product.selfOperated) === 1 && <span className="self-operated-tag">自营</span>}{product.platformNames && String(product.platformNames).split("、").map((name:string)=><span key={name}>{name}</span>)}</div>
-          <h1>{product.title}</h1>
+          <div className="detail-title-row"><h1>{product.title}</h1><button className="share-button" onClick={()=>void sharePage(product.title,`${product.title} ${money(salePrice)}`,notify)}>分享</button></div>
           <p>{product.summary}</p>
           <div className="agreement-price">
-            <label>{current.agreementPrice != null ? "企业协议价" : "商品原价"}</label>
+            <label>{!loggedIn ? "商品原价" : current.agreementPrice != null ? "企业协议价" : "企业会员价"}</label>
             <strong>
-              {money(productPrice(current))}
+              {money(salePrice)}
             </strong>
-            {current.agreementPrice != null && <del>市场价 {money(current.marketPrice)}</del>}
-            <em>{current.agreementPrice != null ? "已匹配当前企业有效协议" : "当前无协议价格，按商品原价结算"}</em>
+            {loggedIn && <del>市场价 {money(current.marketPrice)}</del>}
+            <em>{!loggedIn ? "登录后可查看会员价或协议价" : current.agreementPrice != null ? "已匹配当前企业有效协议" : "当前商品按企业会员价结算"}</em>
           </div>
           {variants.length>1&&<div className="sku-selector"><strong>选择规格</strong><div>
             {variants.map((item)=><button key={item.skuId} className={Number(item.skuId)===Number(current.skuId)?"active":""}
