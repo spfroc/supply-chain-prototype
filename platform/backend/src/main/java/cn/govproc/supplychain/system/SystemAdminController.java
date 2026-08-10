@@ -10,6 +10,7 @@ import java.util.UUID;
 import java.security.Principal;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,9 +27,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/admin/system")
 public class SystemAdminController {
     private final JdbcClient jdbc;
+    private final PasswordEncoder passwordEncoder;
 
-    public SystemAdminController(JdbcClient jdbc) {
+    public SystemAdminController(JdbcClient jdbc, PasswordEncoder passwordEncoder) {
         this.jdbc = jdbc;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @GetMapping("/me")
@@ -83,7 +86,7 @@ public class SystemAdminController {
             INSERT INTO sys_admin_user (username, password_hash, real_name, phone, email, status)
             VALUES (:username, :password, :realName, :phone, :email, :status)
             """).params(Map.of(
-                "username", request.username(), "password", "{noop}" + request.password(),
+                "username", request.username(), "password", passwordEncoder.encode(request.password()),
                 "realName", request.realName(), "phone", value(request.phone()),
                 "email", value(request.email()), "status", request.status()
             )).update();
@@ -96,13 +99,15 @@ public class SystemAdminController {
     @PutMapping("/users/{id}")
     @Transactional
     void updateUser(@PathVariable long id, @Valid @RequestBody UserRequest request) {
+        String passwordHash = value(request.password()).isBlank()
+            ? "" : passwordEncoder.encode(request.password());
         int changed = jdbc.sql("""
             UPDATE sys_admin_user SET username=:username, real_name=:realName, phone=:phone,
               email=:email, status=:status,
-              password_hash=IF(:password='', password_hash, CONCAT('{noop}', :password))
+              password_hash=IF(:passwordHash='', password_hash, :passwordHash)
             WHERE id=:id AND deleted_at IS NULL
             """).params(Map.of(
-                "id", id, "username", request.username(), "password", value(request.password()),
+                "id", id, "username", request.username(), "passwordHash", passwordHash,
                 "realName", request.realName(), "phone", value(request.phone()),
                 "email", value(request.email()), "status", request.status()
             )).update();
