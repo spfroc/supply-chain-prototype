@@ -16,6 +16,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -34,11 +35,14 @@ public class ClientController {
 
     private final JdbcClient jdbc;
     private final OrderInventoryService inventory;
+    private final PasswordEncoder passwordEncoder;
 
-    public ClientController(JdbcClient jdbc, ClientAuthService auth, OrderInventoryService inventory) {
+    public ClientController(JdbcClient jdbc, ClientAuthService auth, OrderInventoryService inventory,
+                            PasswordEncoder passwordEncoder) {
         this.jdbc = jdbc;
         this.auth = auth;
         this.inventory = inventory;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @GetMapping("/profile")
@@ -142,8 +146,9 @@ public class ClientController {
         requireEnterpriseAdmin();
         jdbc.sql("""
             INSERT INTO enterprise_user(enterprise_id,username,password_hash,real_name,phone,role_code,status)
-            VALUES(:enterpriseId,:username,'{noop}demo-password',:realName,:phone,:roleCode,:status)
+            VALUES(:enterpriseId,:username,:password,:realName,:phone,:roleCode,:status)
             """).params(Map.of("enterpriseId", enterpriseId(), "username", request.username(),
+                "password", passwordEncoder.encode("demo-password"),
                 "realName", request.realName(), "phone", request.phone(), "roleCode", request.roleCode(),
                 "status", request.status())).update();
     }

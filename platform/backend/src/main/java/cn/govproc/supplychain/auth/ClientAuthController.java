@@ -23,8 +23,10 @@ public class ClientAuthController {
     private final JdbcClient jdbc;
     private final PasswordEncoder encoder;
     private final ClientAuthService auth;
-    public ClientAuthController(JdbcClient jdbc,PasswordEncoder encoder,ClientAuthService auth) {
-        this.jdbc=jdbc;this.encoder=encoder;this.auth=auth;
+    private final LoginAttemptService loginAttempts;
+    public ClientAuthController(JdbcClient jdbc,PasswordEncoder encoder,ClientAuthService auth,
+                                LoginAttemptService loginAttempts) {
+        this.jdbc=jdbc;this.encoder=encoder;this.auth=auth;this.loginAttempts=loginAttempts;
     }
 
     @GetMapping("/enterprises")
@@ -93,18 +95,25 @@ public class ClientAuthController {
     }
 
     @PostMapping("/login")
-    Map<String,Object> login(@Valid @RequestBody LoginRequest r,HttpServletResponse response) {
+    Map<String,Object> login(@Valid @RequestBody LoginRequest r,HttpServletRequest request,HttpServletResponse response) {
+        String identifier=r.username().trim();
+        if(loginAttempts.isBlocked("client",identifier,request))
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,"登录尝试过多，请15分钟后重试");
         var users=jdbc.sql("""
           SELECT u.id,u.password_hash AS passwordHash FROM enterprise_user u
           JOIN enterprise e ON e.id=u.enterprise_id
           WHERE (u.username=:identifier OR u.phone=:identifier) AND u.status=1
             AND u.deleted_at IS NULL AND e.status=1 AND e.deleted_at IS NULL
-          """).param("identifier",r.username().trim()).query().listOfRows();
+          """).param("identifier",identifier).query().listOfRows();
         var matched=users.stream()
           .filter(user->encoder.matches(r.password(),String.valueOf(user.get("passwordHash")))).toList();
-        if(matched.isEmpty()) throw new IllegalArgumentException("账号、手机号或密码错误");
+        if(matched.isEmpty()) {
+            loginAttempts.failure("client",identifier,request);
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.UNAUTHORIZED,"账号、手机号或密码错误");
+        }
         if(matched.size()>1) throw new IllegalArgumentException("登录信息关联多个企业，请联系平台管理员处理");
         long userId=((Number)matched.getFirst().get("id")).longValue();
+        loginAttempts.success("client",identifier,request);
         issueSession(userId,response);
         return Map.of("userId",userId);
     }

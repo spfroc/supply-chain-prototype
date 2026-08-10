@@ -12,7 +12,8 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 @Configuration
 public class SecurityConfig {
     @Bean
-    SecurityFilterChain securityFilterChain(HttpSecurity http, JdbcClient jdbc) throws Exception {
+    SecurityFilterChain securityFilterChain(HttpSecurity http, JdbcClient jdbc,
+                                            cn.govproc.supplychain.auth.LoginAttemptService loginAttempts) throws Exception {
         return http
             .csrf(csrf -> csrf.disable())
             .cors(Customizer.withDefaults())
@@ -37,6 +38,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/admin/**").denyAll()
                 .anyRequest().authenticated())
             .httpBasic(Customizer.withDefaults())
+            .addFilterBefore(new AdminLoginProtectionFilter(loginAttempts), BasicAuthenticationFilter.class)
             .addFilterAfter(new AdminAuditFilter(jdbc), BasicAuthenticationFilter.class)
             .build();
     }
