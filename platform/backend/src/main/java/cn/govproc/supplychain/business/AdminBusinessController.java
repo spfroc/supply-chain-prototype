@@ -3,6 +3,7 @@ package cn.govproc.supplychain.business;
 import cn.govproc.supplychain.common.PageSupport;
 import cn.govproc.supplychain.common.RichTextSanitizer;
 import cn.govproc.supplychain.order.OrderInventoryService;
+import cn.govproc.supplychain.order.OrderStatePolicy;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
@@ -466,24 +467,23 @@ public class AdminBusinessController {
                        @RequestBody ItemLogisticsRequest r) {
         List<Map<String,Object>> orders=jdbc.sql("""
           SELECT order_status AS orderStatus,refund_status AS refundStatus
-          FROM order_main WHERE id=:id
+          FROM order_main WHERE id=:id FOR UPDATE
           """).param("id",orderId).query().listOfRows();
         if(orders.isEmpty()) throw new IllegalArgumentException("订单不存在");
         int currentOrderStatus=((Number)orders.getFirst().get("orderStatus")).intValue();
         int refundStatus=((Number)orders.getFirst().get("refundStatus")).intValue();
         if(currentOrderStatus==3||currentOrderStatus==4||refundStatus!=0)
             throw new IllegalArgumentException("已完成、已取消或已退款订单不能修改物流信息");
-        if(r.fulfillmentStatus()<0||r.fulfillmentStatus()>4)
-            throw new IllegalArgumentException("商品发货状态无效");
         if(r.fulfillmentStatus()>0&&(value(r.logisticsCompany()).isBlank()||value(r.logisticsNo()).isBlank()))
             throw new IllegalArgumentException("已发货商品必须填写物流公司和运单号");
-        Integer currentItemStatus=jdbc.sql("""
+        var itemStatuses=jdbc.sql("""
           SELECT fulfillment_status FROM order_item WHERE id=:itemId AND order_main_id=:orderId
-          """).params(Map.of("itemId",itemId,"orderId",orderId)).query(Integer.class).single();
-        if(r.fulfillmentStatus()<currentItemStatus)
-            throw new IllegalArgumentException("商品物流状态不能倒退");
-        if(r.fulfillmentStatus()==4&&currentItemStatus!=0)
-            throw new IllegalArgumentException("只有待发货商品可以取消发货");
+          """).params(Map.of("itemId",itemId,"orderId",orderId)).query(Integer.class).list();
+        if(itemStatuses.isEmpty()) throw new IllegalArgumentException("订单商品不存在");
+        int currentItemStatus=itemStatuses.getFirst();
+        if(!OrderStatePolicy.canTransitionItem(currentItemStatus,r.fulfillmentStatus()))
+            throw new IllegalArgumentException("商品物流状态不允许从"+fulfillmentName(currentItemStatus)
+              +"变更为"+fulfillmentName(r.fulfillmentStatus()));
         if(currentItemStatus==0&&r.fulfillmentStatus()>0&&r.fulfillmentStatus()<4)
             inventory.commitShipment(orderId,itemId);
         if(currentItemStatus==0&&r.fulfillmentStatus()==4)
@@ -498,14 +498,18 @@ public class AdminBusinessController {
             "itemId",itemId,"orderId",orderId)).update(),"订单商品不存在");
         Map<String,Object> stats=jdbc.sql("""
           SELECT COUNT(*) total,
-            SUM(CASE WHEN fulfillment_status>=1 AND fulfillment_status<>4 THEN 1 ELSE 0 END) shipped,
-            SUM(CASE WHEN fulfillment_status=3 THEN 1 ELSE 0 END) delivered
+            SUM(CASE WHEN fulfillment_status=0 THEN 1 ELSE 0 END) pending,
+            SUM(CASE WHEN fulfillment_status IN (1,2) THEN 1 ELSE 0 END) shipped,
+            SUM(CASE WHEN fulfillment_status=3 THEN 1 ELSE 0 END) delivered,
+            SUM(CASE WHEN fulfillment_status=4 THEN 1 ELSE 0 END) cancelled
           FROM order_item WHERE order_main_id=:orderId
           """).param("orderId",orderId).query().singleRow();
         int total=((Number)stats.get("total")).intValue();
+        int pending=((Number)stats.get("pending")).intValue();
         int shipped=((Number)stats.get("shipped")).intValue();
         int delivered=((Number)stats.get("delivered")).intValue();
-        int orderStatus=shipped==0?1:(shipped<total?5:(delivered==total?3:2));
+        int cancelled=((Number)stats.get("cancelled")).intValue();
+        int orderStatus=OrderStatePolicy.deriveOrderStatus(total,pending,shipped,delivered,cancelled);
         jdbc.sql("UPDATE order_main SET order_status=:status WHERE id=:id AND order_status<>4")
           .params(Map.of("status",orderStatus,"id",orderId)).update();
         addOrderEvent(orderId,"ITEM_LOGISTICS",currentOrderStatus,orderStatus,
@@ -521,18 +525,20 @@ public class AdminBusinessController {
           """).param("id",id).query().listOfRows();
         if(orders.isEmpty()) throw new IllegalArgumentException("订单不存在");
         int current=((Number)orders.getFirst().get("orderStatus")).intValue();
+        int currentPayment=((Number)orders.getFirst().get("paymentStatus")).intValue();
         int refund=((Number)orders.getFirst().get("refundStatus")).intValue();
         if(refund!=0) throw new IllegalArgumentException("退款订单不能推进状态");
         boolean confirmPayment=current==0&&r.orderStatus()==1&&r.paymentStatus()==2;
-        boolean complete=current==2&&r.orderStatus()==3;
+        boolean complete=(current==2||current==5)&&r.orderStatus()==3
+          && currentPayment==2&&r.paymentStatus()==2;
         if(!confirmPayment&&!complete)
             throw new IllegalArgumentException("当前订单状态不允许执行该操作");
         if(complete) {
             long pending=jdbc.sql("""
               SELECT COUNT(*) FROM order_item
-              WHERE order_main_id=:id AND fulfillment_status IN (0,4)
+              WHERE order_main_id=:id AND fulfillment_status=0
               """).param("id",id).query(Long.class).single();
-            if(pending>0) throw new IllegalArgumentException("订单仍有待发货或已取消商品，不能完成订单");
+            if(pending>0) throw new IllegalArgumentException("订单仍有待发货商品，不能完成订单");
             jdbc.sql("""
               UPDATE order_item SET fulfillment_status=3,
                 logistics_status='已签收'
@@ -549,13 +555,16 @@ public class AdminBusinessController {
     @Transactional
     void refundOrder(@PathVariable long id,@Valid @RequestBody RefundRequest r) {
         List<Map<String,Object>> orders=jdbc.sql("""
-          SELECT order_status AS orderStatus,refund_status AS refundStatus,payable_amount AS payableAmount
-          FROM order_main WHERE id=:id
+          SELECT order_status AS orderStatus,payment_status AS paymentStatus,
+            refund_status AS refundStatus,payable_amount AS payableAmount
+          FROM order_main WHERE id=:id FOR UPDATE
           """).param("id",id).query().listOfRows();
         if(orders.isEmpty()) throw new IllegalArgumentException("订单不存在");
         Map<String,Object> order=orders.get(0);
         if(((Number)order.get("orderStatus")).intValue()!=3)
             throw new IllegalArgumentException("只有已完成订单可以退款");
+        if(((Number)order.get("paymentStatus")).intValue()!=2)
+            throw new IllegalArgumentException("只有已确认到账订单可以退款");
         if(((Number)order.get("refundStatus")).intValue()!=0)
             throw new IllegalArgumentException("订单已经退款，不能重复操作");
         BigDecimal payable=(BigDecimal)order.get("payableAmount");
@@ -563,7 +572,7 @@ public class AdminBusinessController {
             throw new IllegalArgumentException("退款金额必须大于0且不能超过订单实付金额");
         require(jdbc.sql("""
           UPDATE order_main SET refund_status=1,refund_amount=:amount,refund_reason=:reason,refunded_at=NOW()
-          WHERE id=:id AND refund_status=0
+          WHERE id=:id AND order_status=3 AND payment_status=2 AND refund_status=0
           """).params(Map.of("id",id,"amount",r.refundAmount(),"reason",r.refundReason())).update(),
           "订单退款状态已变化，请刷新后重试");
         addOrderEvent(id,"ORDER_REFUNDED",3,3,
