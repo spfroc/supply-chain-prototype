@@ -1,6 +1,7 @@
 package cn.govproc.supplychain.catalog;
 
 import cn.govproc.supplychain.auth.ClientAuthService;
+import cn.govproc.supplychain.common.RichTextSanitizer;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
@@ -14,10 +15,12 @@ import org.springframework.web.bind.annotation.RestController;
 public class CatalogController {
     private final JdbcClient jdbc;
     private final ClientAuthService auth;
+    private final RichTextSanitizer richTextSanitizer;
 
-    public CatalogController(JdbcClient jdbc,ClientAuthService auth) {
+    public CatalogController(JdbcClient jdbc,ClientAuthService auth,RichTextSanitizer richTextSanitizer) {
         this.jdbc = jdbc;
         this.auth = auth;
+        this.richTextSanitizer = richTextSanitizer;
     }
 
     @GetMapping("/categories")
@@ -76,8 +79,8 @@ public class CatalogController {
             """).param("enterpriseId", enterpriseId).query((rs, n) -> new ProductSummary(
                 rs.getLong("product_id"),rs.getLong("sku_id"), rs.getString("spu_code"), rs.getString("sku_code"),
                 rs.getString("title"), rs.getString("main_image"),rs.getString("gallery"),
-                rs.getString("attributes"),rs.getString("summary"),rs.getString("detail_html"),
-                rs.getString("delivery_description"),rs.getString("after_sales_html"),rs.getLong("category_id"),rs.getInt("self_operated"),rs.getLong("brand_id"),rs.getString("brand_name"),
+                rs.getString("attributes"),rs.getString("summary"),richTextSanitizer.clean(rs.getString("detail_html")),
+                rs.getString("delivery_description"),richTextSanitizer.clean(rs.getString("after_sales_html")),rs.getLong("category_id"),rs.getInt("self_operated"),rs.getLong("brand_id"),rs.getString("brand_name"),
                 rs.getBigDecimal("market_price"), rs.getBigDecimal("member_price"),
                 rs.getBigDecimal("agreement_price"), rs.getInt("available_stock"),rs.getLong("sold_count"),rs.getLong("click_count"),rs.getString("structured_attributes"),rs.getString("platform_names"),rs.getString("variants")
             )).list();

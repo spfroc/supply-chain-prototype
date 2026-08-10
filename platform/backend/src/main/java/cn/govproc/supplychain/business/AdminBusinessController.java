@@ -1,6 +1,7 @@
 package cn.govproc.supplychain.business;
 
 import cn.govproc.supplychain.common.PageSupport;
+import cn.govproc.supplychain.common.RichTextSanitizer;
 import cn.govproc.supplychain.order.OrderInventoryService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
@@ -27,10 +28,13 @@ public class AdminBusinessController {
     private final JdbcClient jdbc;
     private final PasswordEncoder encoder;
     private final OrderInventoryService inventory;
-    public AdminBusinessController(JdbcClient jdbc,PasswordEncoder encoder,OrderInventoryService inventory) {
+    private final RichTextSanitizer richTextSanitizer;
+    public AdminBusinessController(JdbcClient jdbc,PasswordEncoder encoder,OrderInventoryService inventory,
+                                   RichTextSanitizer richTextSanitizer) {
         this.jdbc = jdbc;
         this.encoder = encoder;
         this.inventory = inventory;
+        this.richTextSanitizer = richTextSanitizer;
     }
 
     @GetMapping("/products")
@@ -70,9 +74,12 @@ public class AdminBusinessController {
           ) sales ON sales.spu_id=p.id
           WHERE p.deleted_at IS NULL
           """;
-        if(page==null) return jdbc.sql(base+" ORDER BY id DESC").query().listOfRows();
-        return PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
-          List.of("spuCode","title","summary","skuCode"),"status");
+        if(page==null) return richTextSanitizer.cleanRows(
+          jdbc.sql(base+" ORDER BY id DESC").query().listOfRows(), "detailHtml", "afterSalesHtml");
+        return richTextSanitizer.cleanPage(
+          PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
+            List.of("spuCode","title","summary","skuCode"),"status"),
+          "detailHtml", "afterSalesHtml");
     }
 
     @PostMapping("/products") @ResponseStatus(HttpStatus.CREATED) @Transactional
@@ -88,8 +95,8 @@ public class AdminBusinessController {
           .param("code",spuCode).param("title",r.title()).param("categoryId",r.categoryId()).param("brandId",r.brandId())
           .param("selfOperated",r.selfOperatedValue())
           .param("mainImage",value(r.mainImage())).param("gallery",value(r.gallery())).param("attributes",value(r.attributes()))
-          .param("summary",value(r.summary())).param("detailHtml",value(r.detailHtml()))
-          .param("deliveryDescription",value(r.deliveryDescription())).param("afterSalesHtml",value(r.afterSalesHtml()))
+          .param("summary",value(r.summary())).param("detailHtml",richTextSanitizer.clean(r.detailHtml()))
+          .param("deliveryDescription",value(r.deliveryDescription())).param("afterSalesHtml",richTextSanitizer.clean(r.afterSalesHtml()))
           .param("status",r.status()).update();
         long id=jdbc.sql("SELECT id FROM product_spu WHERE spu_code=:code").param("code",spuCode).query(Long.class).single();
         saveSkus(id,r,skuCode);
@@ -110,8 +117,8 @@ public class AdminBusinessController {
           .param("selfOperated",r.selfOperatedValue())
           .param("mainImage",value(r.mainImage())).param("gallery",value(r.gallery()))
           .param("attributes",value(r.attributes())).param("summary",value(r.summary()))
-          .param("detailHtml",value(r.detailHtml())).param("deliveryDescription",value(r.deliveryDescription()))
-          .param("afterSalesHtml",value(r.afterSalesHtml())).param("status",r.status()).update(),"商品不存在");
+          .param("detailHtml",richTextSanitizer.clean(r.detailHtml())).param("deliveryDescription",value(r.deliveryDescription()))
+          .param("afterSalesHtml",richTextSanitizer.clean(r.afterSalesHtml())).param("status",r.status()).update(),"商品不存在");
         saveSkus(id,r,null);
         saveAttributeValues(id,r.attributeValues());
     }

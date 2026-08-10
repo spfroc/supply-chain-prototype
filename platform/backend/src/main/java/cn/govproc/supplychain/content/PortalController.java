@@ -13,29 +13,34 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.http.HttpStatus;
 import org.springframework.transaction.annotation.Transactional;
 import cn.govproc.supplychain.auth.ClientAuthService;
+import cn.govproc.supplychain.common.RichTextSanitizer;
 
 @RestController
 @RequestMapping("/api/public/portal")
 public class PortalController {
     private final JdbcClient jdbc;
     private final ClientAuthService auth;
+    private final RichTextSanitizer richTextSanitizer;
 
-    public PortalController(JdbcClient jdbc, ClientAuthService auth) {
+    public PortalController(JdbcClient jdbc, ClientAuthService auth, RichTextSanitizer richTextSanitizer) {
         this.jdbc = jdbc;
         this.auth = auth;
+        this.richTextSanitizer = richTextSanitizer;
     }
 
     @GetMapping
     Map<String, Object> portal() {
         var result = new LinkedHashMap<String, Object>();
         for (String type : List.of("NAVIGATION", "BANNER", "PLATFORM", "SOLUTION", "CONTENT")) {
-            result.put(type.toLowerCase(), jdbc.sql("""
+            var rows = jdbc.sql("""
                 SELECT id,title,subtitle,description,price_prefix AS pricePrefix,image_url AS imageUrl,mobile_image_url AS mobileImageUrl,
                        link_url AS linkUrl,sort_order AS sortOrder
                 FROM portal_resource
                 WHERE resource_type=:type AND status=1 AND deleted_at IS NULL
                 ORDER BY sort_order,id
-                """).param("type", type).query().listOfRows());
+                """).param("type", type).query().listOfRows();
+            result.put(type.toLowerCase(), "CONTENT".equals(type)
+                ? richTextSanitizer.cleanRows(rows, "description") : rows);
         }
         result.put("brands", jdbc.sql("""
             SELECT id,name,logo,description FROM brand

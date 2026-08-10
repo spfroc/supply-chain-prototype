@@ -1,6 +1,7 @@
 package cn.govproc.supplychain.content;
 
 import cn.govproc.supplychain.common.PageSupport;
+import cn.govproc.supplychain.common.RichTextSanitizer;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -31,9 +32,11 @@ import org.springframework.web.server.ResponseStatusException;
 public class ContentAdminController {
     private static final Set<String> TYPES = Set.of("NAVIGATION", "BANNER", "PLATFORM", "SOLUTION", "CONTENT");
     private final JdbcClient jdbc;
+    private final RichTextSanitizer richTextSanitizer;
 
-    public ContentAdminController(JdbcClient jdbc) {
+    public ContentAdminController(JdbcClient jdbc, RichTextSanitizer richTextSanitizer) {
         this.jdbc = jdbc;
+        this.richTextSanitizer = richTextSanitizer;
     }
 
     @GetMapping("/{type}")
@@ -47,9 +50,13 @@ public class ContentAdminController {
             WHERE resource_type=:type AND deleted_at IS NULL
             """;
         var params=Map.of("type",normalize(type));
-        if(page==null) return jdbc.sql(base+" ORDER BY sortOrder,id").params(params).query().listOfRows();
-        return PageSupport.query(jdbc,base,"q.sortOrder,q.id",params,page,pageSize,keyword,status,
+        if(page==null) {
+            var rows=jdbc.sql(base+" ORDER BY sortOrder,id").params(params).query().listOfRows();
+            return "CONTENT".equals(normalize(type)) ? richTextSanitizer.cleanRows(rows,"description") : rows;
+        }
+        var result=PageSupport.query(jdbc,base,"q.sortOrder,q.id",params,page,pageSize,keyword,status,
             List.of("title","subtitle","description","linkUrl"),"status");
+        return "CONTENT".equals(normalize(type)) ? richTextSanitizer.cleanPage(result,"description") : result;
     }
 
     @PostMapping("/{type}") @ResponseStatus(HttpStatus.CREATED) @Transactional
@@ -58,7 +65,7 @@ public class ContentAdminController {
             INSERT INTO portal_resource(resource_type,title,subtitle,description,price_prefix,image_url,mobile_image_url,link_url,sort_order,status)
             VALUES(:type,:title,:subtitle,:description,:pricePrefix,:imageUrl,:mobileImageUrl,:linkUrl,:sortOrder,:status)
             """).param("type", normalize(type)).param("title", request.title())
-            .param("subtitle", request.subtitle()).param("description", request.description()).param("imageUrl", request.imageUrl())
+            .param("subtitle", request.subtitle()).param("description", description(type, request)).param("imageUrl", request.imageUrl())
             .param("mobileImageUrl", request.mobileImageUrl())
             .param("pricePrefix", pricePrefix(type, request))
             .param("linkUrl", request.linkUrl()).param("sortOrder", request.sortOrder())
@@ -75,7 +82,7 @@ public class ContentAdminController {
                 link_url=:linkUrl,sort_order=:sortOrder,status=:status
             WHERE id=:id AND resource_type=:type AND deleted_at IS NULL
             """).param("id", id).param("type", normalize(type)).param("title", request.title())
-            .param("subtitle", request.subtitle()).param("description", request.description()).param("imageUrl", request.imageUrl())
+            .param("subtitle", request.subtitle()).param("description", description(type, request)).param("imageUrl", request.imageUrl())
             .param("mobileImageUrl", request.mobileImageUrl())
             .param("pricePrefix", pricePrefix(type, request))
             .param("linkUrl", request.linkUrl()).param("sortOrder", request.sortOrder())
@@ -291,6 +298,11 @@ public class ContentAdminController {
             .replace("企业采购", "").replace("企业购", "")
             .replace("采购平台", "").replace("平台", "").replace("商城", "").trim();
         return derived.isEmpty() ? request.title().trim() : derived;
+    }
+
+    private String description(String type, ResourceRequest request) {
+        return "CONTENT".equals(normalize(type))
+            ? richTextSanitizer.clean(request.description()) : request.description();
     }
 
     public record ResourceRequest(@NotBlank String title, String subtitle, String description, String pricePrefix, String imageUrl,
