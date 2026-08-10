@@ -719,7 +719,7 @@ function AdminLogin({ success }: { success: () => void }) {
   const login = async () => {
     setError("");
     if (!username.trim() || !password) {
-      setError("请输入后台账号和密码");
+      setError("请输入后台账号或手机号和密码");
       return;
     }
     setLoading(true);
@@ -730,7 +730,7 @@ function AdminLogin({ success }: { success: () => void }) {
       const response = await fetch("/api/admin/system/me", {
         headers: { Authorization: `Basic ${credential}` },
       });
-      if (!response.ok) throw new Error("后台账号或密码错误");
+      if (!response.ok) throw new Error("后台账号、手机号或密码错误");
       sessionStorage.setItem("adminCredential", credential);
       success();
     } catch (e) {
@@ -752,12 +752,12 @@ function AdminLogin({ success }: { success: () => void }) {
         <h1>管理后台登录</h1>
         <p>仅限平台运营、财务及系统管理人员使用</p>
         <label>
-          后台账号
+          后台账号或手机号
           <Input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             onPressEnter={() => void login()}
-            placeholder="请输入后台账号"
+            placeholder="请输入后台账号或手机号"
           />
         </label>
         <label>

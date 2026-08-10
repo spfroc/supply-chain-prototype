@@ -128,6 +128,13 @@ Case "AUTH-ISOLATION-001" "后台用户只能登录管理后台，不能登录 W
   if ($me.Data.username -ne $username) { throw "后台登录身份不正确" }
   Expect-Status (Invoke-Api POST "/api/auth/login" @{username=$username;password="Qa-password-2026"} @{}) @(400)
 }
+Case "AUTH-ADMIN-PHONE-001" "后台用户可使用手机号登录管理后台" {
+  $phoneCredential = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("13800138101:Qa-password-2026"))
+  $phoneHeaders = @{ Authorization="Basic $phoneCredential"; "Content-Type"="application/json" }
+  $me = Invoke-Api GET "/api/admin/system/me" $null $phoneHeaders
+  Expect-Status $me @(200)
+  if ($me.Data.username -ne $username) { throw "后台手机号登录身份不正确" }
+}
 Case "AUTH-ISOLATION-002" "企业成员账号不能登录管理后台" {
   $enterpriseCredential = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("demo:demo-password"))
   Expect-Status (Invoke-Api GET "/api/admin/system/me" $null @{Authorization="Basic $enterpriseCredential"}) @(401)
