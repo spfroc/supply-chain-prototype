@@ -61,7 +61,7 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       SPRING_PROFILES_ACTIVE: docker
-      DB_URL: jdbc:mysql://supply-chain-internal-mysql:3306/${MYSQL_DATABASE:-supply_chain}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      DB_URL: jdbc:mysql://${DB_HOST:-supply-chain-internal-mysql}:${DB_PORT:-3306}/${MYSQL_DATABASE:-supply_chain}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       DB_USERNAME: ${MYSQL_USER:-supply_chain}
       DB_PASSWORD: ${MYSQL_PASSWORD}
       REDIS_HOST: supply-chain-internal-redis
