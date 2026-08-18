@@ -1,33 +1,6 @@
 name: ${COMPOSE_PROJECT_NAME:-supply-chain}
 
 services:
-  mysql:
-    image: mysql:8.4
-    restart: unless-stopped
-    environment:
-      TZ: ${TZ:-Asia/Shanghai}
-      MYSQL_DATABASE: ${MYSQL_DATABASE:-supply_chain}
-      MYSQL_USER: ${MYSQL_USER:-supply_chain}
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
-    command:
-      - --character-set-server=utf8mb4
-      - --collation-server=utf8mb4_0900_ai_ci
-      - --default-time-zone=+08:00
-      - --slow-query-log=1
-      - --long-query-time=1
-    volumes:
-      - mysql_data:/var/lib/mysql
-    healthcheck:
-      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
-      interval: 10s
-      timeout: 5s
-      retries: 20
-    networks:
-      internal:
-        aliases:
-          - supply-chain-internal-mysql
-
   redis:
     image: redis:8.2-alpine
     restart: unless-stopped
@@ -61,7 +34,7 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       SPRING_PROFILES_ACTIVE: docker
-      DB_URL: jdbc:mysql://${DB_HOST:-supply-chain-internal-mysql}:${DB_PORT:-3306}/${MYSQL_DATABASE:-supply_chain}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      DB_URL: jdbc:mysql://${DB_HOST:?DB_HOST is required}:${DB_PORT:-3306}/${MYSQL_DATABASE:-supply_chain}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       DB_USERNAME: ${MYSQL_USER:-supply_chain}
       DB_PASSWORD: ${MYSQL_PASSWORD}
       REDIS_HOST: supply-chain-internal-redis
@@ -81,7 +54,6 @@ services:
     volumes:
       - upload_data:/app/uploads
     depends_on:
-      mysql: { condition: service_healthy }
       redis: { condition: service_healthy }
     healthcheck:
       test: ["CMD-SHELL", "wget -Y off -qO- http://127.0.0.1:8080/actuator/health | grep UP"]
@@ -117,7 +89,6 @@ services:
           - supply-chain-frontend
 
 volumes:
-  mysql_data:
   redis_data:
   upload_data:
 
