@@ -10,6 +10,7 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class RichTextSanitizer {
+    private static final String SAFE_BASE_URI = "https://supply.invalid/";
     private static final Safelist POLICY = Safelist.relaxed()
         .addTags("figure", "figcaption", "video", "source", "iframe")
         .addAttributes(":all", "class")
@@ -29,7 +30,7 @@ public class RichTextSanitizer {
     public String clean(String html) {
         if (html == null || html.isBlank()) return "";
         Document.OutputSettings output = new Document.OutputSettings().prettyPrint(false);
-        return Jsoup.clean(html, "", POLICY, output);
+        return Jsoup.clean(html, SAFE_BASE_URI, POLICY, output);
     }
 
     public List<Map<String, Object>> cleanRows(List<Map<String, Object>> rows, String... fields) {
