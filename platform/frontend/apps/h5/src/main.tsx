@@ -590,7 +590,6 @@ function MobileAuth({
         >
           {submitting ? "提交中…" : mode === "login" ? "登录" : "提交注册申请"}
         </button>
-        {mode === "login" && <small>演示账号 demo / demo-password</small>}
       </main>
     </div>
   );

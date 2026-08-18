@@ -930,7 +930,6 @@ function AuthPage({
               ? "登录企业采购平台"
               : "提交注册申请"}
         </button>
-        {mode === "login" && <small>演示账号：demo　密码：demo-password</small>}
       </section>
     </main>
   );
