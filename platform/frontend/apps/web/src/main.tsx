@@ -180,7 +180,8 @@ const pathFor = (view: View, platformId?: number, solutionId?: number, productId
 };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(path, {
+  const requestUrl = new URL(path, window.location.origin).toString();
+  const response = await fetch(requestUrl, {
     ...init,
     headers: { "Content-Type": "application/json", ...init?.headers },
   });
