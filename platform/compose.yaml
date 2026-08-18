@@ -23,7 +23,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 20
-    networks: [internal]
+    networks:
+      internal:
+        aliases:
+          - supply-chain-internal-mysql
 
   redis:
     image: redis:8.2-alpine
@@ -46,7 +49,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
-    networks: [internal]
+    networks:
+      internal:
+        aliases:
+          - supply-chain-internal-redis
 
   api:
     build:
@@ -55,10 +61,10 @@ services:
     environment:
       TZ: ${TZ:-Asia/Shanghai}
       SPRING_PROFILES_ACTIVE: docker
-      DB_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-supply_chain}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
+      DB_URL: jdbc:mysql://supply-chain-internal-mysql:3306/${MYSQL_DATABASE:-supply_chain}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai
       DB_USERNAME: ${MYSQL_USER:-supply_chain}
       DB_PASSWORD: ${MYSQL_PASSWORD}
-      REDIS_HOST: redis
+      REDIS_HOST: supply-chain-internal-redis
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       JWT_SECRET: ${JWT_SECRET}
       AMAP_API_KEY: ${AMAP_API_KEY:-}
