@@ -14,6 +14,7 @@ type View =
   | "platforms"
   | "platform-products"
   | "content"
+  | "article-detail"
   | "detail"
   | "cart"
   | "checkout"
@@ -29,10 +30,43 @@ const structuredSpecs = (value: unknown): Row[] => {
     return Array.isArray(parsed) ? parsed : [];
   } catch { return []; }
 };
+const productServices=(value:unknown):string[]=>{try{const parsed=typeof value==="string"?JSON.parse(value||"[]"):value;return Array.isArray(parsed)?parsed.map(String):[];}catch{return [];}};
+const isAgreementProduct = (product: Row) => {
+  if (product.agreementPrice != null) return true;
+  try {
+    const variants=typeof product.variants==="string"?JSON.parse(product.variants||"[]"):product.variants;
+    return Array.isArray(variants)&&variants.some((variant:Row)=>variant.agreementPrice!=null);
+  } catch { return false; }
+};
+const productBadgeLabel = (product: Row) => {
+  const badgeType=String(product.badgeType||"").toUpperCase();
+  if (badgeType === "CUSTOM") return String(product.customBadge||"").trim();
+  if (badgeType === "PLATFORM") {
+    const prefix=String(product.badgePlatformPrefix||"").trim();
+    return prefix ? (prefix.endsWith("平台") ? prefix : `${prefix}平台`) : "";
+  }
+  if ((badgeType === "AGREEMENT" || badgeType === "NONE" || !badgeType) && isAgreementProduct(product)) return "协议专属";
+  return "";
+};
 const money = (value: any) =>
   `¥${Number(value || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const productPrice = (row: Row) => row.agreementPrice != null ? row.agreementPrice : row.marketPrice;
 const customerPrice = (row: Row, loggedIn: boolean) => !loggedIn ? row.marketPrice : row.agreementPrice != null ? row.agreementPrice : row.memberPrice ?? row.marketPrice;
+const productPlatformPrices = (value: unknown): Row[] => {
+  try {
+    const rows = Array.isArray(value) ? value : JSON.parse(String(value || "[]"));
+    const byPlatform = new Map<number, Row>();
+    (Array.isArray(rows) ? rows : []).forEach((row: Row) => {
+      const id = Number(row.platformId); const current = byPlatform.get(id);
+      if (!current || Number(row.platformPrice) < Number(current.platformPrice)) byPlatform.set(id, row);
+    });
+    return [...byPlatform.values()].sort((a,b)=>Number(a.sortOrder||0)-Number(b.sortOrder||0)||Number(a.platformId)-Number(b.platformId));
+  } catch { return []; }
+};
+const productStockLabel = (value: unknown) => {
+  const stock=Math.max(0,Number(value||0));
+  return stock>100 ? "库存充足" : stock>0 ? `仅剩 ${stock} 件` : "暂时缺货";
+};
 const copyText = async (text: string) => {
   if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(text);
   const area=document.createElement("textarea"); area.value=text; area.style.position="fixed"; area.style.opacity="0";
@@ -86,6 +120,7 @@ const routeViews: View[] = [
   "platforms",
   "platform-products",
   "content",
+  "article-detail",
   "cart",
   "checkout",
   "orders",
@@ -109,6 +144,7 @@ const parseRoute = (url = new URL(location.href)) => {
   const product = path.match(/^\/web\/products\/(\d+)$/);
   const solution = path.match(/^\/web\/solutions\/(\d+)$/);
   const platform = path.match(/^\/web\/platforms\/(\d+)\/products$/);
+  const article = path.match(/^\/web\/articles\/(\d+)$/);
   const route: Record<string, View> = {
     "/web": "home", "/web/products": "products", "/web/agreement-products": "agreement-products", "/web/solutions": "solutions",
     "/web/platforms": "platforms", "/web/content": "content", "/web/cart": "cart",
@@ -120,19 +156,22 @@ const parseRoute = (url = new URL(location.href)) => {
   return {
     view: product ? "detail" as View : solution ? "solution-detail" as View
       : platform ? "platform-products" as View
+        : article ? "article-detail" as View
         : legacy && routeViews.includes(legacy) ? legacy
           : route[path] || "home",
     categoryId: Number(url.searchParams.get("categoryId")) || undefined,
     platformId: platform ? Number(platform[1]) : Number(url.searchParams.get("platformId")) || undefined,
     solutionId: solution ? Number(solution[1]) : Number(url.searchParams.get("solutionId")) || undefined,
     productId: product ? Number(product[1]) : Number(url.searchParams.get("productId")) || undefined,
+    articleId: article ? Number(article[1]) : undefined,
   };
 };
 const routeFromLocation = () => parseRoute().view;
-const pathFor = (view: View, platformId?: number, solutionId?: number, productId?: number) => {
+const pathFor = (view: View, platformId?: number, solutionId?: number, productId?: number, articleId?: number) => {
   if (view === "detail" && productId) return `/web/products/${productId}`;
   if (view === "solution-detail" && solutionId) return `/web/solutions/${solutionId}`;
   if (view === "platform-products" && platformId) return `/web/platforms/${platformId}/products`;
+  if (view === "article-detail" && articleId) return `/web/articles/${articleId}`;
   return ({ home: "/web/", products: "/web/products", "agreement-products": "/web/agreement-products", solutions: "/web/solutions",
     platforms: "/web/platforms", content: "/web/content", cart: "/web/cart",
     checkout: "/web/checkout", orders: "/web/orders", profile: "/web/account",
@@ -170,6 +209,7 @@ function App() {
   const [solutionId, setSolutionId] = useState<number | undefined>(() => {
     return parseRoute().solutionId;
   });
+  const [articleId, setArticleId] = useState<number | undefined>(() => parseRoute().articleId);
   const [profile, setProfile] = useState<Row>({});
   const [summary, setSummary] = useState<Row>({});
   const [cart, setCart] = useState<Row[]>([]);
@@ -184,9 +224,28 @@ function App() {
   const pendingAction = useRef<undefined | (() => void)>(undefined);
   const [siteConfig, setSiteConfig] = useState<Row>({});
   const siteName = siteConfig["platform.name"] || "政企采购供应链";
-  const servicePhone = siteConfig["platform.servicePhone"] || "400-800-2026";
+  const siteLogo = String(siteConfig["platform.logo"] || "").trim();
+  const englishName = String(siteConfig["platform.englishName"] || "SUPPLY CHAIN").trim();
+  const siteSlogan = String(siteConfig["platform.slogan"] || "自营正品 · 全国配送").trim();
+  const contactLandline = String(siteConfig["contact.landline"] || "").trim();
   const icpFiling = String(siteConfig["platform.icpFiling"] || "").trim();
   const policeFiling = String(siteConfig["platform.policeFiling"] || "").trim();
+  const telecomLicense = String(siteConfig["platform.telecomLicense"] || "鲁B2-20210548").trim();
+  const footerAbout = String(siteConfig["footer.about"] || "").trim();
+  const footerAddress = String(siteConfig["footer.address"] || "").trim();
+  const footerAboutTitle = String(siteConfig["footer.aboutTitle"] || "关于壹采").trim();
+  const footerOfficialTitle = String(siteConfig["footer.officialTitle"] || "官方平台").trim();
+  const footerServiceTitle = String(siteConfig["footer.serviceTitle"] || "我们的服务").trim();
+  const footerContactTitle = String(siteConfig["footer.contactTitle"] || "联系我们").trim();
+  const copyrightYears = String(siteConfig["footer.copyrightYears"] || "2023-2025").trim();
+  const companyName = String(siteConfig["footer.companyName"] || "山东壹知产数字科技有限公司").trim();
+  useEffect(()=>{
+    const title=String(siteConfig["seo.title"]||siteName),description=String(siteConfig["seo.description"]||""),keywords=[siteConfig["seo.keywords"],siteConfig["seo.geoKeywords"]].filter(Boolean).join(",");
+    document.title=title;
+    const meta=(name:string,value:string)=>{let node=document.head.querySelector(`meta[name="${name}"]`) as HTMLMetaElement|null;if(!node){node=document.createElement("meta");node.name=name;document.head.appendChild(node)}node.content=value};
+    meta("description",description);meta("keywords",keywords);meta("robots","index,follow,max-image-preview:large");
+    let schema=document.getElementById("seo-schema");if(!schema){schema=document.createElement("script");schema.id="seo-schema";(schema as HTMLScriptElement).type="application/ld+json";document.head.appendChild(schema)}schema.textContent=JSON.stringify({"@context":"https://schema.org","@type":"Organization",name:siteConfig["seo.organizationName"]||companyName,url:location.origin+"/web/",description,areaServed:"中国山东省"});
+  },[siteConfig,siteName,companyName]);
   const notify = (text: string) => {
     setToast(text);
     setTimeout(() => setToast(""), 2200);
@@ -247,6 +306,7 @@ function App() {
       setCategoryId(route.categoryId);
       setPlatformId(route.platformId);
       setSolutionId(route.solutionId);
+      setArticleId(route.articleId);
       setSearchKeyword(new URLSearchParams(location.search).get("q") || "");
       setSelected(undefined);
     };
@@ -259,16 +319,18 @@ function App() {
     nextPlatform?: number,
     nextSolution?: number,
     nextProduct?: number,
+    nextArticle?: number,
   ) => {
     setView(target);
     setCategoryId(nextCategory);
     setPlatformId(nextPlatform);
     setSolutionId(nextSolution);
+    setArticleId(nextArticle);
     if (target === "detail" && nextProduct) {
       setSelected(products.find((row) => Number(row.id) === nextProduct));
     }
     const url = new URL(location.href);
-    url.pathname = pathFor(target, nextPlatform, nextSolution, nextProduct);
+    url.pathname = pathFor(target, nextPlatform, nextSolution, nextProduct, nextArticle);
     url.searchParams.delete("view");
     if (nextCategory) url.searchParams.set("categoryId", String(nextCategory));
     else url.searchParams.delete("categoryId");
@@ -284,12 +346,13 @@ function App() {
     nextPlatform?: number,
     nextSolution?: number,
     nextProduct?: number,
+    nextArticle?: number,
   ) => {
     if (protectedViews.has(target) && !current) {
-      requireAuth(() => applyNavigation(target, nextCategory, nextPlatform, nextSolution, nextProduct));
+      requireAuth(() => applyNavigation(target, nextCategory, nextPlatform, nextSolution, nextProduct, nextArticle));
       return;
     }
-    applyNavigation(target, nextCategory, nextPlatform, nextSolution, nextProduct);
+    applyNavigation(target, nextCategory, nextPlatform, nextSolution, nextProduct, nextArticle);
   };
   const openNavigation = (item: Row, index: number) => {
     const fallback: View =
@@ -314,6 +377,7 @@ function App() {
       configuredRoute?.platformId,
       configuredRoute?.solutionId,
       configuredRoute?.productId,
+      configuredRoute?.articleId,
     );
   };
   const addToCart = async (product: Row, quantity = 1) => {
@@ -356,6 +420,7 @@ function App() {
     });
   const goProduct = (product: Row) => {
     applyNavigation("detail", undefined, undefined, undefined, Number(product.id));
+    setSelected(product);
     scrollTo(0, 0);
   };
   useEffect(() => {
@@ -406,7 +471,7 @@ function App() {
   return (
     <div className="shop">
       <div className="topbar">
-        <span>{siteName} · 自营正品 · 全国配送</span>
+        <span>{siteName} · {siteSlogan}</span>
         <div>
           {current ? (
             <>
@@ -423,10 +488,10 @@ function App() {
       </div>
       <header className="header">
         <button className="logo" onClick={() => navigate("home")}>
-          <i>政</i>
+          {siteLogo?<img src={siteLogo} alt={`${siteName} Logo`}/>:<i>政</i>}
           <span>
             <strong>{siteName}</strong>
-            <small>SUPPLY CHAIN</small>
+            <small>{englishName}</small>
           </span>
         </button>
         <label className="search">
@@ -551,8 +616,14 @@ function App() {
           notify={notify}
         />
       )}
+      {displayView === "article-detail" && articleId && (
+        <ArticleDetail
+          article={(portal.content || []).find((row: Row) => Number(row.id) === articleId)}
+          back={() => navigate("content")}
+        />
+      )}
       {displayView === "platform-products" && platformId && (
-        <PlatformProducts platformId={platformId} open={goProduct} loggedIn={Boolean(current)} />
+        <PlatformProducts platformId={platformId} open={goProduct} add={add} loggedIn={Boolean(current)} />
       )}
       {displayView === "detail" && selected && (
         <Detail
@@ -595,43 +666,33 @@ function App() {
       )}
       <footer className="footer">
         <section className="footer-services">
-          {[
-            ["正品保障", "自营商品，品质保证"],
-            ["授信守信", "协议价格，统一对账"],
-            ["专属服务", "企业客户，一对一服务"],
-            ["全国配送", "多地址拆分，物流可查"],
-          ].map(([title, text], index) => <article key={title}>
-            <FooterServiceIcon index={index}/><div><strong>{title}</strong><span>{text}</span></div>
+          {(portal.serviceFeatures || []).map((row: Row, index: number) => <article key={row.id || row.title}>
+            {row.imageUrl ? <img src={row.imageUrl} alt=""/> : <FooterServiceIcon index={index}/>}<div><strong>{row.title}</strong><span>{row.subtitle}</span></div>
           </article>)}
         </section>
         <section className="footer-main">
           <div className="footer-brand">
-            <strong>{siteName}</strong>
-            <span>{hasAgreement ? "企业协议价 · 自营库存 · 银行转账 · 全国配送" : "自营库存 · 银行转账 · 全国配送"}</span>
-            <p>服务电话 {servicePhone}<br/>工作日 09:00–18:00</p>
+            <h3>{footerAboutTitle}</h3>
+            <p>{footerAbout}</p>
           </div>
-          <nav className="footer-articles">
-            <h3>服务与帮助</h3>
-            <div>{(portal.content || []).slice(0, 8).map((row: Row, index: number) => {
-              const genericContentLink = !row.linkUrl || row.linkUrl === "/web/?view=content" || row.linkUrl === "/web/content";
-              return <a key={row.id} href={genericContentLink ? `/web/content#content-${row.id}` : row.linkUrl}>
-                {row.imageUrl ? <img src={row.imageUrl} alt=""/> : <FooterServiceIcon index={index % 4}/>}<span>{row.title}</span>
-              </a>;
-            })}</div>
+          <nav className="footer-column-links">
+            <h3>{footerOfficialTitle}</h3>
+            {(portal.footerLinks || []).filter((row:Row)=>row.linkGroup==="OFFICIAL").map((row:Row)=><a key={row.id} href={row.linkUrl} target={row.openTarget==="BLANK"?"_blank":undefined} rel={row.openTarget==="BLANK"?"noreferrer":undefined}>{row.title}</a>)}
           </nav>
-          <div className="footer-meta">
-            <h3>平台信息</h3>
-            <p>企业采购服务平台<br/>自营商品 · 协议定价 · 统一结算</p>
-            {(icpFiling || policeFiling) && (
-              <nav>
-                <span className="filing-prefix">备案号：</span>
-                {policeFiling && <a className="police-filing" href="https://www.beian.gov.cn/portal/registerSystemInfo" target="_blank" rel="noreferrer"><PoliceFilingIcon />{policeFiling}</a>}
-                {icpFiling && <a href="https://beian.miit.gov.cn/" target="_blank" rel="noreferrer">{icpFiling}</a>}
-              </nav>
-            )}
+          <nav className="footer-column-links">
+            <h3>{footerServiceTitle}</h3>
+            {(portal.footerLinks || []).filter((row:Row)=>row.linkGroup==="SERVICE").map((row:Row)=><a key={row.id} href={row.linkUrl} target={row.openTarget==="BLANK"?"_blank":undefined} rel={row.openTarget==="BLANK"?"noreferrer":undefined}>{row.title}</a>)}
+          </nav>
+          <div className="footer-contact">
+            <h3>{footerContactTitle}</h3>
+            <p>电话：{contactLandline}</p>
+            <p>邮箱：<a href={`mailto:${String(siteConfig["contact.email"] || "")}`}>{String(siteConfig["contact.email"] || "")}</a></p>
+            <p>地址：{footerAddress}</p>
           </div>
+          <div className="footer-copyright">© {copyrightYears} {companyName} 版权所有 | <a href="https://beian.miit.gov.cn/#/Integrated/recordQuery" target="_blank" rel="noreferrer">{icpFiling}</a> | 电信增值业务许可证：{telecomLicense} | <a href="https://beian.mps.gov.cn/#/query/webSearch" target="_blank" rel="noreferrer">{policeFiling}</a></div>
         </section>
       </footer>
+      <FloatingContact config={siteConfig}/>
       {toast && <div className="toast">✓ {toast}</div>}
       {authOpen && !current && (
         <div className="auth-modal-backdrop">
@@ -648,6 +709,36 @@ function App() {
       )}
     </div>
   );
+}
+
+function FloatingContact({ config }: { config: Row }) {
+  const [expanded, setExpanded] = useState(true);
+  const landline = String(config["contact.landline"] || "0531-86099058").trim();
+  const mobile = String(config["contact.mobile"] || "13105315957").trim();
+  const wechatQr = String(config["contact.wechatQr"] || "https://qlyc.co/image/wx.png").trim();
+  const email = String(config["contact.email"] || "Wangyunlei@yizhichan.co").trim();
+  if (!expanded) return <button className="floating-contact-expand" onClick={() => setExpanded(true)} aria-label="展开联系方式">‹</button>;
+  return (
+    <aside className="floating-contact" aria-label="联系方式">
+      <button className="floating-contact-collapse" onClick={() => setExpanded(false)} aria-label="收起联系方式">›</button>
+      <a href={`tel:${landline.replace(/[^\d+-]/g, "")}`}><ContactIcon type="phone"/><strong>{landline}</strong><small>咨询热线</small></a>
+      <a href={`tel:${mobile.replace(/[^\d+]/g, "")}`}><ContactIcon type="mobile"/><strong>{mobile}</strong><small>手机</small></a>
+      <div className="floating-contact-wechat" tabIndex={0}><ContactIcon type="wechat"/><strong>微信咨询</strong><small>扫码添加</small>
+        <div className="floating-contact-qr"><img src={wechatQr} alt="微信二维码"/><span>扫码添加微信<br/>获取更多信息</span></div>
+      </div>
+      <a href={`mailto:${email}`}><ContactIcon type="email"/><strong>邮箱</strong><small>联系我们</small></a>
+    </aside>
+  );
+}
+
+function ContactIcon({ type }: { type: "phone" | "mobile" | "wechat" | "email" }) {
+  const paths = {
+    phone: <path d="M7 3 4.8 5.2c-.5.5-.5 1.3-.2 2 2.5 5.5 6.7 9.7 12.2 12.2.7.3 1.5.3 2-.2L21 17l-4.3-3-2 2c-2.8-1.5-5.2-3.9-6.7-6.7l2-2L7 3Z"/>,
+    mobile: <><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M10 18h4"/></>,
+    wechat: <><ellipse cx="9" cy="10" rx="6" ry="5"/><ellipse cx="16" cy="15" rx="5" ry="4"/><path d="m5 14-1 3 3-2m12 3 1 2-3-1"/></>,
+    email: <><rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="m3 7 9 7 9-7"/></>,
+  };
+  return <svg viewBox="0 0 24 24" aria-hidden="true">{paths[type]}</svg>;
 }
 
 function PoliceFilingIcon() {
@@ -876,6 +967,8 @@ function floorProducts(floor: Row, products: Row[], categories: Row[], portal: R
   return rows.slice(0, Number(floor.displayCount || 4));
 }
 
+const adGroupItems=(value:unknown):Row[]=>{try{return Array.isArray(value)?value:JSON.parse(String(value||"[]"));}catch{return [];}};
+function HomeAdGroup({group}:{group:Row}){const items=adGroupItems(group.items).sort((a,b)=>Number(a.sortOrder||0)-Number(b.sortOrder||0));if(!items.length)return null;return <section className={`home-ad-group ad-layout-${String(group.layoutType||"FULL").toLowerCase()}`} style={{width:"100%",marginLeft:0,marginRight:0}}>{items.map((item)=><a key={item.id} href={item.linkUrl||undefined} target={item.openTarget==="BLANK"?"_blank":undefined} rel={item.openTarget==="BLANK"?"noreferrer":undefined}>{item.webImageUrl&&<img src={item.webImageUrl} alt={item.title||group.name}/>} {item.title&&<span>{item.title}</span>}</a>)}</section>}
 function HomeFloor({ floor, products, categories, portal, hasAgreement, loggedIn, open, add, all }: { floor: Row; products: Row[]; categories: Row[]; portal: Row; hasAgreement: boolean; loggedIn:boolean; open: (row: Row) => void; add: (row: Row) => void; all: (id?:number) => void }) {
   if (floor.contentType === "PRODUCT") {
     const rows = floorProducts(floor, products, categories, portal, hasAgreement);
@@ -889,7 +982,7 @@ function HomeFloor({ floor, products, categories, portal, hasAgreement, loggedIn
   const ids = String(floor.contentIds || "").split(",").map(Number).filter(Boolean);
   const rows = (floor.selectionRule === "MANUAL" ? ids.map((id)=>source.find((row:Row)=>Number(row.id)===id)).filter(Boolean) : source).slice(0,Number(floor.displayCount||3));
   if (!rows.length) return null;
-  return <section className="solutions home-floor"><div><span>{floor.contentType === "SOLUTION" ? "SCENE SOLUTION" : floor.contentType === "CATEGORY" ? "PRODUCT CATEGORY" : "PORTAL CONTENT"}</span><h2>{floor.title}</h2><p>{floor.subtitle}</p></div>{rows.map((row:Row)=><article key={row.id} style={row.imageUrl?{backgroundImage:`linear-gradient(135deg,#15365de8,#1f6ac9d9),url(${row.imageUrl})`,backgroundSize:"cover"}:undefined}><i>{String(row.title||row.name).slice(0,1)}</i><strong>{row.title||row.name}</strong><small>{row.subtitle||"查看分类商品"}</small><button onClick={()=>floor.contentType==="CATEGORY"?all(Number(row.id)):location.href=row.linkUrl||(floor.contentType==="SOLUTION"?`/web/solutions/${row.id}`:`/web/content`)}>查看详情 →</button></article>)}</section>;
+  return <section className="solutions home-floor"><div><span>{floor.contentType === "SOLUTION" ? "SCENE SOLUTION" : floor.contentType === "CATEGORY" ? "PRODUCT CATEGORY" : "PORTAL CONTENT"}</span><h2>{floor.title}</h2><p>{floor.subtitle}</p></div>{rows.map((row:Row)=><article key={row.id} style={row.imageUrl?{backgroundImage:`linear-gradient(135deg,#15365de8,#1f6ac9d9),url(${row.imageUrl})`,backgroundSize:"cover"}:undefined}><i>{String(row.title||row.name).slice(0,1)}</i><strong>{row.title||row.name}</strong><small>{row.subtitle||"查看分类商品"}</small><button onClick={()=>floor.contentType==="CATEGORY"?all(Number(row.id)):location.href=row.linkUrl||(floor.contentType==="SOLUTION"?`/web/solutions/${row.id}`:`/web/articles/${row.id}`)}>查看详情 →</button></article>)}</section>;
 }
 
 function Home({
@@ -999,7 +1092,13 @@ function Home({
           </article>
         ))}
       </section>}
-      {(portal.floors || []).filter((floor:Row)=>["ALL","WEB"].includes(floor.targetScope)).map((floor:Row)=><HomeFloor key={floor.id} floor={floor} products={products} categories={categories} portal={portal} hasAgreement={hasAgreement} loggedIn={loggedIn} open={open} add={add} all={all} />)}
+      {(portal.adGroups||[]).filter((g:Row)=>["ALL","WEB"].includes(g.targetScope)&&g.placement==="TOP").map((g:Row)=><HomeAdGroup key={`ad-${g.id}`} group={g}/>)}
+      {(portal.floors || []).filter((floor:Row)=>["ALL","WEB"].includes(floor.targetScope)).flatMap((floor:Row)=>[
+        ...(portal.adGroups||[]).filter((g:Row)=>["ALL","WEB"].includes(g.targetScope)&&g.placement==="BEFORE_FLOOR"&&Number(g.anchorFloorId)===Number(floor.id)).map((g:Row)=><HomeAdGroup key={`ad-${g.id}`} group={g}/>),
+        <HomeFloor key={`floor-${floor.id}`} floor={floor} products={products} categories={categories} portal={portal} hasAgreement={hasAgreement} loggedIn={loggedIn} open={open} add={add} all={all} />,
+        ...(portal.adGroups||[]).filter((g:Row)=>["ALL","WEB"].includes(g.targetScope)&&g.placement==="AFTER_FLOOR"&&Number(g.anchorFloorId)===Number(floor.id)).map((g:Row)=><HomeAdGroup key={`ad-${g.id}`} group={g}/>),
+      ])}
+      {(portal.adGroups||[]).filter((g:Row)=>["ALL","WEB"].includes(g.targetScope)&&g.placement==="BOTTOM").map((g:Row)=><HomeAdGroup key={`ad-${g.id}`} group={g}/>)}
     </main>
   );
 }
@@ -1035,6 +1134,7 @@ function Products({
   const [attributeFilters,setAttributeFilters]=useState<Record<string,string[]>>({});
   const [hovered, setHovered] = useState<number>();
   const [sort, setSort] = useState<"default" | "price">("default");
+  const [page,setPage]=useState(1);const pageSize=12;
   const ids = active
     ? [
         active,
@@ -1054,7 +1154,7 @@ function Products({
     .map((item)=>[String(item.code),item])).values()) : [];
   const filterOptions=(code:string)=>Array.from(new Set(categoryProducts.flatMap((p)=>structuredSpecs(p.structuredAttributes))
     .filter((item)=>String(item.code)===code).map((item)=>String(item.value))));
-  const brands=Array.from(new Set(products.map((p)=>String(p.brandName||"")).filter(Boolean))).sort();
+  const brands=Array.from(new Set(categoryProducts.map((p)=>String(p.brandName||"")).filter(Boolean))).sort();
   const chooseCategory=(next:number|undefined)=>{
     setActive(next);
     setBrand("");
@@ -1067,7 +1167,7 @@ function Products({
         (!active || ids.includes(Number(p.categoryId))) &&
         (!onlyStock || Number(p.availableStock)>0) &&
         (!(forceAgreement || onlyAgreement) || p.agreementPrice != null) &&
-        (active || !brand || String(p.brandName||"")===brand) &&
+        (!brand || String(p.brandName||"")===brand) &&
         (!active || Object.entries(attributeFilters).every(([code,values])=>!values.length||structuredSpecs(p.structuredAttributes)
           .some((item)=>String(item.code)===code&&values.includes(String(item.value))))) &&
         (`${p.title || ""} ${p.summary || ""} ${p.brandName || ""} ${p.skuCode || ""}`
@@ -1079,6 +1179,9 @@ function Products({
         : 0,
     );
   const roots = categories.filter((x) => Number(x.level) === 1);
+  const totalPages=Math.max(1,Math.ceil(filtered.length/pageSize));
+  const paged=filtered.slice((page-1)*pageSize,page*pageSize);
+  useEffect(()=>setPage(1),[keyword,active,onlyStock,onlyAgreement,brand,attributeFilters,sort]);
   return (
     <main className="page">
       <div className="breadcrumb">首页　/　办公集采</div>
@@ -1164,19 +1267,19 @@ function Products({
             </div>
           </div>
           <div className="product-search-panel">
+            <label>
+              <span>品牌</span>
+              <select value={brand} onChange={(e)=>setBrand(e.target.value)}>
+                <option value="">全部品牌</option>
+                {brands.map((item)=><option key={item} value={item}>{item}</option>)}
+              </select>
+            </label>
             <label className="product-keyword">
               <span>关键词</span>
               <input value={keyword}
                 onChange={(e) => { setKeyword(e.target.value); routeChanged(active,e.target.value); }}
                 placeholder={active ? "搜索当前分类商品" : "搜索商品名称、品牌、型号或编码"}/>
             </label>
-            {!active && <label>
-              <span>品牌</span>
-              <select value={brand} onChange={(e)=>setBrand(e.target.value)}>
-                <option value="">全部品牌</option>
-                {brands.map((item)=><option key={item} value={item}>{item}</option>)}
-              </select>
-            </label>}
             <label className="search-check"><input type="checkbox" checked={onlyStock} onChange={(e)=>setOnlyStock(e.target.checked)}/> 仅看有货</label>
             {hasAgreement && !forceAgreement && <label className="search-check"><input type="checkbox" checked={onlyAgreement} onChange={(e)=>setOnlyAgreement(e.target.checked)}/> 企业协议商品</label>}
             {active && filterDefinitions.map((definition)=><div className="product-attribute-filter" key={definition.code}>
@@ -1206,7 +1309,7 @@ function Products({
             <span>{hasAgreement ? "协议价优先展示" : "商品原价展示"}</span>
           </div>
           <div className="product-grid">
-            {filtered.map((p, i) => (
+            {paged.map((p, i) => (
               <ProductCard
                 key={p.skuId}
                 product={p}
@@ -1217,6 +1320,7 @@ function Products({
               />
             ))}
           </div>
+          {filtered.length>pageSize&&<div className="web-pagination"><button disabled={page===1} onClick={()=>setPage(page-1)}>上一页</button><span>第 {page} / {totalPages} 页</span><button disabled={page===totalPages} onClick={()=>setPage(page+1)}>下一页</button></div>}
           {!filtered.length && (
             <div className="empty">
               <h2>该分类暂无在售商品</h2>
@@ -1300,6 +1404,24 @@ function PortalList({
           ))}
         </div>
       </section>
+    </main>
+  );
+}
+
+function ArticleDetail({ article, back }: { article?: Row; back: () => void }) {
+  if (!article) return (
+    <main className="page article-detail-page">
+      <div className="breadcrumb"><button onClick={back}>内容中心</button>　/　文章详情</div>
+      <section className="article-detail-card"><p className="content-empty">文章不存在、尚未发布或已被删除。</p></section>
+    </main>
+  );
+  return (
+    <main className="page article-detail-page">
+      <div className="breadcrumb"><button onClick={back}>内容中心</button>　/　{article.title}</div>
+      <article className="article-detail-card">
+        <header><h1>{article.title}</h1>{article.subtitle && <p>{article.subtitle}</p>}</header>
+        {article.description ? <div className="content-body" dangerouslySetInnerHTML={{ __html: article.description }}/> : <p className="content-empty">正文内容暂未配置。</p>}
+      </article>
     </main>
   );
 }
@@ -1395,10 +1517,12 @@ function SolutionDetail({
 function PlatformProducts({
   platformId,
   open,
+  add,
   loggedIn,
 }: {
   platformId: number;
   open: (r: Row) => void;
+  add: (r: Row) => void;
   loggedIn: boolean;
 }) {
   const [data, setData] = useState<Row>({ products: [] });
@@ -1423,7 +1547,7 @@ function PlatformProducts({
     } catch {
       // 浏览统计失败不阻止用户查看商品详情。
     }
-    open({ ...product, clickCount: Number(product.clickCount || 0) + 1 });
+    open({ ...product, platformTitle:data.platform?.title, platformPricePrefix:data.platform?.pricePrefix, clickCount: Number(product.clickCount || 0) + 1 });
   };
   return (
     <main className="page">
@@ -1453,6 +1577,7 @@ function PlatformProducts({
                 platformTitle={data.platform?.title}
                 platformPricePrefix={data.platform?.pricePrefix}
                 loggedIn={loggedIn}
+                add={add}
               />
             ))}
           </div>
@@ -1486,9 +1611,7 @@ function ProductCard({
   loggedIn?: boolean;
 }) {
   const salePrice=customerPrice(product,loggedIn);
-  const platformCost=loggedIn&&product.agreementPrice!=null?product.agreementPrice:product.memberPrice??product.marketPrice;
-  const platformPrice=Number(product.platformPrice||0);
-  const profitRate=platformPrice>0?(platformPrice-Number(platformCost||0))/platformPrice*100:0;
+  const badge = productBadgeLabel(product);
   return (
     <article className="product-card" onClick={() => open(product)}>
       <div className={`product-image p${index % 5}`}>
@@ -1497,7 +1620,7 @@ function ProductCard({
         ) : (
           <i>{["💻", "📄", "🖨️", "🖥️", "📦"][index % 5]}</i>
         )}
-        <em>{platformTitle || (product.agreementPrice != null ? "协议专享" : "品质精选")}</em>
+        {badge && <em>{badge}</em>}
       </div>
       <div className="product-info">
         <div className="platform-tags">
@@ -1515,20 +1638,12 @@ function ProductCard({
         </div>
         <h3>{product.title}</h3>
         <p>{product.summary || "政企采购自营商品，全国配送"}</p>
-        <div className="price">
-          {platformTitle && <span style={{ color: "#b35b00", fontSize: 14, fontWeight: 700, marginRight: 5 }}>{platformPricePrefix || platformTitle}价：</span>}
-          <strong>{money(platformTitle ? product.platformPrice : salePrice)}</strong>
-          {!platformTitle && loggedIn && <del>{money(product.marketPrice)}</del>}
-          {!platformTitle && loggedIn && <small>{product.agreementPrice != null ? "协议价" : "会员价"}</small>}
-          {platformTitle && <small className="platform-profit">{loggedIn&&product.agreementPrice!=null?"协议价":"会员价"} {money(platformCost)} · 利润率 {profitRate.toFixed(2)}%</small>}
+        <div className={`price${platformTitle ? " platform-price" : ""}`}>
+          {platformTitle ? <><span className="price-item"><small>{platformPricePrefix || platformTitle}价</small><strong>{money(product.platformPrice)}</strong></span><span className="price-item member-price"><small>会员价</small><strong>{money(product.memberPrice??product.marketPrice)}</strong></span></> : <><span className="price-item"><small>市场价</small><strong>{money(product.marketPrice)}</strong></span>{loggedIn?<span className="price-item member-price"><small>会员价</small><strong>{money(product.memberPrice??salePrice)}</strong></span>:<span className="login-price-hint">登录后查看会员价</span>}</>}
         </div>
-        <div className="stock">
-          <span>库存 {product.availableStock} · 已售 {product.soldCount || 0}{platformTitle ? ` · 浏览 ${product.clickCount || 0}` : ""}</span>
-          {platformTitle ? (
-            product.productUrl && <a className="platform-card-link" href={product.productUrl} target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>平台链接</a>
-          ) : (
-            <button onClick={(event) => { event.stopPropagation(); void add?.(product); }}>加入购物车</button>
-          )}
+        <div className={`stock${platformTitle ? " platform-stock" : ""}`}>
+          <span>{productStockLabel(product.availableStock)}</span>
+          <span className="card-actions"><button onClick={(event) => { event.stopPropagation(); void add?.(product); }}>加入购物车</button></span>
         </div>
       </div>
     </article>
@@ -1555,6 +1670,8 @@ function Detail({
   const [selectedSku,setSelectedSku]=useState(Number(product.skuId));
   const variant=variants.find((item)=>Number(item.skuId)===selectedSku)||variants[0];
   const current:Row=variant?{...product,...variant,mainImage:variant.skuImage||product.mainImage}:product;
+  const currentTitle=String(current.skuTitle||product.title||"").trim();
+  const detailBadge=productBadgeLabel(current);
   const variantLabel=(item:Row)=>Object.entries(typeof item.specValues==="string"?JSON.parse(item.specValues||"{}"):item.specValues||{})
     .map(([key,value])=>`${key}：${value}`).join(" / ")||item.skuCode;
   const [detailTab, setDetailTab] = useState<
@@ -1597,11 +1714,11 @@ function Detail({
         <div className="detail-gallery">
           <div>
             {activeImage ? (
-              <img src={activeImage} alt={product.title} />
+              <img src={activeImage} alt={currentTitle} />
             ) : (
               <i>暂无商品图片</i>
             )}
-            <span>{product.agreementPrice != null ? "协议价商品" : "自营商品"}</span>
+            {detailBadge && <span>{detailBadge}</span>}
           </div>
           {galleryImages.length > 0 && (
             <nav>
@@ -1612,7 +1729,7 @@ function Detail({
                   onClick={() => setActiveImage(url)}
                   aria-label={`查看商品图片${index + 1}`}
                 >
-                  <img src={url} alt={`${product.title} 图片${index + 1}`} />
+                  <img src={url} alt={`${currentTitle} 图片${index + 1}`} />
                 </button>
               ))}
             </nav>
@@ -1620,7 +1737,7 @@ function Detail({
         </div>
         <div className="detail-main">
           <div className="platform-tags detail-tags">{Number(product.selfOperated) === 1 && <span className="self-operated-tag">自营</span>}{product.platformNames && String(product.platformNames).split("、").map((name:string)=><span key={name}>{name}</span>)}</div>
-          <div className="detail-title-row"><h1>{product.title}</h1><button className="share-button" onClick={()=>void sharePage(product.title,`${product.title} ${money(salePrice)}`,notify)}>分享</button></div>
+          <div className="detail-title-row"><h1>{currentTitle}</h1><button className="share-button" onClick={()=>void sharePage(currentTitle,`${currentTitle} ${money(salePrice)}`,notify)}>分享</button></div>
           <p>{product.summary}</p>
           <div className="agreement-price">
             <label>{!loggedIn ? "商品原价" : current.agreementPrice != null ? "企业协议价" : "企业会员价"}</label>
@@ -1644,9 +1761,7 @@ function Detail({
             </dd>
             <dt>服务</dt>
             <dd>
-              <span>自营正品</span>
-              <span>全国配送</span>
-              <span>统一对账</span>
+              {productServices(product.services).length?productServices(product.services).map((service)=><span key={service}>{service}</span>):<span>暂无服务配置</span>}
             </dd>
             <dt>数量</dt>
             <dd className="counter">
@@ -1659,9 +1774,10 @@ function Detail({
               >
                 ＋
               </button>
-              <small>库存 {current.availableStock} 件 · 已售 {product.soldCount || 0} 件</small>
+              <small>{productStockLabel(current.availableStock)}</small>
             </dd>
           </dl>
+          {current.productUrl&&<div className="detail-platform-link"><span>平台商品链接</span><a href={current.productUrl} target="_blank" rel="noreferrer">前往{current.platformTitle||"平台"}查看</a></div>}
           <div className="buy">
             <button disabled={Number(current.availableStock)<=0} onClick={() => void add(current, qty)}>加入购物车</button>
             <button disabled={Number(current.availableStock)<=0} onClick={() => void buyNow(current, qty)}>立即采购</button>
@@ -1851,7 +1967,7 @@ function Cart({
                   }
                 />
                 <div className="cart-product">
-                  <i>📦</i>
+                  {row.mainImage ? <img src={row.mainImage} alt={row.title}/> : <i>📦</i>}
                   <span>
                     <strong>{row.title}</strong>
                     <small>{row.skuCode}</small>
@@ -1947,11 +2063,14 @@ function Checkout({
   const [addresses, setAddresses] = useState<Row[]>([]);
   const [allocations, setAllocations] = useState<Record<string, Row[]>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [bankAccounts,setBankAccounts]=useState<Row[]>([]);
+  const [bankAccountId,setBankAccountId]=useState<number>();
   useEffect(() => {
     void api<Row[]>("/api/client/addresses")
       .then(setAddresses)
       .catch((error) => notify(error.message));
   }, []);
+  useEffect(()=>{void api<Row[]>("/api/public/payment-bank-accounts").then(rows=>{setBankAccounts(rows);setBankAccountId(Number(rows[0]?.id)||undefined)}).catch(e=>notify(e.message));},[]);
   const currentAddress = addresses[0];
   useEffect(() => {
     if (!addresses.length) return;
@@ -2037,6 +2156,7 @@ function Checkout({
               quantity: Number(item.quantity),
             })),
           ),
+          bankAccountId,
         }),
       });
       await reload();
@@ -2161,12 +2281,12 @@ function Checkout({
         ))}
       </section>
       <section className="checkout-card checkout-payment">
-        <div><h2>支付方式</h2><p>线下银行转账，提交后请按照订单说明完成付款</p></div>
-        <strong>银行转账</strong>
+        <div><h2>收款银行</h2><p>请选择本订单线下转账的收款账号，提交后将记录到订单中</p></div>
+        <div className="bank-account-options">{bankAccounts.map(row=><label className={bankAccountId===Number(row.id)?"active":""} key={row.id}><input type="radio" name="bank" checked={bankAccountId===Number(row.id)} onChange={()=>setBankAccountId(Number(row.id))}/><span><strong>{row.bankName}</strong><small>{row.accountName}</small><b>{row.accountNumber}</b>{row.branchName&&<small>{row.branchName}</small>}</span></label>)}{!bankAccounts.length&&<p>暂无可用收款账号，请联系管理员</p>}</div>
       </section>
       <section className="checkout-submit">
         <span>应付总额 <strong>{money(total)}</strong></span>
-        <button disabled={!currentAddress || submitting} onClick={() => void submit()}>
+        <button disabled={!currentAddress || !bankAccountId || submitting} onClick={() => void submit()}>
           {submitting ? "正在提交…" : "提交订单"}
         </button>
       </section>

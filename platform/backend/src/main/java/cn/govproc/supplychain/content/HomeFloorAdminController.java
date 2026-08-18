@@ -42,7 +42,8 @@ public class HomeFloorAdminController {
     Map<String,Object> create(@Valid @RequestBody FloorRequest r){validate(r); jdbc.sql("""
       INSERT INTO home_floor(title,subtitle,content_type,selection_rule,reference_id,display_count,target_scope,link_url,sort_order,status)
       VALUES(:title,:subtitle,:contentType,:selectionRule,:referenceId,:displayCount,:targetScope,:linkUrl,:sortOrder,:status)
-      """).paramSource(r).update(); return Map.of("id",jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single());}
+      """).paramSource(r).update(); long id=jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single();
+      replaceItems(id,r); return Map.of("id",id);}
 
     @PutMapping("/{id}") @Transactional
     void update(@PathVariable long id,@Valid @RequestBody FloorRequest r){validate(r); int changed=jdbc.sql("""
@@ -53,7 +54,8 @@ public class HomeFloorAdminController {
         .param("contentType",r.contentType()).param("selectionRule",r.selectionRule()).param("referenceId",r.referenceId())
         .param("displayCount",r.displayCount()).param("targetScope",r.targetScope()).param("linkUrl",r.linkUrl())
         .param("sortOrder",r.sortOrder()).param("status",r.status()).update();
-      if(changed==0)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"首页楼层不存在");}
+      if(changed==0)throw new ResponseStatusException(HttpStatus.NOT_FOUND,"首页楼层不存在");
+      replaceItems(id,r);}
 
     @GetMapping("/{id}/items")
     List<Map<String,Object>> items(@PathVariable long id){return jdbc.sql("""
@@ -85,9 +87,33 @@ public class HomeFloorAdminController {
       if(!CONTENT_TYPES.contains(r.contentType()))throw new IllegalArgumentException("不支持的楼层内容类型");
       if(!RULES.contains(r.selectionRule()))throw new IllegalArgumentException("不支持的选品规则");
       if(!SCOPES.contains(r.targetScope()))throw new IllegalArgumentException("不支持的展示端");
+      if("MANUAL".equals(r.selectionRule())&&"PRODUCT".equals(r.contentType())&&(r.contentIds()==null||r.contentIds().isEmpty()))
+        throw new IllegalArgumentException("手动选择商品时至少选择一个商品");
+    }
+    private void replaceItems(long floorId,FloorRequest r){
+      jdbc.sql("UPDATE home_floor_item SET deleted_at=NOW() WHERE floor_id=:floorId AND deleted_at IS NULL")
+        .param("floorId",floorId).update();
+      if(!"MANUAL".equals(r.selectionRule())||r.contentIds()==null)return;
+      int sortOrder=0;
+      for(Long contentId:r.contentIds().stream().filter(java.util.Objects::nonNull).distinct().toList()){
+        if("PRODUCT".equals(r.contentType())){
+          int count=jdbc.sql("SELECT COUNT(*) FROM product_sku WHERE id=:id AND status=1 AND deleted_at IS NULL")
+            .param("id",contentId).query(Integer.class).single();
+          if(count==0)throw new IllegalArgumentException("所选商品不存在、已下架或已删除");
+        }
+        if("CONTENT".equals(r.contentType())){
+          int count=jdbc.sql("SELECT COUNT(*) FROM portal_resource WHERE id=:id AND resource_type='CONTENT' AND status=1 AND deleted_at IS NULL")
+            .param("id",contentId).query(Integer.class).single();
+          if(count==0)throw new IllegalArgumentException("所选文章不存在、未发布或已删除");
+        }
+        jdbc.sql("""
+          INSERT INTO home_floor_item(floor_id,content_id,sort_order) VALUES(:floorId,:contentId,:sortOrder)
+          ON DUPLICATE KEY UPDATE sort_order=VALUES(sort_order),deleted_at=NULL
+          """).param("floorId",floorId).param("contentId",contentId).param("sortOrder",sortOrder++).update();
+      }
     }
     public record FloorRequest(@NotBlank String title,String subtitle,@NotBlank String contentType,@NotBlank String selectionRule,
       Long referenceId,@NotNull @Min(1) @Max(50) Integer displayCount,@NotBlank String targetScope,String linkUrl,
-      @NotNull Integer sortOrder,@NotNull @Min(0) @Max(1) Integer status){}
+      @NotNull Integer sortOrder,@NotNull @Min(0) @Max(1) Integer status,List<Long> contentIds){}
     public record ItemRequest(@NotNull Long contentId,@NotNull Integer sortOrder){}
 }

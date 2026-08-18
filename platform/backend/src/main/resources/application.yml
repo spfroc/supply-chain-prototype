@@ -47,3 +47,11 @@ springdoc:
     path: /api/openapi
 app:
   upload-dir: ${UPLOAD_DIR:/app/uploads}
+  oss:
+    endpoint: ${ALIYUN_OSS_ENDPOINT:}
+    bucket: ${ALIYUN_OSS_BUCKET:}
+    access-key-id: ${ALIYUN_OSS_ACCESS_KEY_ID:}
+    access-key-secret: ${ALIYUN_OSS_ACCESS_KEY_SECRET:}
+    public-url: ${ALIYUN_OSS_PUBLIC_URL:}
+    object-prefix: ${ALIYUN_OSS_OBJECT_PREFIX:supply-chain/}
+    migrate-local-on-start: ${ALIYUN_OSS_MIGRATE_LOCAL_ON_START:false}

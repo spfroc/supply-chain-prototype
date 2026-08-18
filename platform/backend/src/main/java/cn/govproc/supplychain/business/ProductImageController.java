@@ -1,5 +1,9 @@
 package cn.govproc.supplychain.business;
 
+import com.aliyun.oss.OSS;
+import com.aliyun.oss.OSSException;
+import com.aliyun.oss.OSSClientBuilder;
+import com.aliyun.oss.model.ObjectMetadata;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -9,8 +13,12 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import javax.imageio.ImageIO;
+import jakarta.annotation.PreDestroy;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
+import org.springframework.core.io.InputStreamResource;
 import org.springframework.core.io.UrlResource;
 import org.springframework.http.CacheControl;
 import org.springframework.http.MediaType;
@@ -26,12 +34,33 @@ import org.springframework.web.multipart.MultipartFile;
 @RestController
 @RequestMapping("/api")
 public class ProductImageController {
+    private static final Logger log = LoggerFactory.getLogger(ProductImageController.class);
     private static final Set<String> CONTENT_TYPES = Set.of("image/jpeg", "image/png");
     private final Path uploadDirectory;
+    private final OSS ossClient;
+    private final String ossBucket;
+    private final String ossPublicUrl;
+    private final String ossObjectPrefix;
 
-    public ProductImageController(@Value("${app.upload-dir:/app/uploads}") String uploadDirectory) throws IOException {
+    public ProductImageController(
+        @Value("${app.upload-dir:/app/uploads}") String uploadDirectory,
+        @Value("${app.oss.endpoint:}") String ossEndpoint,
+        @Value("${app.oss.bucket:}") String ossBucket,
+        @Value("${app.oss.access-key-id:}") String ossAccessKeyId,
+        @Value("${app.oss.access-key-secret:}") String ossAccessKeySecret,
+        @Value("${app.oss.public-url:}") String ossPublicUrl,
+        @Value("${app.oss.object-prefix:supply-chain/}") String ossObjectPrefix,
+        @Value("${app.oss.migrate-local-on-start:false}") boolean migrateLocalOnStart
+    ) throws IOException {
         this.uploadDirectory = Path.of(uploadDirectory).toAbsolutePath().normalize();
         Files.createDirectories(this.uploadDirectory);
+        this.ossBucket = ossBucket.trim();
+        this.ossObjectPrefix = normalizePrefix(ossObjectPrefix);
+        this.ossPublicUrl = normalizePublicUrl(ossPublicUrl, this.ossBucket, ossEndpoint);
+        this.ossClient = isConfigured(ossEndpoint, this.ossBucket, ossAccessKeyId, ossAccessKeySecret)
+            ? new OSSClientBuilder().build(ossEndpoint.trim(), ossAccessKeyId.trim(), ossAccessKeySecret.trim())
+            : null;
+        if (migrateLocalOnStart && this.ossClient != null) migrateLocalImages();
     }
 
     @PostMapping("/admin/business/uploads/images")
@@ -44,7 +73,10 @@ public class ProductImageController {
             case "banner" -> new ImageProfile(1200, 400, 3840, 1280, 3.0, 5);
             case "portal" -> new ImageProfile(800, 450, 3840, 2160, 16.0 / 9.0, 5);
             case "contentIcon" -> new ImageProfile(128, 128, 1024, 1024, 1.0, 2);
+            case "qr" -> new ImageProfile(300, 300, 2000, 2000, 1.0, 2);
             case "solutionMobile" -> new ImageProfile(720, 1280, 2160, 3840, 9.0 / 16.0, 5);
+            case "adWeb" -> new ImageProfile(800, 160, 6000, 3000, 0, 8);
+            case "adH5" -> new ImageProfile(600, 240, 3000, 4000, 0, 8);
             case "rich" -> new ImageProfile(300, 200, 3840, 3840, 0, 8);
             default -> throw new IllegalArgumentException("未知图片用途");
         };
@@ -67,6 +99,21 @@ public class ProductImageController {
 
         String extension = "image/png".equals(file.getContentType()) ? ".png" : ".jpg";
         String filename = UUID.randomUUID() + extension;
+        if (ossClient != null) {
+            String objectKey = ossObjectPrefix + "images/" + filename;
+            ObjectMetadata metadata = new ObjectMetadata();
+            metadata.setContentType(file.getContentType());
+            metadata.setContentLength(file.getSize());
+            metadata.setCacheControl("public, max-age=31536000, immutable");
+            ossClient.putObject(ossBucket, objectKey, file.getInputStream(), metadata);
+            return Map.of(
+                "url", "/api/public/uploads/images/" + filename,
+                "width", width,
+                "height", height,
+                "size", file.getSize(),
+                "storage", "OSS"
+            );
+        }
         Path target = uploadDirectory.resolve(filename).normalize();
         if (!target.getParent().equals(uploadDirectory)) throw new IllegalArgumentException("非法文件名");
         Files.copy(file.getInputStream(), target, StandardCopyOption.REPLACE_EXISTING);
@@ -74,8 +121,59 @@ public class ProductImageController {
             "url", "/api/public/uploads/images/" + filename,
             "width", width,
             "height", height,
-            "size", file.getSize()
+            "size", file.getSize(),
+            "storage", "LOCAL"
         );
+    }
+
+    private boolean isConfigured(String... values) {
+        for (String value : values) if (value == null || value.isBlank()) return false;
+        return true;
+    }
+
+    private String normalizePrefix(String value) {
+        String prefix = value == null ? "" : value.trim().replace('\\', '/');
+        while (prefix.startsWith("/")) prefix = prefix.substring(1);
+        return prefix.isEmpty() || prefix.endsWith("/") ? prefix : prefix + "/";
+    }
+
+    private String normalizePublicUrl(String value, String bucket, String endpoint) {
+        String url = value == null ? "" : value.trim();
+        if (url.isEmpty() && !bucket.isEmpty() && endpoint != null && !endpoint.isBlank()) {
+            String serviceEndpoint = endpoint.trim().replaceFirst("^https?://", "");
+            url = "https://" + bucket + "." + serviceEndpoint;
+        }
+        while (url.endsWith("/")) url = url.substring(0, url.length() - 1);
+        return url;
+    }
+
+    private void migrateLocalImages() throws IOException {
+        int uploaded = 0;
+        int skipped = 0;
+        try (var paths = Files.list(uploadDirectory)) {
+            for (Path path : paths.filter(Files::isRegularFile).toList()) {
+                String objectKey = ossObjectPrefix + "images/" + path.getFileName();
+                if (ossClient.doesObjectExist(ossBucket, objectKey)) {
+                    skipped++;
+                    continue;
+                }
+                ObjectMetadata metadata = new ObjectMetadata();
+                String contentType = Files.probeContentType(path);
+                metadata.setContentType(contentType == null ? MediaType.APPLICATION_OCTET_STREAM_VALUE : contentType);
+                metadata.setContentLength(Files.size(path));
+                metadata.setCacheControl("public, max-age=31536000, immutable");
+                try (var input = Files.newInputStream(path)) {
+                    ossClient.putObject(ossBucket, objectKey, input, metadata);
+                }
+                uploaded++;
+            }
+        }
+        log.info("OSS local image migration completed: uploaded={}, skipped={}, source={}", uploaded, skipped, uploadDirectory);
+    }
+
+    @PreDestroy
+    void closeOssClient() {
+        if (ossClient != null) ossClient.shutdown();
     }
 
     private record ImageProfile(
@@ -92,6 +190,21 @@ public class ProductImageController {
 
     @GetMapping("/public/uploads/images/{filename:.+}")
     ResponseEntity<Resource> image(@PathVariable String filename) throws IOException {
+        if (!filename.matches("[0-9a-fA-F-]+\\.(jpg|png)")) return ResponseEntity.notFound().build();
+        if (ossClient != null) {
+            String objectKey = ossObjectPrefix + "images/" + filename;
+            try {
+                var object = ossClient.getObject(ossBucket, objectKey);
+                String contentType = object.getObjectMetadata().getContentType();
+                return ResponseEntity.ok()
+                    .cacheControl(CacheControl.maxAge(java.time.Duration.ofDays(365)).cachePublic().immutable())
+                    .contentLength(object.getObjectMetadata().getContentLength())
+                    .contentType(contentType == null ? MediaType.APPLICATION_OCTET_STREAM : MediaType.parseMediaType(contentType))
+                    .body(new InputStreamResource(object.getObjectContent()));
+            } catch (OSSException exception) {
+                if (!"NoSuchKey".equals(exception.getErrorCode())) throw exception;
+            }
+        }
         Path file = uploadDirectory.resolve(filename).normalize();
         if (!file.getParent().equals(uploadDirectory) || !Files.isRegularFile(file))
             return ResponseEntity.notFound().build();

@@ -18,6 +18,14 @@ const structuredSpecs = (value: unknown): Row[] => {
     return Array.isArray(parsed) ? parsed : [];
   } catch { return []; }
 };
+const productServices=(value:unknown):string[]=>{try{const parsed=typeof value==="string"?JSON.parse(value||"[]"):value;return Array.isArray(parsed)?parsed.map(String):[];}catch{return [];}};
+const isAgreementProduct = (product: Row) => {
+  if(product.agreementPrice!=null)return true;
+  try{const variants=typeof product.variants==="string"?JSON.parse(product.variants||"[]"):product.variants;
+    return Array.isArray(variants)&&variants.some((variant:Row)=>variant.agreementPrice!=null);
+  }catch{return false;}
+};
+const productStockLabel=(value:unknown)=>{const stock=Math.max(0,Number(value||0));return stock>100?"库存充足":stock>0?`仅剩 ${stock} 件`:"暂时缺货";};
 function DragScroll({ className, children }: { className: string; children: React.ReactNode }) {
   const ref = useRef<HTMLDivElement>(null);
   const drag = useRef({ active: false, moved: false, x: 0, left: 0 });
@@ -57,8 +65,24 @@ function DragScroll({ className, children }: { className: string; children: Reac
 }
 const money = (v: any) =>
   `¥${Number(v || 0).toLocaleString("zh-CN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const productBadge = (product: Row) => isAgreementProduct(product)
+  ? "协议专属"
+  : product.badgeType === "PLATFORM"
+    ? (() => { const prefix=String(product.badgePlatformPrefix||"").trim(); return prefix ? (prefix.endsWith("平台") ? prefix : `${prefix}平台`) : ""; })()
+    : product.badgeType === "CUSTOM" ? String(product.customBadge||"") : "";
 const productPrice = (row: Row) => row.agreementPrice != null ? row.agreementPrice : row.marketPrice;
 const customerPrice = (row: Row, loggedIn: boolean) => !loggedIn ? row.marketPrice : row.agreementPrice != null ? row.agreementPrice : row.memberPrice ?? row.marketPrice;
+const productPlatformPrices = (value: unknown): Row[] => {
+  try {
+    const rows = Array.isArray(value) ? value : JSON.parse(String(value || "[]"));
+    const byPlatform = new Map<number, Row>();
+    (Array.isArray(rows) ? rows : []).forEach((row: Row) => {
+      const id = Number(row.platformId); const current = byPlatform.get(id);
+      if (!current || Number(row.platformPrice) < Number(current.platformPrice)) byPlatform.set(id, row);
+    });
+    return [...byPlatform.values()].sort((a,b)=>Number(a.sortOrder||0)-Number(b.sortOrder||0)||Number(a.platformId)-Number(b.platformId));
+  } catch { return []; }
+};
 const copyText = async (text:string) => {
   if(navigator.clipboard?.writeText)return navigator.clipboard.writeText(text);
   const area=document.createElement("textarea");area.value=text;area.style.position="fixed";area.style.opacity="0";document.body.appendChild(area);area.select();document.execCommand("copy");area.remove();
@@ -129,7 +153,8 @@ function App() {
   const pendingAction = useRef<undefined | (() => void)>(undefined);
   const [siteConfig, setSiteConfig] = useState<Row>({});
   const siteName = siteConfig["platform.name"] || "政企采购供应链";
-  const servicePhone = siteConfig["platform.servicePhone"] || "400-800-2026";
+  const siteLogo = String(siteConfig["platform.logo"] || "").trim();
+  const contactLandline = String(siteConfig["contact.landline"] || "").trim();
   const icpFiling = String(siteConfig["platform.icpFiling"] || "").trim();
   const policeFiling = String(siteConfig["platform.policeFiling"] || "").trim();
   const loadCart = async () => {
@@ -308,7 +333,7 @@ function App() {
     <div className="mobile-app">
       <header className="mobile-header">
         <div>
-          <i>政</i>
+          {siteLogo?<img src={siteLogo} alt={`${siteName} Logo`}/>:<i>政</i>}
           <span>
             <strong>{siteName}</strong>
             <small>
@@ -319,7 +344,7 @@ function App() {
           </span>
         </div>
         <button onClick={() => !current && setAuthOpen(true)}>
-          {current ? servicePhone : "登录"}
+          {current ? contactLandline : "登录"}
         </button>
       </header>
       <section className="mobile-content">
@@ -737,7 +762,10 @@ function Home({
           ))}
         </DragScroll>
       </section>}
+      {(portal.adGroups||[]).filter((g:Row)=>["ALL","H5"].includes(g.targetScope)&&g.placement==="TOP").map((g:Row)=><MobileAdGroup key={`ad-${g.id}`} group={g}/>)}
       {(portal.floors || []).filter((floor:Row)=>["ALL","H5"].includes(floor.targetScope)).map((floor:Row)=>{
+        const before=(portal.adGroups||[]).filter((g:Row)=>["ALL","H5"].includes(g.targetScope)&&g.placement==="BEFORE_FLOOR"&&Number(g.anchorFloorId)===Number(floor.id));
+        const after=(portal.adGroups||[]).filter((g:Row)=>["ALL","H5"].includes(g.targetScope)&&g.placement==="AFTER_FLOOR"&&Number(g.anchorFloorId)===Number(floor.id));
         if(floor.contentType === "PRODUCT"){
           let rows=[...products]; const rule=String(floor.selectionRule||"LATEST");
           const ids=String(floor.contentIds||"").split(",").map(Number).filter(Boolean);
@@ -754,16 +782,18 @@ function Home({
           if(rule==="VIEWS")rows.sort((a,b)=>Number(b.clickCount||0)-Number(a.clickCount||0));
           if(rule==="LATEST")rows.sort((a,b)=>Number(b.id)-Number(a.id));
           rows=rows.slice(0,Number(floor.displayCount||4)); if(!rows.length)return null;
-          return <section className="m-section" key={floor.id}><header><div><span>{rule==="LATEST"?"NEW ARRIVALS":"CURATED PICKS"}</span><h2>{floor.title}</h2><small>{floor.subtitle}</small></div><button onClick={()=>category()}>全部 ›</button></header><DragScroll className="product-scroll">{rows.map((row,index)=><Product key={row.skuId} row={row} index={index} open={open} add={add} loggedIn={loggedIn}/>)}</DragScroll></section>;
+          return <React.Fragment key={floor.id}>{before.map((g:Row)=><MobileAdGroup key={`ad-${g.id}`} group={g}/>) }<section className="m-section"><header><div><span>{rule==="LATEST"?"NEW ARRIVALS":"CURATED PICKS"}</span><h2>{floor.title}</h2><small>{floor.subtitle}</small></div><button onClick={()=>category()}>全部 ›</button></header><DragScroll className="product-scroll">{rows.map((row,index)=><Product key={row.skuId} row={row} index={index} open={open} add={add} loggedIn={loggedIn}/>)}</DragScroll></section>{after.map((g:Row)=><MobileAdGroup key={`ad-${g.id}`} group={g}/>)}</React.Fragment>;
         }
         const source=floor.contentType==="SOLUTION"?solutions:floor.contentType==="CONTENT"?(portal.content||[]):floor.contentType==="CATEGORY"?categories:[];
         const ids=String(floor.contentIds||"").split(",").map(Number).filter(Boolean);
         const rows=(floor.selectionRule==="MANUAL"?ids.map(id=>source.find((row:Row)=>Number(row.id)===id)).filter(Boolean):source).slice(0,Number(floor.displayCount||3)); if(!rows.length)return null;
-        return <section className="m-section" key={floor.id}><header><div><span>{floor.contentType==="SOLUTION"?"SCENE SOLUTION":floor.contentType==="CATEGORY"?"PRODUCT CATEGORY":"PORTAL CONTENT"}</span><h2>{floor.title}</h2><small>{floor.subtitle}</small></div><button onClick={floor.contentType==="SOLUTION"?allSolutions:()=>category()}>全部 ›</button></header><DragScroll className="solution-scroll">{rows.map((row:Row)=><article key={row.id} onClick={()=>floor.contentType==="SOLUTION"?openSolution(Number(row.id)):floor.contentType==="CATEGORY"?category():row.linkUrl&&(location.href=row.linkUrl)} style={row.imageUrl?{backgroundImage:`linear-gradient(135deg,#15365de8,#1f6ac9d9),url(${row.imageUrl})`,backgroundSize:"cover"}:undefined}><span>{floor.contentType==="SOLUTION"?"SCENE SOLUTION":floor.contentType==="CATEGORY"?"PRODUCT CATEGORY":"PORTAL CONTENT"}</span><strong>{row.title||row.name}</strong><small>{row.subtitle||"查看分类商品"}</small><b>查看详情 ›</b></article>)}</DragScroll></section>;
+        return <React.Fragment key={floor.id}>{before.map((g:Row)=><MobileAdGroup key={`ad-${g.id}`} group={g}/>)}<section className="m-section"><header><div><span>{floor.contentType==="SOLUTION"?"SCENE SOLUTION":floor.contentType==="CATEGORY"?"PRODUCT CATEGORY":"PORTAL CONTENT"}</span><h2>{floor.title}</h2><small>{floor.subtitle}</small></div><button onClick={floor.contentType==="SOLUTION"?allSolutions:()=>category()}>全部 ›</button></header><DragScroll className="solution-scroll">{rows.map((row:Row)=><article key={row.id} onClick={()=>floor.contentType==="SOLUTION"?openSolution(Number(row.id)):floor.contentType==="CATEGORY"?category():location.href=row.linkUrl||`/web/content#content-${row.id}`} style={row.imageUrl?{backgroundImage:`linear-gradient(135deg,#15365de8,#1f6ac9d9),url(${row.imageUrl})`,backgroundSize:"cover"}:undefined}><span>{floor.contentType==="SOLUTION"?"SCENE SOLUTION":floor.contentType==="CATEGORY"?"PRODUCT CATEGORY":"PORTAL CONTENT"}</span><strong>{row.title||row.name}</strong><small>{row.subtitle||"查看分类商品"}</small><b>查看详情 ›</b></article>)}</DragScroll></section>{after.map((g:Row)=><MobileAdGroup key={`ad-${g.id}`} group={g}/>)}</React.Fragment>;
       })}
+      {(portal.adGroups||[]).filter((g:Row)=>["ALL","H5"].includes(g.targetScope)&&g.placement==="BOTTOM").map((g:Row)=><MobileAdGroup key={`ad-${g.id}`} group={g}/>)}
     </div>
   );
 }
+function MobileAdGroup({group}:{group:Row}){let items:Row[]=[];try{items=Array.isArray(group.items)?group.items:JSON.parse(String(group.items||"[]"));}catch{}items.sort((a,b)=>Number(a.sortOrder||0)-Number(b.sortOrder||0));if(!items.length)return null;return <section className={`m-ad-group m-ad-${String(group.layoutType||"FULL").toLowerCase()}`}>{items.map(item=><a key={item.id} href={item.linkUrl||undefined} target={item.openTarget==="BLANK"?"_blank":undefined} rel={item.openTarget==="BLANK"?"noreferrer":undefined}><img src={item.h5ImageUrl||item.webImageUrl} alt={item.title||group.name}/>{item.title&&<span>{item.title}</span>}</a>)}</section>}
 function Product({
   row,
   index,
@@ -790,7 +820,7 @@ function Product({
             }}
           />
         )}
-        {row.agreementPrice != null && <span>协议价</span>}
+        {productBadge(row) && <span>{productBadge(row)}</span>}
         <i>{["💻", "📄", "🖨️", "📦"][index % 4]}</i>
       </div>
       <h3>{row.title}</h3>
@@ -804,10 +834,9 @@ function Product({
               <span key={name}>{name}</span>
             ))}
       </div>
-      <small className="m-product-sales">已售 {row.soldCount || 0} 件</small>
-      <div>
-        <strong>{money(customerPrice(row,loggedIn))}</strong>
-        {loggedIn && <del>{money(row.marketPrice)}</del>}
+      <small className="m-product-sales">{productStockLabel(row.availableStock)}</small>
+      <div className="m-price-list">
+        <span><small>市场价 <b>{money(row.marketPrice)}</b></small>{loggedIn?<small>会员价 <b>{money(row.memberPrice??customerPrice(row,true))}</b></small>:<small>登录后查看会员价</small>}</span>
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -837,6 +866,7 @@ function Category({
 }) {
   const roots = categories.filter((x) => Number(x.level) === 1);
   const [active, setActive] = useState<number>();
+  const [brand,setBrand]=useState("");
   const [attributeFilters,setAttributeFilters]=useState<Record<string,string>>({});
   const children = active
     ? categories.filter((x) => Number(x.parentId) === active)
@@ -853,10 +883,11 @@ function Category({
       ]
     : [];
   const categoryProducts=products.filter((p)=>!active||ids.includes(Number(p.categoryId)));
+  const brands=Array.from(new Set(categoryProducts.map((p)=>String(p.brandName||"")).filter(Boolean))).sort();
   const filterDefinitions=Array.from(new Map(categoryProducts.flatMap((p)=>structuredSpecs(p.structuredAttributes))
     .filter((item)=>Number(item.filterable)===1&&item.value).map((item)=>[String(item.code),item])).values());
   const visible = products.filter(
-    (p) => (!active || ids.includes(Number(p.categoryId))) &&
+    (p) => (!active || ids.includes(Number(p.categoryId))) && (!brand||String(p.brandName||"")===brand) &&
       Object.entries(attributeFilters).every(([code,value])=>!value||structuredSpecs(p.structuredAttributes)
         .some((item)=>String(item.code)===code&&String(item.value)===value)) &&
       `${p.title||""} ${p.summary||""} ${p.brandName||""} ${p.skuCode||""}`.toLowerCase().includes(keyword.toLowerCase()),
@@ -871,14 +902,14 @@ function Category({
         <aside>
           <button
             className={!active ? "active" : ""}
-            onClick={() => setActive(undefined)}
+            onClick={() => {setActive(undefined);setBrand("");setAttributeFilters({});}}
           >
             全部商品
           </button>
           {roots.map((x) => (
             <button
               className={active === Number(x.id) ? "active" : ""}
-              onClick={() => setActive(Number(x.id))}
+              onClick={() => {setActive(Number(x.id));setBrand("");setAttributeFilters({});}}
               key={x.id}
             >
               {x.name}
@@ -894,7 +925,8 @@ function Category({
             </strong>
             <small>{hasAgreement ? "协议商品专属优惠" : "自营商品品质保障"}</small>
           </div>
-          {filterDefinitions.length>0&&<div className="m-attribute-filters">
+          <div className="m-attribute-filters">
+            <label>品牌<select value={brand} onChange={(e)=>setBrand(e.target.value)}><option value="">全部品牌</option>{brands.map((value)=><option key={value}>{value}</option>)}</select></label>
             {filterDefinitions.map((definition)=>{
               const code=String(definition.code);
               const options=Array.from(new Set(categoryProducts.flatMap((p)=>structuredSpecs(p.structuredAttributes))
@@ -904,11 +936,11 @@ function Category({
                 <option value="">全部</option>{options.map((value)=><option key={value}>{value}</option>)}
               </select></label>;
             })}
-          </div>}
+          </div>
           <h2>下级分类</h2>
           <div className="category-grid">
             {children.map((x) => (
-              <button key={x.id} onClick={()=>setActive(Number(x.id))}>
+              <button key={x.id} onClick={()=>{setActive(Number(x.id));setBrand("");setAttributeFilters({});}}>
                 <span>{x.name}</span>
               </button>
             ))}
@@ -925,7 +957,7 @@ function Category({
               </i>
               <span>
                 <strong>{p.title}</strong>
-                <small>{money(customerPrice(p,loggedIn))}{loggedIn&&<del>{money(p.marketPrice)}</del>}</small>
+                <small className="category-price-list"><i>市场价 {money(p.marketPrice)}</i>{loggedIn?<i>会员价 {money(p.memberPrice??customerPrice(p,true))}</i>:<i>登录后查看会员价</i>}</small>
               </span>
               <em>›</em>
             </button>
@@ -1041,7 +1073,7 @@ function ProductDetail({
         </div>
         <h1>{product.title}</h1>
         <p>{product.summary}</p>
-        <small>已售 {product.soldCount || 0} 件</small>
+        <small>{productStockLabel(current.availableStock)}</small>
         <section>
           {Number(product.selfOperated) === 1 && <span>自营正品</span>}
           <span>{current.agreementPrice != null ? "协议专价" : "原价结算"}</span>
@@ -1056,6 +1088,8 @@ function ProductDetail({
         <strong>配送</strong>
         <span>{product.deliveryDescription || "自营库存 · 全国配送"}</span>
       </article>
+      <article className="info-row"><strong>服务</strong><span>{productServices(product.services).length?productServices(product.services).join("·"):"暂无服务配置"}</span></article>
+      {current.productUrl&&<article className="info-row m-platform-link"><strong>平台链接</strong><a href={current.productUrl} target="_blank" rel="noreferrer">前往{current.platformTitle||"平台"}查看</a></article>}
       <article className="detail-copy">
         <h2>商品详情</h2>
         {product.detailHtml ? (

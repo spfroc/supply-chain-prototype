@@ -26,7 +26,8 @@ public class AttributeAdminController {
         String base="""
           SELECT a.id,a.code,a.name,a.group_name AS groupName,a.attribute_type AS attributeType,
             a.input_type AS inputType,a.unit,a.required_flag AS requiredFlag,a.filterable,a.searchable,
-            a.visible_flag AS visibleFlag,a.allow_custom AS allowCustom,a.sort_order AS sortOrder,a.status
+            a.visible_flag AS visibleFlag,a.allow_custom AS allowCustom,a.global_flag AS globalFlag,
+            a.sort_order AS sortOrder,a.status
           FROM attribute_definition a WHERE a.deleted_at IS NULL
           """;
         var params=new LinkedHashMap<String,Object>();
@@ -63,11 +64,16 @@ public class AttributeAdminController {
             UNION ALL SELECT c.id,c.parent_id,a.distance+1 FROM category c JOIN ancestors a ON a.parent_id=c.id
           )
           SELECT a.id,a.code,a.name,a.group_name AS groupName,a.attribute_type AS attributeType,
-            a.input_type AS inputType,a.unit,COALESCE(MAX(ca.required_override),a.required_flag) AS requiredFlag,
+            a.input_type AS inputType,a.unit,COALESCE(MAX(CASE WHEN anc.id IS NOT NULL THEN ca.required_override END),a.required_flag) AS requiredFlag,
             a.filterable,a.visible_flag AS visibleFlag,a.allow_custom AS allowCustom,
-            MIN(anc.distance) AS inheritedLevel,MIN(ca.sort_order) AS sortOrder
-          FROM ancestors anc JOIN category_attribute ca ON ca.category_id=anc.id
-          JOIN attribute_definition a ON a.id=ca.attribute_id AND a.status=1 AND a.deleted_at IS NULL
+            a.global_flag AS globalFlag,
+            CASE WHEN a.global_flag=1 THEN -1 ELSE MIN(anc.distance) END AS inheritedLevel,
+            CASE WHEN a.global_flag=1 THEN 'GLOBAL' WHEN MIN(anc.distance)=0 THEN 'CURRENT' ELSE 'INHERITED' END AS scopeSource,
+            COALESCE(MIN(CASE WHEN anc.id IS NOT NULL THEN ca.sort_order END),a.sort_order) AS sortOrder
+          FROM attribute_definition a
+          LEFT JOIN category_attribute ca ON ca.attribute_id=a.id
+          LEFT JOIN ancestors anc ON anc.id=ca.category_id
+          WHERE a.status=1 AND a.deleted_at IS NULL AND (a.global_flag=1 OR anc.id IS NOT NULL)
           GROUP BY a.id ORDER BY sortOrder,a.id
           """).param("categoryId",categoryId).query().listOfRows();
         var result=new ArrayList<Map<String,Object>>();
@@ -83,12 +89,12 @@ public class AttributeAdminController {
     void create(@Valid @RequestBody AttributeRequest r) {
         jdbc.sql("""
           INSERT INTO attribute_definition(code,name,group_name,attribute_type,input_type,unit,required_flag,
-            filterable,searchable,visible_flag,allow_custom,sort_order,status)
+            filterable,searchable,visible_flag,allow_custom,global_flag,sort_order,status)
           VALUES(:code,:name,:groupName,:attributeType,:inputType,:unit,:requiredFlag,:filterable,
-            :searchable,:visibleFlag,:allowCustom,:sortOrder,:status)
+            :searchable,:visibleFlag,:allowCustom,:globalFlag,:sortOrder,:status)
           """).params(params(r)).update();
         long id=jdbc.sql("SELECT id FROM attribute_definition WHERE code=:code").param("code",r.code()).query(Long.class).single();
-        saveCategories(id,r.categoryIds());
+        if(r.globalFlag()!=1) saveCategories(id,r.categoryIds());
     }
 
     @PutMapping("/{id}") @Transactional
@@ -96,12 +102,13 @@ public class AttributeAdminController {
         int changed=jdbc.sql("""
           UPDATE attribute_definition SET code=:code,name=:name,group_name=:groupName,attribute_type=:attributeType,
             input_type=:inputType,unit=:unit,required_flag=:requiredFlag,filterable=:filterable,
-            searchable=:searchable,visible_flag=:visibleFlag,allow_custom=:allowCustom,sort_order=:sortOrder,status=:status
+            searchable=:searchable,visible_flag=:visibleFlag,allow_custom=:allowCustom,global_flag=:globalFlag,
+            sort_order=:sortOrder,status=:status
           WHERE id=:id AND deleted_at IS NULL
           """).params(params(r)).param("id",id).update();
         if(changed==0) throw new IllegalArgumentException("属性不存在");
         jdbc.sql("DELETE FROM category_attribute WHERE attribute_id=:id").param("id",id).update();
-        saveCategories(id,r.categoryIds());
+        if(r.globalFlag()!=1) saveCategories(id,r.categoryIds());
     }
 
     @DeleteMapping("/{id}") @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -132,8 +139,8 @@ public class AttributeAdminController {
 
     private List<Map<String,Object>> options(long id){return jdbc.sql("SELECT id,option_code AS optionCode,option_label AS optionLabel,color_value AS colorValue,sort_order AS sortOrder,status FROM attribute_option WHERE attribute_id=:id AND deleted_at IS NULL ORDER BY sort_order,id").param("id",id).query().listOfRows();}
     private void saveCategories(long id,List<Long> categoryIds){if(categoryIds==null)return;for(long categoryId:categoryIds) jdbc.sql("INSERT INTO category_attribute(category_id,attribute_id,sort_order) VALUES(:categoryId,:id,0)").params(Map.of("categoryId",categoryId,"id",id)).update();}
-    private Map<String,Object> params(AttributeRequest r){var p=new LinkedHashMap<String,Object>();p.put("code",r.code().trim().toUpperCase());p.put("name",r.name());p.put("groupName",r.groupName());p.put("attributeType",r.attributeType());p.put("inputType",r.inputType());p.put("unit",value(r.unit()));p.put("requiredFlag",r.requiredFlag());p.put("filterable",r.filterable());p.put("searchable",r.searchable());p.put("visibleFlag",r.visibleFlag());p.put("allowCustom",r.allowCustom());p.put("sortOrder",r.sortOrder());p.put("status",r.status());return p;}
+    private Map<String,Object> params(AttributeRequest r){var p=new LinkedHashMap<String,Object>();p.put("code",r.code().trim().toUpperCase());p.put("name",r.name());p.put("groupName",r.groupName());p.put("attributeType",r.attributeType());p.put("inputType",r.inputType());p.put("unit",value(r.unit()));p.put("requiredFlag",r.requiredFlag());p.put("filterable",r.filterable());p.put("searchable",r.searchable());p.put("visibleFlag",r.visibleFlag());p.put("allowCustom",r.allowCustom());p.put("globalFlag",r.globalFlag());p.put("sortOrder",r.sortOrder());p.put("status",r.status());return p;}
     private static String value(String value){return value==null?"":value;}
-    public record AttributeRequest(@NotBlank String code,@NotBlank String name,@NotBlank String groupName,@NotBlank String attributeType,@NotBlank String inputType,String unit,int requiredFlag,int filterable,int searchable,int visibleFlag,int allowCustom,int sortOrder,int status,List<Long> categoryIds){}
+    public record AttributeRequest(@NotBlank String code,@NotBlank String name,@NotBlank String groupName,@NotBlank String attributeType,@NotBlank String inputType,String unit,int requiredFlag,int filterable,int searchable,int visibleFlag,int allowCustom,int globalFlag,int sortOrder,int status,List<Long> categoryIds){}
     public record OptionRequest(@NotBlank String optionCode,@NotBlank String optionLabel,String colorValue,int sortOrder,int status){}
 }

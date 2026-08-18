@@ -14,6 +14,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.security.SecureRandom;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
@@ -40,19 +41,37 @@ public class AdminBusinessController {
 
     @GetMapping("/products")
     Object products(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
-                    @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
+                    @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status,
+                    @RequestParam(required=false) String badgeType,
+                    @RequestParam(required=false) Long categoryId,@RequestParam(required=false) Long brandId,
+                    @RequestParam(required=false) Integer selfOperated,
+                    @RequestParam(required=false) Integer stockMin,@RequestParam(required=false) Integer stockMax) {
         String base="""
-          SELECT p.id,p.spu_code AS spuCode,p.title,p.summary,p.main_image AS mainImage,p.self_operated AS selfOperated,
+          SELECT p.id,p.spu_code AS spuCode,p.title,p.model,p.summary,p.main_image AS mainImage,p.self_operated AS selfOperated,
+            p.badge_type AS badgeType,p.badge_platform_id AS badgePlatformId,p.custom_badge AS customBadge,
+            COALESCE((SELECT JSON_ARRAYAGG(pso.option_id) FROM product_service_option pso WHERE pso.product_id=p.id),JSON_ARRAY()) AS serviceOptionIds,
             JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')) AS gallery,
-            JSON_UNQUOTE(JSON_EXTRACT(p.attributes_json,'$.content')) AS attributes,
             p.detail_html AS detailHtml,p.delivery_description AS deliveryDescription,
             p.after_sales_html AS afterSalesHtml,p.category_id AS categoryId,p.brand_id AS brandId,
             p.status,s.id AS skuId,s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
             (SELECT SUM(st.stock) FROM product_sku st WHERE st.spu_id=p.id AND st.deleted_at IS NULL) AS stock,
             (SELECT SUM(st.reserved_stock) FROM product_sku st WHERE st.spu_id=p.id AND st.deleted_at IS NULL) AS reservedStock,
+            DATE_FORMAT(p.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,
             DATE_FORMAT(p.updated_at,'%Y-%m-%d %H:%i:%s') AS updatedAt,
             COALESCE(sales.soldCount,0) AS soldCount,COALESCE(sales.orderCount,0) AS orderCount,
             COALESCE(sales.salesAmount,0) AS salesAmount,
+            COALESCE((SELECT GROUP_CONCAT(DISTINCT pr.title ORDER BY pr.title SEPARATOR '、')
+              FROM product_platform pp JOIN portal_resource pr ON pr.id=pp.platform_id
+                AND pr.resource_type='PLATFORM' AND pr.deleted_at IS NULL
+              JOIN product_sku ps ON ps.id=pp.sku_id
+              WHERE ps.spu_id=p.id AND pp.deleted_at IS NULL),'') AS platformNames,
+            COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('id',pp.id,'platformId',pp.platform_id,'skuId',pp.sku_id))
+              FROM product_platform pp JOIN product_sku ps ON ps.id=pp.sku_id
+              WHERE ps.spu_id=p.id AND pp.deleted_at IS NULL),JSON_ARRAY()) AS platformRelations,
+            COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('id',ai.id,'agreementId',ai.agreement_id,'skuId',ai.sku_id,
+              'agreementPrice',ai.agreement_price,'status',ai.status))
+              FROM agreement_item ai JOIN product_sku ags ON ags.id=ai.sku_id
+              WHERE ags.spu_id=p.id AND ai.deleted_at IS NULL),JSON_ARRAY()) AS agreementRelations,
             COALESCE((SELECT JSON_OBJECTAGG(CAST(pav.attribute_id AS CHAR),
               CASE WHEN pav.option_ids IS NOT NULL THEN
                 CASE WHEN ad.input_type='CHECKBOX' THEN pav.option_ids ELSE JSON_EXTRACT(pav.option_ids,'$[0]') END
@@ -60,9 +79,10 @@ public class AdminBusinessController {
               FROM product_attribute_value pav JOIN attribute_definition ad ON ad.id=pav.attribute_id
               WHERE pav.product_id=p.id),JSON_OBJECT()) AS attributeValues,
             (SELECT COUNT(*) FROM product_sku sx WHERE sx.spu_id=p.id AND sx.deleted_at IS NULL) AS skuCount,
-            COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('id',sx.id,'skuCode',sx.sku_code,
-              'specValues',sx.spec_json,'skuImage',sx.sku_image,'marketPrice',sx.market_price,
-              'memberPrice',sx.member_price,'stock',sx.stock,'reservedStock',sx.reserved_stock,'status',sx.status))
+            COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('id',sx.id,'skuCode',sx.sku_code,'skuTitle',sx.title,
+              'specValues',sx.spec_json,'skuImage',sx.sku_image,'skuGallery',COALESCE(JSON_UNQUOTE(JSON_EXTRACT(sx.gallery_json,'$.content')),''),'marketPrice',sx.market_price,
+              'memberPrice',sx.member_price,'stock',sx.stock,'reservedStock',sx.reserved_stock,'status',sx.status,
+              'createdAt',DATE_FORMAT(sx.created_at,'%Y-%m-%d %H:%i:%s'),'updatedAt',DATE_FORMAT(sx.updated_at,'%Y-%m-%d %H:%i:%s')))
               FROM product_sku sx WHERE sx.spu_id=p.id AND sx.deleted_at IS NULL),JSON_ARRAY()) AS skus
           FROM product_spu p JOIN product_sku s ON s.spu_id=p.id AND s.deleted_at IS NULL
             AND s.id=(SELECT MIN(s0.id) FROM product_sku s0 WHERE s0.spu_id=p.id AND s0.deleted_at IS NULL)
@@ -75,53 +95,199 @@ public class AdminBusinessController {
           ) sales ON sales.spu_id=p.id
           WHERE p.deleted_at IS NULL
           """;
+        String normalizedBadgeType=badgeType==null?"":badgeType.trim().toUpperCase();
+        var params=new java.util.HashMap<String,Object>();
+        if(categoryId!=null) { base+=" AND p.category_id=:categoryId"; params.put("categoryId",categoryId); }
+        if(brandId!=null) { base+=" AND p.brand_id=:brandId"; params.put("brandId",brandId); }
+        if(selfOperated!=null) {
+            if(selfOperated!=0&&selfOperated!=1) throw new IllegalArgumentException("自营筛选条件不正确");
+            base+=" AND p.self_operated=:selfOperated"; params.put("selfOperated",selfOperated);
+        }
+        if(stockMin!=null&&stockMin<0||stockMax!=null&&stockMax<0) throw new IllegalArgumentException("库存区间不能小于0");
+        if(stockMin!=null&&stockMax!=null&&stockMin>stockMax) throw new IllegalArgumentException("最低库存不能大于最高库存");
+        if(stockMin!=null) {
+            base+=" AND (SELECT COALESCE(SUM(st.stock-st.reserved_stock),0) FROM product_sku st WHERE st.spu_id=p.id AND st.deleted_at IS NULL)>=:stockMin";
+            params.put("stockMin",stockMin);
+        }
+        if(stockMax!=null) {
+            base+=" AND (SELECT COALESCE(SUM(st.stock-st.reserved_stock),0) FROM product_sku st WHERE st.spu_id=p.id AND st.deleted_at IS NULL)<=:stockMax";
+            params.put("stockMax",stockMax);
+        }
+        if(!normalizedBadgeType.isBlank()) {
+            if("AUTO".equals(normalizedBadgeType)) base+=" AND p.badge_type IS NULL";
+            else {
+                if(!Set.of("AGREEMENT","PLATFORM","CUSTOM").contains(normalizedBadgeType))
+                    throw new IllegalArgumentException("角标类型不正确");
+                base+=" AND p.badge_type=:badgeType";
+                params.put("badgeType",normalizedBadgeType);
+            }
+        }
         if(page==null) return richTextSanitizer.cleanRows(
-          jdbc.sql(base+" ORDER BY id DESC").query().listOfRows(), "detailHtml", "afterSalesHtml");
+          jdbc.sql(base+" ORDER BY id DESC").params(params).query().listOfRows(), "detailHtml", "afterSalesHtml");
         return richTextSanitizer.cleanPage(
-          PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
+          PageSupport.query(jdbc,base,"q.id DESC",params,page,pageSize,keyword,status,
             List.of("spuCode","title","summary","skuCode"),"status"),
           "detailHtml", "afterSalesHtml");
     }
 
+    @GetMapping("/product-associations")
+    Object productAssociations(@RequestParam String type,@RequestParam(defaultValue="1") int page,
+                               @RequestParam(defaultValue="10") int pageSize,
+                               @RequestParam(defaultValue="") String keyword,
+                               @RequestParam(required=false) Long targetId,
+                               @RequestParam(required=false) Integer status) {
+        String normalized=type.trim().toUpperCase();
+        String base;
+        String relationStatusColumn=null;
+        var params=new java.util.HashMap<String,Object>();
+        switch(normalized) {
+          case "PLATFORM" -> {
+            base="""
+              SELECT rel.id AS relationId,p.id AS productId,s.id AS skuId,p.title,p.main_image AS mainImage,p.spu_code AS spuCode,
+                s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
+                s.stock-s.reserved_stock AS availableStock,p.status AS productStatus,p.self_operated AS selfOperated,
+                p.badge_type AS badgeType,p.custom_badge AS customBadge,badge_platform.price_prefix AS badgePlatformPrefix,
+                target.id AS targetId,target.title AS associationName,rel.platform_price AS associationPrice,
+                rel.product_url AS productUrl,rel.listing_status AS relationStatus,rel.click_count AS clickCount
+              FROM product_platform rel JOIN product_sku s ON s.id=rel.sku_id AND s.deleted_at IS NULL
+              JOIN product_spu p ON p.id=s.spu_id AND p.deleted_at IS NULL
+              LEFT JOIN portal_resource badge_platform ON badge_platform.id=p.badge_platform_id AND badge_platform.deleted_at IS NULL
+              JOIN portal_resource target ON target.id=rel.platform_id AND target.resource_type='PLATFORM' AND target.deleted_at IS NULL
+              WHERE rel.deleted_at IS NULL
+              """;
+            relationStatusColumn="relationStatus";
+          }
+          case "AGREEMENT" -> {
+            base="""
+              SELECT rel.id AS relationId,p.id AS productId,s.id AS skuId,p.title,p.main_image AS mainImage,p.spu_code AS spuCode,
+                s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
+                s.stock-s.reserved_stock AS availableStock,p.status AS productStatus,p.self_operated AS selfOperated,
+                p.badge_type AS badgeType,p.custom_badge AS customBadge,badge_platform.price_prefix AS badgePlatformPrefix,
+                target.id AS targetId,CONCAT(target.name,'（',owner.name,'）') AS associationName,
+                rel.agreement_price AS associationPrice,rel.status AS relationStatus,0 AS clickCount
+              FROM agreement_item rel JOIN product_sku s ON s.id=rel.sku_id AND s.deleted_at IS NULL
+              JOIN product_spu p ON p.id=s.spu_id AND p.deleted_at IS NULL
+              LEFT JOIN portal_resource badge_platform ON badge_platform.id=p.badge_platform_id AND badge_platform.deleted_at IS NULL
+              JOIN agreement target ON target.id=rel.agreement_id AND target.deleted_at IS NULL
+              JOIN enterprise owner ON owner.id=target.enterprise_id AND owner.deleted_at IS NULL
+              WHERE rel.deleted_at IS NULL
+              """;
+            relationStatusColumn="relationStatus";
+          }
+          case "SOLUTION" -> {
+            base="""
+              SELECT rel.id AS relationId,p.id AS productId,s.id AS skuId,p.title,p.main_image AS mainImage,p.spu_code AS spuCode,
+                s.sku_code AS skuCode,s.market_price AS marketPrice,s.member_price AS memberPrice,
+                s.stock-s.reserved_stock AS availableStock,p.status AS productStatus,p.self_operated AS selfOperated,
+                p.badge_type AS badgeType,p.custom_badge AS customBadge,badge_platform.price_prefix AS badgePlatformPrefix,
+                target.id AS targetId,target.title AS associationName,s.member_price AS associationPrice,
+                rel.default_quantity AS defaultQuantity,rel.required_item AS requiredItem,rel.sort_order AS sortOrder,
+                1 AS relationStatus,0 AS clickCount
+              FROM solution_item rel JOIN product_sku s ON s.id=rel.sku_id AND s.deleted_at IS NULL
+              JOIN product_spu p ON p.id=s.spu_id AND p.deleted_at IS NULL
+              LEFT JOIN portal_resource badge_platform ON badge_platform.id=p.badge_platform_id AND badge_platform.deleted_at IS NULL
+              JOIN portal_resource target ON target.id=rel.solution_id AND target.resource_type='SOLUTION' AND target.deleted_at IS NULL
+              WHERE rel.deleted_at IS NULL
+              """;
+          }
+          default -> throw new IllegalArgumentException("不支持的商品关联类型");
+        }
+        if(targetId!=null){base+=" AND target.id=:targetId";params.put("targetId",targetId);}
+        return PageSupport.query(jdbc,base,"q.productId DESC,q.skuId,q.relationId",params,page,pageSize,keyword,status,
+          List.of("title","spuCode","skuCode","associationName"),relationStatusColumn);
+    }
+
     @PostMapping("/products") @ResponseStatus(HttpStatus.CREATED) @Transactional
     Map<String,Object> createProduct(@Valid @RequestBody ProductRequest r) {
-        String suffix=uniqueProductCodeSuffix();
-        String spuCode="SPU-"+suffix, skuCode="SKU-"+suffix;
+        if(value(r.mainImage()).isBlank()||r.marketPrice()==null||r.memberPrice()==null)
+            throw new IllegalArgumentException("商品主图、市场价和会员价不能为空");
+        validateBadge(null,r);
+        String spuCode=uniqueProductCode();
+        String skuCode=uniqueProductCode();
+        while(skuCode.equals(spuCode)) skuCode=uniqueProductCode();
         jdbc.sql("""
-          INSERT INTO product_spu(spu_code,title,category_id,brand_id,self_operated,main_image,gallery_json,attributes_json,
-            summary,detail_html,delivery_description,after_sales_html,status)
-          VALUES(:code,:title,:categoryId,:brandId,:selfOperated,:mainImage,JSON_OBJECT('content',:gallery),
-            JSON_OBJECT('content',:attributes),:summary,:detailHtml,:deliveryDescription,:afterSalesHtml,:status)
+          INSERT INTO product_spu(spu_code,title,model,category_id,brand_id,self_operated,main_image,gallery_json,
+            summary,detail_html,delivery_description,after_sales_html,status,badge_type,badge_platform_id,custom_badge)
+          VALUES(:code,:title,:model,:categoryId,:brandId,:selfOperated,:mainImage,JSON_OBJECT('content',:gallery),
+            :summary,:detailHtml,:deliveryDescription,:afterSalesHtml,:status,:badgeType,:badgePlatformId,:customBadge)
           """)
-          .param("code",spuCode).param("title",r.title()).param("categoryId",r.categoryId()).param("brandId",r.brandId())
+          .param("code",spuCode).param("title",r.title()).param("model",value(r.model())).param("categoryId",r.categoryId()).param("brandId",r.brandId())
           .param("selfOperated",r.selfOperatedValue())
-          .param("mainImage",value(r.mainImage())).param("gallery",value(r.gallery())).param("attributes",value(r.attributes()))
+          .param("mainImage",value(r.mainImage())).param("gallery",value(r.gallery()))
           .param("summary",value(r.summary())).param("detailHtml",richTextSanitizer.clean(r.detailHtml()))
           .param("deliveryDescription",value(r.deliveryDescription())).param("afterSalesHtml",richTextSanitizer.clean(r.afterSalesHtml()))
+          .param("badgeType",persistedBadgeType(r.badgeType())).param("badgePlatformId",normalizedBadgePlatformId(r))
+          .param("customBadge",normalizedCustomBadge(r))
           .param("status",r.status()).update();
         long id=jdbc.sql("SELECT id FROM product_spu WHERE spu_code=:code").param("code",spuCode).query(Long.class).single();
         saveSkus(id,r,skuCode);
         saveAttributeValues(id,r.attributeValues());
+        saveServiceOptions(id,r.serviceOptionIds());
         return Map.of("id",id,"spuCode",spuCode);
     }
 
     @PutMapping("/products/{id}") @Transactional
     void updateProduct(@PathVariable long id,@Valid @RequestBody ProductRequest r) {
+        validateBadge(id,r);
         require(jdbc.sql("""
-          UPDATE product_spu SET title=:title,category_id=:categoryId,brand_id=:brandId,self_operated=:selfOperated,
-          main_image=:mainImage,gallery_json=JSON_OBJECT('content',:gallery),
-          attributes_json=JSON_OBJECT('content',:attributes),summary=:summary,detail_html=:detailHtml,
-          delivery_description=:deliveryDescription,after_sales_html=:afterSalesHtml,
+          UPDATE product_spu SET title=:title,model=:model,category_id=:categoryId,brand_id=:brandId,self_operated=:selfOperated,
+          main_image=COALESCE(:mainImage,main_image),
+          gallery_json=CASE WHEN :gallery IS NULL THEN gallery_json ELSE JSON_OBJECT('content',:gallery) END,
+          attributes_json=NULL,
+          summary=COALESCE(:summary,summary),detail_html=COALESCE(:detailHtml,detail_html),
+          delivery_description=COALESCE(:deliveryDescription,delivery_description),
+          after_sales_html=COALESCE(:afterSalesHtml,after_sales_html),
+          badge_type=CASE WHEN :badgeType IS NULL THEN badge_type ELSE NULLIF(:badgeType,'NONE') END,
+          badge_platform_id=CASE WHEN :badgeType IS NULL THEN badge_platform_id ELSE :badgePlatformId END,
+          custom_badge=CASE WHEN :badgeType IS NULL THEN custom_badge ELSE :customBadge END,
           status=:status WHERE id=:id AND deleted_at IS NULL
           """)
-          .param("id",id).param("title",r.title()).param("categoryId",r.categoryId()).param("brandId",r.brandId())
+          .param("id",id).param("title",r.title()).param("model",value(r.model())).param("categoryId",r.categoryId()).param("brandId",r.brandId())
           .param("selfOperated",r.selfOperatedValue())
-          .param("mainImage",value(r.mainImage())).param("gallery",value(r.gallery()))
-          .param("attributes",value(r.attributes())).param("summary",value(r.summary()))
-          .param("detailHtml",richTextSanitizer.clean(r.detailHtml())).param("deliveryDescription",value(r.deliveryDescription()))
-          .param("afterSalesHtml",richTextSanitizer.clean(r.afterSalesHtml())).param("status",r.status()).update(),"商品不存在");
-        saveSkus(id,r,null);
-        saveAttributeValues(id,r.attributeValues());
+          .param("mainImage",r.mainImage()).param("gallery",r.gallery())
+          .param("summary",r.summary())
+          .param("detailHtml",r.detailHtml()==null?null:richTextSanitizer.clean(r.detailHtml()))
+          .param("deliveryDescription",r.deliveryDescription())
+          .param("afterSalesHtml",r.afterSalesHtml()==null?null:richTextSanitizer.clean(r.afterSalesHtml()))
+          .param("badgeType",r.badgeType()).param("badgePlatformId",normalizedBadgePlatformId(r))
+          .param("customBadge",normalizedCustomBadge(r))
+          .param("status",r.status()).update(),"商品不存在");
+        if((r.skus()!=null&&!r.skus().isEmpty())||r.marketPrice()!=null||r.memberPrice()!=null) saveSkus(id,r,null);
+        if(r.attributeValues()!=null) saveAttributeValues(id,r.attributeValues());
+        if(r.serviceOptionIds()!=null) saveServiceOptions(id,r.serviceOptionIds());
+    }
+
+    @GetMapping("/product-service-options")
+    List<Map<String,Object>> productServiceOptions() {
+        return jdbc.sql("SELECT id,label,option_value AS optionValue,sort_order AS sortOrder FROM system_option WHERE option_type='PRODUCT_SERVICE' AND status=1 AND deleted_at IS NULL ORDER BY sort_order,id")
+          .query().listOfRows();
+    }
+
+    @GetMapping("/product-badge-options")
+    List<Map<String,Object>> productBadgeOptions() {
+        return jdbc.sql("SELECT id,label,option_value AS optionValue,sort_order AS sortOrder FROM system_option WHERE option_type='PRODUCT_BADGE' AND status=1 AND deleted_at IS NULL ORDER BY sort_order,id")
+          .query().listOfRows();
+    }
+
+    @GetMapping("/product-default-stock")
+    Map<String,Object> productDefaultStock() {
+        int stock=jdbc.sql("SELECT config_value FROM system_config WHERE config_key='inventory.defaultStock'")
+          .query(String.class).optional().map(value->{try{return Math.max(0,Integer.parseInt(value));}catch(NumberFormatException e){return 10000;}}).orElse(10000);
+        return Map.of("stock",stock);
+    }
+
+    @GetMapping("/product-content-templates")
+    Map<String,Object> productContentTemplates() {
+        var rows=jdbc.sql("SELECT config_key,config_value FROM system_config WHERE config_key IN ('product.deliveryTemplates','product.afterSalesTemplates')")
+          .query().listOfRows();
+        var result=new java.util.HashMap<String,Object>();
+        result.put("deliveryTemplates","[]");
+        result.put("afterSalesTemplates","[]");
+        rows.forEach(row->{
+            String key=String.valueOf(row.get("config_key"));
+            result.put(key.endsWith("deliveryTemplates")?"deliveryTemplates":"afterSalesTemplates",row.get("config_value"));
+        });
+        return result;
     }
 
     @PutMapping("/products/{id}/status") @Transactional
@@ -132,9 +298,25 @@ public class AdminBusinessController {
           .params(Map.of("id",id,"status",r.status()==1?1:0)).update();
     }
 
+    @PutMapping("/products/{productId}/skus/{skuId}/status") @Transactional
+    void skuStatus(@PathVariable long productId,@PathVariable long skuId,@RequestBody StatusRequest r) {
+        if(r.status()!=0&&r.status()!=1) throw new IllegalArgumentException("SKU状态只能为启用或停用");
+        require(jdbc.sql("UPDATE product_sku SET status=:status WHERE id=:skuId AND spu_id=:productId AND deleted_at IS NULL")
+          .params(Map.of("productId",productId,"skuId",skuId,"status",r.status())).update(),"SKU不存在");
+    }
+
+    @PutMapping("/products/batch-self-operated") @Transactional
+    Map<String,Object> batchSelfOperated(@RequestBody BatchSelfOperatedRequest r) {
+        if(r.ids()==null||r.ids().isEmpty()) throw new IllegalArgumentException("请选择商品");
+        if(r.selfOperated()!=0&&r.selfOperated()!=1) throw new IllegalArgumentException("经营类型不正确");
+        int changed=jdbc.sql("UPDATE product_spu SET self_operated=:selfOperated WHERE id IN (:ids) AND deleted_at IS NULL")
+          .param("selfOperated",r.selfOperated()).param("ids",r.ids()).update();
+        return Map.of("updated",changed);
+    }
+
     @PutMapping("/products/{id}/stock") @Transactional
     void productStock(@PathVariable long id,@RequestBody StockRequest r) {
-        int reserved=jdbc.sql("SELECT reserved_stock FROM product_sku WHERE spu_id=:id AND deleted_at IS NULL")
+        int reserved=jdbc.sql("SELECT MAX(reserved_stock) FROM product_sku WHERE spu_id=:id AND deleted_at IS NULL")
           .param("id",id).query(Integer.class).optional().orElseThrow(()->new IllegalArgumentException("商品不存在"));
         if(r.stock()<reserved) throw new IllegalArgumentException("库存不能小于已占用库存 "+reserved);
         jdbc.sql("UPDATE product_sku SET stock=:stock WHERE spu_id=:id AND deleted_at IS NULL")
@@ -151,12 +333,29 @@ public class AdminBusinessController {
     @GetMapping("/categories")
     List<Map<String,Object>> categories() {
         return jdbc.sql("""
+          WITH RECURSIVE category_tree AS (
+            SELECT id AS ancestor_id,id AS descendant_id FROM category WHERE deleted_at IS NULL
+            UNION ALL
+            SELECT tree.ancestor_id,child.id
+            FROM category_tree tree
+            JOIN category child ON child.parent_id=tree.descendant_id AND child.deleted_at IS NULL
+          ), product_counts AS (
+            SELECT tree.ancestor_id,COUNT(DISTINCT product.id) AS product_count
+            FROM category_tree tree
+            LEFT JOIN product_spu product ON product.category_id=tree.descendant_id AND product.deleted_at IS NULL
+            GROUP BY tree.ancestor_id
+          ), child_counts AS (
+            SELECT parent_id,COUNT(*) AS child_count FROM category
+            WHERE deleted_at IS NULL AND parent_id IS NOT NULL GROUP BY parent_id
+          )
           SELECT c.id,c.name,c.parent_id AS parentId,p.name AS parentName,c.level,c.sort_order AS sortOrder,
-            c.icon,c.status,COUNT(DISTINCT child.id) AS childCount,COUNT(DISTINCT product.id) AS productCount
-          FROM category c LEFT JOIN category p ON p.id=c.parent_id
-          LEFT JOIN category child ON child.parent_id=c.id AND child.deleted_at IS NULL
-          LEFT JOIN product_spu product ON product.category_id=c.id AND product.deleted_at IS NULL
-          WHERE c.deleted_at IS NULL GROUP BY c.id ORDER BY c.level,c.sort_order,c.id
+            c.icon,c.status,COALESCE(children.child_count,0) AS childCount,
+            COALESCE(products.product_count,0) AS productCount
+          FROM category c
+          LEFT JOIN category p ON p.id=c.parent_id AND p.deleted_at IS NULL
+          LEFT JOIN child_counts children ON children.parent_id=c.id
+          LEFT JOIN product_counts products ON products.ancestor_id=c.id
+          WHERE c.deleted_at IS NULL ORDER BY c.level,c.sort_order,c.id
           """).query().listOfRows();
     }
 
@@ -263,8 +462,8 @@ public class AdminBusinessController {
           FROM enterprise_user u JOIN enterprise e ON e.id=u.enterprise_id
           WHERE u.deleted_at IS NULL AND e.deleted_at IS NULL
           """;
-        if(page==null) return jdbc.sql(base+" ORDER BY id DESC").query().listOfRows();
-        return PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
+        if(page==null) return jdbc.sql(base+" ORDER BY CASE WHEN u.status=2 THEN 0 ELSE 1 END,u.created_at DESC,u.id DESC").query().listOfRows();
+        return PageSupport.query(jdbc,base,"CASE WHEN q.status=2 THEN 0 ELSE 1 END,q.createdAt DESC,q.id DESC",Map.of(),page,pageSize,keyword,status,
           List.of("enterpriseName","username","realName","phone","roleCode"),"status");
     }
 
@@ -375,45 +574,77 @@ public class AdminBusinessController {
     Object orders(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
                   @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
         String base="""
-          SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,o.payable_amount AS payableAmount,
+          SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,u.real_name AS buyerName,
+            u.username AS buyerUsername,u.phone AS buyerPhone,a.name AS agreementName,
+            o.item_amount AS itemAmount,o.freight_amount AS freightAmount,o.payable_amount AS payableAmount,
             o.payment_status AS paymentStatus,o.order_status AS orderStatus,o.refund_status AS refundStatus,
             o.refund_amount AS refundAmount,
-            DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,COUNT(oi.id) AS itemKinds,SUM(oi.quantity) AS itemCount
-          FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id LEFT JOIN order_item oi ON oi.order_main_id=o.id
-          GROUP BY o.id
+            COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT(
+              'id',item.id,'title',spu.title,'mainImage',spu.main_image,'skuCode',sku.sku_code,
+              'quantity',item.quantity,'unitPrice',item.unit_price,'totalPrice',item.total_price,
+              'fulfillmentStatus',item.fulfillment_status,'logisticsCompany',item.logistics_company,'logisticsNo',item.logistics_no))
+              FROM order_item item JOIN product_sku sku ON sku.id=item.sku_id
+              JOIN product_spu spu ON spu.id=sku.spu_id WHERE item.order_main_id=o.id),JSON_ARRAY()) AS items,
+            DATE_FORMAT(o.payment_due_at,'%Y-%m-%d %H:%i:%s') AS paymentDueAt,
+            DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,
+            DATE_FORMAT(o.updated_at,'%Y-%m-%d %H:%i:%s') AS updatedAt,COUNT(oi.id) AS itemKinds,SUM(oi.quantity) AS itemCount
+          FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id JOIN enterprise_user u ON u.id=o.user_id
+          LEFT JOIN agreement a ON a.id=o.agreement_id LEFT JOIN order_item oi ON oi.order_main_id=o.id
+          GROUP BY o.id,u.id,a.id
           """;
         if(page==null) return jdbc.sql(base+" ORDER BY id DESC").query().listOfRows();
         return PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
-          List.of("orderNo","enterpriseName"),"orderStatus");
+          List.of("orderNo","enterpriseName","buyerName","buyerUsername","buyerPhone","agreementName"),"orderStatus");
     }
 
     @GetMapping("/agreement-orders")
     Object agreementOrders(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
                            @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
         String base="""
-          SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,a.name AS agreementName,
-            o.payable_amount AS payableAmount,o.payment_status AS paymentStatus,
+          SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,u.real_name AS buyerName,
+            u.username AS buyerUsername,u.phone AS buyerPhone,a.name AS agreementName,
+            o.item_amount AS itemAmount,o.freight_amount AS freightAmount,o.payable_amount AS payableAmount,o.payment_status AS paymentStatus,
             o.order_status AS orderStatus,o.refund_status AS refundStatus,o.refund_amount AS refundAmount,
+            COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT(
+              'id',item.id,'title',spu.title,'mainImage',spu.main_image,'skuCode',sku.sku_code,
+              'quantity',item.quantity,'unitPrice',item.unit_price,'totalPrice',item.total_price,
+              'fulfillmentStatus',item.fulfillment_status,'logisticsCompany',item.logistics_company,'logisticsNo',item.logistics_no))
+              FROM order_item item JOIN product_sku sku ON sku.id=item.sku_id
+              JOIN product_spu spu ON spu.id=sku.spu_id WHERE item.order_main_id=o.id),JSON_ARRAY()) AS items,
+            DATE_FORMAT(o.payment_due_at,'%Y-%m-%d %H:%i:%s') AS paymentDueAt,
             DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,
+            DATE_FORMAT(o.updated_at,'%Y-%m-%d %H:%i:%s') AS updatedAt,
             COUNT(oi.id) AS itemKinds,SUM(oi.quantity) AS itemCount
-          FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id JOIN agreement a ON a.id=o.agreement_id
+          FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id JOIN enterprise_user u ON u.id=o.user_id JOIN agreement a ON a.id=o.agreement_id
           LEFT JOIN order_item oi ON oi.order_main_id=o.id
-          GROUP BY o.id,a.id
+          GROUP BY o.id,u.id,a.id
           """;
         if(page==null) return jdbc.sql(base+" ORDER BY id DESC").query().listOfRows();
         return PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
-          List.of("orderNo","enterpriseName","agreementName"),"orderStatus");
+          List.of("orderNo","enterpriseName","buyerName","buyerUsername","buyerPhone","agreementName"),"orderStatus");
     }
 
     @GetMapping("/platform-orders")
     Object platformOrders(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
                           @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
         String base="""
-          SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,o.payable_amount AS payableAmount,
+          SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,u.real_name AS buyerName,
+            u.username AS buyerUsername,u.phone AS buyerPhone,a.name AS agreementName,
+            o.item_amount AS itemAmount,o.freight_amount AS freightAmount,o.payable_amount AS payableAmount,
             o.payment_status AS paymentStatus,o.order_status AS orderStatus,o.refund_status AS refundStatus,
-            o.refund_amount AS refundAmount,DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,
+            o.refund_amount AS refundAmount,
+            COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT(
+              'id',item.id,'title',spu.title,'mainImage',spu.main_image,'skuCode',sku.sku_code,
+              'quantity',item.quantity,'unitPrice',item.unit_price,'totalPrice',item.total_price,
+              'fulfillmentStatus',item.fulfillment_status,'logisticsCompany',item.logistics_company,'logisticsNo',item.logistics_no))
+              FROM order_item item JOIN product_sku sku ON sku.id=item.sku_id
+              JOIN product_spu spu ON spu.id=sku.spu_id WHERE item.order_main_id=o.id),JSON_ARRAY()) AS items,
+            DATE_FORMAT(o.payment_due_at,'%Y-%m-%d %H:%i:%s') AS paymentDueAt,
+            DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,
+            DATE_FORMAT(o.updated_at,'%Y-%m-%d %H:%i:%s') AS updatedAt,
             COUNT(oi.id) AS itemKinds,SUM(oi.quantity) AS itemCount,platforms.platformNames
-          FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id
+          FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id JOIN enterprise_user u ON u.id=o.user_id
+          LEFT JOIN agreement a ON a.id=o.agreement_id
           LEFT JOIN order_item oi ON oi.order_main_id=o.id
           JOIN (
             SELECT oi2.order_main_id,
@@ -422,23 +653,28 @@ public class AdminBusinessController {
             JOIN portal_resource pr ON pr.id=pp.platform_id AND pr.resource_type='PLATFORM' AND pr.deleted_at IS NULL
             GROUP BY oi2.order_main_id
           ) platforms ON platforms.order_main_id=o.id
-          GROUP BY o.id,platforms.platformNames
+          GROUP BY o.id,u.id,a.id,platforms.platformNames
           """;
         if(page==null) return jdbc.sql(base+" ORDER BY id DESC").query().listOfRows();
         return PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
-          List.of("orderNo","enterpriseName","platformNames"),"orderStatus");
+          List.of("orderNo","enterpriseName","buyerName","buyerUsername","buyerPhone","agreementName","platformNames"),"orderStatus");
     }
 
     @GetMapping("/orders/{id}")
     Map<String,Object> order(@PathVariable long id) {
         var order=jdbc.sql("""
           SELECT o.id,o.order_no AS orderNo,e.name AS enterpriseName,u.real_name AS buyerName,
+            u.username AS buyerUsername,u.phone AS buyerPhone,a.name AS agreementName,
             o.item_amount AS itemAmount,o.freight_amount AS freightAmount,o.payable_amount AS payableAmount,
             o.payment_status AS paymentStatus,o.order_status AS orderStatus,o.refund_status AS refundStatus,
             o.refund_amount AS refundAmount,o.refund_reason AS refundReason,
+            o.payment_bank_snapshot AS paymentBankSnapshot,
             DATE_FORMAT(o.refunded_at,'%Y-%m-%d %H:%i:%s') AS refundedAt,
-            DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
-          FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id JOIN enterprise_user u ON u.id=o.user_id WHERE o.id=:id
+            DATE_FORMAT(o.payment_due_at,'%Y-%m-%d %H:%i:%s') AS paymentDueAt,
+            DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt,
+            DATE_FORMAT(o.updated_at,'%Y-%m-%d %H:%i:%s') AS updatedAt
+          FROM order_main o JOIN enterprise e ON e.id=o.enterprise_id JOIN enterprise_user u ON u.id=o.user_id
+          LEFT JOIN agreement a ON a.id=o.agreement_id WHERE o.id=:id
           """)
           .param("id",id).query().singleRow();
         var items=jdbc.sql("""
@@ -450,7 +686,7 @@ public class AdminBusinessController {
             DATE_FORMAT(oi.shipped_at,'%Y-%m-%d %H:%i:%s') AS shippedAt
           FROM order_item oi JOIN product_sku s ON s.id=oi.sku_id
           JOIN product_spu p ON p.id=s.spu_id JOIN order_sub os ON os.id=oi.order_sub_id
-          WHERE oi.order_main_id=:id
+          WHERE oi.order_main_id=:id ORDER BY os.id,oi.id
           """).param("id",id).query().listOfRows();
         var timeline=jdbc.sql("""
           SELECT event_type AS eventType,from_status AS fromStatus,to_status AS toStatus,
@@ -591,14 +827,14 @@ public class AdminBusinessController {
     }
 
     private static String value(String s){return s==null?"":s;}
-    private String uniqueProductCodeSuffix() {
+    private String uniqueProductCode() {
         for(int attempt=0;attempt<20;attempt++) {
-            String suffix=System.currentTimeMillis()+String.format("%06d",CODE_RANDOM.nextInt(1_000_000));
+            String code=System.currentTimeMillis()+String.format("%06d",CODE_RANDOM.nextInt(1_000_000));
             long existing=jdbc.sql("""
-              SELECT (SELECT COUNT(*) FROM product_spu WHERE spu_code=:spuCode)
-                   + (SELECT COUNT(*) FROM product_sku WHERE sku_code=:skuCode)
-              """).params(Map.of("spuCode","SPU-"+suffix,"skuCode","SKU-"+suffix)).query(Long.class).single();
-            if(existing==0) return suffix;
+              SELECT (SELECT COUNT(*) FROM product_spu WHERE spu_code=:code)
+                   + (SELECT COUNT(*) FROM product_sku WHERE sku_code=:code)
+              """).param("code",code).query(Long.class).single();
+            if(existing==0) return code;
         }
         throw new IllegalStateException("商品编码生成失败，请重试");
     }
@@ -633,6 +869,38 @@ public class AdminBusinessController {
         });
     }
     private static void require(int n,String message){if(n==0)throw new IllegalArgumentException(message);}
+    private void validateBadge(Long productId,ProductRequest r) {
+        if(r.badgeType()==null) return;
+        String type=normalizedBadgeType(r.badgeType());
+        if(!Set.of("NONE","AGREEMENT","PLATFORM","CUSTOM").contains(type))
+            throw new IllegalArgumentException("商品角标类型不正确");
+        if("PLATFORM".equals(type)) {
+            if(r.badgePlatformId()==null) throw new IllegalArgumentException("平台角标必须选择平台");
+            if(productId==null) throw new IllegalArgumentException("请先保存商品并关联平台，再配置平台角标");
+            int count=jdbc.sql("""
+              SELECT COUNT(*) FROM product_platform pp JOIN product_sku s ON s.id=pp.sku_id
+              JOIN portal_resource pr ON pr.id=pp.platform_id AND pr.resource_type='PLATFORM' AND pr.status=1 AND pr.deleted_at IS NULL
+              WHERE s.spu_id=:productId AND pp.platform_id=:platformId AND pp.deleted_at IS NULL
+              """).param("productId",productId).param("platformId",r.badgePlatformId()).query(Integer.class).single();
+            if(count==0) throw new IllegalArgumentException("角标平台必须是商品当前已关联的平台");
+        }
+        if("CUSTOM".equals(type)) {
+            String badge=value(r.customBadge()).trim();
+            int length=badge.codePointCount(0,badge.length());
+            boolean allHan=badge.codePoints().allMatch(codePoint->Character.UnicodeScript.of(codePoint)==Character.UnicodeScript.HAN);
+            if(length<2||length>5||!allHan) throw new IllegalArgumentException("自定义角标必须为2至5个汉字");
+        }
+    }
+    private static String normalizedBadgeType(String type){return type==null?null:type.trim().toUpperCase();}
+    private static String persistedBadgeType(String type){
+        String normalized=normalizedBadgeType(type);return "NONE".equals(normalized)?null:normalized;
+    }
+    private static Long normalizedBadgePlatformId(ProductRequest r){
+        return "PLATFORM".equals(normalizedBadgeType(r.badgeType()))?r.badgePlatformId():null;
+    }
+    private static String normalizedCustomBadge(ProductRequest r){
+        return "CUSTOM".equals(normalizedBadgeType(r.badgeType()))?value(r.customBadge()).trim():null;
+    }
     private void validateCategoryParent(Long id,Long parentId,int level) {
         if(level<1||level>3) throw new IllegalArgumentException("分类级别必须为1至3级");
         if(level==1&&parentId!=null) throw new IllegalArgumentException("一级分类不能设置上级分类");
@@ -652,21 +920,26 @@ public class AdminBusinessController {
               .param("id",productId).query(Long.class).optional().orElse(null);
             String existingCode=existingId==null?createCode:jdbc.sql("SELECT sku_code FROM product_sku WHERE id=:id")
               .param("id",existingId).query(String.class).single();
-            requested=List.of(new SkuRequest(existingId,existingCode,Map.of("规格",value(r.spec())),value(r.mainImage()),
-              r.marketPrice(),r.memberPrice(),r.stock(),r.status()==1?1:0));
+            requested=List.of(new SkuRequest(existingId,existingCode,Map.of("规格",value(r.spec())),value(r.mainImage()),"",value(r.mainImage()),
+              r.marketPrice(),r.memberPrice(),r.stock()==null?0:r.stock(),r.status()==1?1:0));
         }
         var retained=new java.util.HashSet<Long>();
         for(SkuRequest sku:requested) {
             if(sku.marketPrice()==null||sku.memberPrice()==null||sku.stock()<0)
                 throw new IllegalArgumentException("SKU价格和库存不能为空或小于0");
-            String code=value(sku.skuCode()).isBlank()?"SKU-"+uniqueProductCodeSuffix():sku.skuCode().trim();
+            String code=value(sku.skuCode()).isBlank()?uniqueProductCode():sku.skuCode().trim();
             String specs=toJson(sku.specValues()==null?Map.of():sku.specValues());
+            String specification=sku.specValues()==null?"":sku.specValues().values().stream().map(String::valueOf).filter(v->!v.isBlank()).reduce((a,b)->a+" "+b).orElse("");
+            String skuTitle=value(sku.skuTitle()).isBlank()?(r.title()+(!specification.isBlank()?" "+specification:"")):sku.skuTitle().trim();
+            String gallery=value(sku.skuGallery()).trim();
+            String image=value(sku.skuImage()).trim();
+            if(image.isBlank()&&retained.isEmpty())image=value(r.mainImage()).trim();
             if(sku.id()==null) {
                 jdbc.sql("""
-                  INSERT INTO product_sku(spu_id,sku_code,spec_json,sku_image,market_price,member_price,stock,status)
-                  VALUES(:spuId,:code,CAST(:specs AS JSON),:image,:marketPrice,:memberPrice,:stock,:status)
-                  """).params(Map.of("spuId",productId,"code",code,"specs",specs,"image",value(sku.skuImage()),
-                    "marketPrice",sku.marketPrice(),"memberPrice",sku.memberPrice(),"stock",sku.stock(),"status",sku.status())).update();
+                  INSERT INTO product_sku(spu_id,sku_code,title,spec_json,sku_image,gallery_json,market_price,member_price,stock,status)
+                  VALUES(:spuId,:code,:title,CAST(:specs AS JSON),:image,JSON_OBJECT('content',:gallery),:marketPrice,:memberPrice,:stock,:status)
+                  """).param("spuId",productId).param("code",code).param("title",skuTitle).param("specs",specs).param("image",image).param("gallery",gallery)
+                    .param("marketPrice",sku.marketPrice()).param("memberPrice",sku.memberPrice()).param("stock",sku.stock()).param("status",sku.status()).update();
                 retained.add(jdbc.sql("SELECT id FROM product_sku WHERE sku_code=:code").param("code",code).query(Long.class).single());
             } else {
                 int reserved=jdbc.sql("SELECT reserved_stock FROM product_sku WHERE id=:id AND spu_id=:spuId")
@@ -674,12 +947,11 @@ public class AdminBusinessController {
                   .orElseThrow(()->new IllegalArgumentException("SKU不存在"));
                 if(sku.stock()<reserved) throw new IllegalArgumentException("SKU库存不能小于已占用库存 "+reserved);
                 jdbc.sql("""
-                  UPDATE product_sku SET sku_code=:code,spec_json=CAST(:specs AS JSON),sku_image=:image,
+                  UPDATE product_sku SET sku_code=:code,title=:title,spec_json=CAST(:specs AS JSON),sku_image=:image,gallery_json=JSON_OBJECT('content',:gallery),
                     market_price=:marketPrice,member_price=:memberPrice,stock=:stock,status=:status
                   WHERE id=:id AND spu_id=:spuId AND deleted_at IS NULL
-                  """).params(Map.of("id",sku.id(),"spuId",productId,"code",code,"specs",specs,
-                    "image",value(sku.skuImage()),"marketPrice",sku.marketPrice(),"memberPrice",sku.memberPrice(),
-                    "stock",sku.stock(),"status",sku.status())).update();
+                  """).param("id",sku.id()).param("spuId",productId).param("code",code).param("title",skuTitle).param("specs",specs).param("image",image).param("gallery",gallery)
+                    .param("marketPrice",sku.marketPrice()).param("memberPrice",sku.memberPrice()).param("stock",sku.stock()).param("status",sku.status()).update();
                 retained.add(sku.id());
             }
         }
@@ -691,27 +963,40 @@ public class AdminBusinessController {
         try{return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(value);}
         catch(Exception e){throw new IllegalArgumentException("SKU规格格式错误");}
     }
+    private void saveServiceOptions(long productId,List<Long> optionIds) {
+        jdbc.sql("DELETE FROM product_service_option WHERE product_id=:id").param("id",productId).update();
+        if(optionIds==null)return;
+        for(Long optionId:optionIds) {
+            if(optionId==null)continue;
+            int exists=jdbc.sql("SELECT COUNT(*) FROM system_option WHERE id=:id AND option_type='PRODUCT_SERVICE' AND status=1 AND deleted_at IS NULL")
+              .param("id",optionId).query(Integer.class).single();
+            if(exists==0)throw new IllegalArgumentException("商品服务选项不存在或已停用");
+            jdbc.sql("INSERT INTO product_service_option(product_id,option_id) VALUES(:productId,:optionId)")
+              .param("productId",productId).param("optionId",optionId).update();
+        }
+    }
     private static void validatePassword(String password,boolean required) {
         if(required&&(password==null||password.isBlank()))
             throw new IllegalArgumentException("初始密码不能为空");
         if(password!=null&&!password.isBlank()&&(password.length()<8||password.length()>72))
             throw new IllegalArgumentException("密码长度必须为8至72位");
     }
-    public record ProductRequest(@NotBlank String title,@NotNull Long categoryId,@NotNull Long brandId,Integer selfOperated,
-        @NotBlank String mainImage,String gallery,String attributes,String summary,String detailHtml,
+    public record ProductRequest(@NotBlank String title,String model,@NotNull Long categoryId,@NotNull Long brandId,Integer selfOperated,
+        String mainImage,String gallery,String summary,String detailHtml,
         String deliveryDescription,String afterSalesHtml,String spec,
-      @NotNull @DecimalMin("0") BigDecimal marketPrice,@NotNull @DecimalMin("0") BigDecimal memberPrice,@Min(0) int stock,int status,
-      Map<String,Object> attributeValues,List<SkuRequest> skus){
+      @DecimalMin("0") BigDecimal marketPrice,@DecimalMin("0") BigDecimal memberPrice,@Min(0) Integer stock,int status,
+      Map<String,Object> attributeValues,List<SkuRequest> skus,String badgeType,Long badgePlatformId,String customBadge,List<Long> serviceOptionIds){
         public ProductRequest {
             long galleryCount=gallery==null?0:gallery.lines().filter(line->!line.isBlank()).count();
             if(galleryCount>6) throw new IllegalArgumentException("商品配图最多上传6张");
         }
-        public int selfOperatedValue() { return selfOperated==null ? 1 : (selfOperated==0 ? 0 : 1); }
+        public int selfOperatedValue() { return selfOperated==null ? 0 : (selfOperated==0 ? 0 : 1); }
     }
-    public record SkuRequest(Long id,String skuCode,Map<String,Object> specValues,String skuImage,
+    public record SkuRequest(Long id,String skuCode,Map<String,Object> specValues,String skuImage,String skuTitle,String skuGallery,
       BigDecimal marketPrice,BigDecimal memberPrice,int stock,int status){}
     public record CategoryRequest(@NotBlank String name,Long parentId,@Min(1) int level,
       @Min(0) int sortOrder,String icon,int status){}
+    public record BatchSelfOperatedRequest(List<Long> ids,int selfOperated){}
     public record EnterpriseRequest(@NotBlank String name,@NotBlank String creditCode,@NotBlank String contactName,
       @NotBlank String contactPhone,String address,int status){}
     public record EnterpriseMemberRequest(@NotBlank String username,@NotBlank String realName,

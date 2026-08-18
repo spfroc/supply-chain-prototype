@@ -36,7 +36,7 @@ public class ClientAuthController {
     }
 
     @PostMapping("/register") @ResponseStatus(HttpStatus.CREATED) @Transactional
-    Map<String,Object> register(@Valid @RequestBody RegisterRequest r,HttpServletResponse response) {
+    Map<String,Object> register(@Valid @RequestBody RegisterRequest r) {
         String enterpriseName=r.enterpriseName().trim();
         String creditCode=r.creditCode().trim().toUpperCase();
         String username=r.username().trim();
@@ -79,7 +79,7 @@ public class ClientAuthController {
             if(enabled==0) throw new IllegalArgumentException("该企业当前已停用，请联系平台管理员");
         }
         String roleCode=newEnterprise?"ENTERPRISE_ADMIN":"BUYER";
-        int status=newEnterprise?1:0;
+        int status=2;
         jdbc.sql("""
           INSERT INTO enterprise_user(enterprise_id,username,password_hash,real_name,phone,role_code,status)
           VALUES(:enterpriseId,:username,:password,:realName,:phone,:roleCode,:status)
@@ -88,10 +88,8 @@ public class ClientAuthController {
           "roleCode",roleCode,"status",status)).update();
         long userId=jdbc.sql("SELECT id FROM enterprise_user WHERE enterprise_id=:enterpriseId AND username=:username AND deleted_at IS NULL")
           .params(Map.of("enterpriseId",enterpriseId,"username",username)).query(Long.class).single();
-        if(newEnterprise) issueSession(userId,response);
         return Map.of("userId",userId,"enterpriseId",enterpriseId,"primaryAccount",newEnterprise,
-          "pendingApproval",!newEnterprise,"message",newEnterprise
-            ?"企业及主账号已创建":"注册申请已提交，请等待企业管理员启用账号");
+          "pendingApproval",true,"message","注册申请已提交，请等待平台管理员审核通过后登录");
     }
 
     @PostMapping("/login")
@@ -100,10 +98,10 @@ public class ClientAuthController {
         if(loginAttempts.isBlocked("client",identifier,request))
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,"登录尝试过多，请15分钟后重试");
         var users=jdbc.sql("""
-          SELECT u.id,u.password_hash AS passwordHash FROM enterprise_user u
+          SELECT u.id,u.password_hash AS passwordHash,u.status,e.status AS enterpriseStatus FROM enterprise_user u
           JOIN enterprise e ON e.id=u.enterprise_id
-          WHERE (u.username=:identifier OR u.phone=:identifier) AND u.status=1
-            AND u.deleted_at IS NULL AND e.status=1 AND e.deleted_at IS NULL
+          WHERE (u.username=:identifier OR u.phone=:identifier)
+            AND u.deleted_at IS NULL AND e.deleted_at IS NULL
           """).param("identifier",identifier).query().listOfRows();
         var matched=users.stream()
           .filter(user->encoder.matches(r.password(),String.valueOf(user.get("passwordHash")))).toList();
@@ -112,7 +110,15 @@ public class ClientAuthController {
             throw new org.springframework.web.server.ResponseStatusException(HttpStatus.UNAUTHORIZED,"账号、手机号或密码错误");
         }
         if(matched.size()>1) throw new IllegalArgumentException("登录信息关联多个企业，请联系平台管理员处理");
-        long userId=((Number)matched.getFirst().get("id")).longValue();
+        var matchedUser=matched.getFirst();
+        int userStatus=((Number)matchedUser.get("status")).intValue();
+        if(userStatus==2)
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN,"账号正在审核中，请等待平台管理员审核通过后登录");
+        if(userStatus!=1)
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN,"账号已停用或未通过审核，请联系平台管理员");
+        if(((Number)matchedUser.get("enterpriseStatus")).intValue()!=1)
+            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN,"所属企业已停用，请联系平台管理员");
+        long userId=((Number)matchedUser.get("id")).longValue();
         loginAttempts.success("client",identifier,request);
         issueSession(userId,response);
         return Map.of("userId",userId);

@@ -203,6 +203,7 @@ public class SystemAdminController {
               group_name AS groupName, description, is_public AS isPublic,
               DATE_FORMAT(updated_at, '%Y-%m-%d %H:%i:%s') AS updatedAt
             FROM system_config
+            WHERE group_name NOT IN ('联系方式','门户页脚','SEO与GEO')
             """;
         return pagedOrAll(base,"q.groupName,q.id",page,pageSize,keyword,null,List.of("configKey","configValue","groupName","description"),null);
     }

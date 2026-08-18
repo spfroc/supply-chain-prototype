@@ -27,7 +27,10 @@ public class SecurityConfig {
                 .requestMatchers("/api/admin/system/configs/**","/api/admin/system/options/**",
                   "/api/admin/system/option-groups/**").hasAuthority("system:config")
                 .requestMatchers("/api/admin/system/logs/**").hasAuthority("system:log")
-                .requestMatchers("/api/admin/business/products/**","/api/admin/business/categories/**",
+                .requestMatchers("/api/admin/business/product-associations").hasAnyAuthority("product:manage","agreement:manage")
+                .requestMatchers("/api/admin/business/agreements","/api/admin/agreements/**").hasAnyAuthority("product:manage","agreement:manage")
+                .requestMatchers("/api/admin/content/bank-accounts/**").hasAnyAuthority("system:config","product:manage")
+                .requestMatchers("/api/admin/business/products/**","/api/admin/business/product-service-options","/api/admin/business/product-badge-options","/api/admin/business/product-default-stock","/api/admin/business/product-content-templates","/api/admin/business/categories/**",
                   "/api/admin/business/attributes/**","/api/admin/business/uploads/**",
                   "/api/admin/content/**").hasAuthority("product:manage")
                 .requestMatchers("/api/admin/business/enterprises/**",

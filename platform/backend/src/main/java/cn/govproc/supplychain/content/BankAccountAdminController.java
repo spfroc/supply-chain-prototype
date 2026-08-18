@@ -1,0 +1,14 @@
+package cn.govproc.supplychain.content;
+import cn.govproc.supplychain.common.PageSupport;
+import jakarta.validation.Valid;import jakarta.validation.constraints.*;import java.util.Map;
+import org.springframework.http.HttpStatus;import org.springframework.jdbc.core.simple.JdbcClient;import org.springframework.transaction.annotation.Transactional;import org.springframework.web.bind.annotation.*;
+@RestController
+public class BankAccountAdminController {
+ private final JdbcClient jdbc; public BankAccountAdminController(JdbcClient jdbc){this.jdbc=jdbc;}
+ @GetMapping("/api/public/payment-bank-accounts") Object publicList(){return jdbc.sql("SELECT id,account_name AS accountName,bank_name AS bankName,account_number AS accountNumber,branch_name AS branchName FROM payment_bank_account WHERE status=1 AND deleted_at IS NULL ORDER BY sort_order,id").query().listOfRows();}
+ @GetMapping("/api/admin/content/bank-accounts") Object list(@RequestParam(defaultValue="1")int page,@RequestParam(defaultValue="10")int pageSize,@RequestParam(defaultValue="")String keyword,@RequestParam(required=false)Integer status){return PageSupport.query(jdbc,"SELECT id,account_name AS accountName,bank_name AS bankName,account_number AS accountNumber,branch_name AS branchName,sort_order AS sortOrder,status FROM payment_bank_account WHERE deleted_at IS NULL","q.sortOrder,q.id",Map.of(),page,pageSize,keyword,status,java.util.List.of("accountName","bankName","accountNumber","branchName"),"status");}
+ @PostMapping("/api/admin/content/bank-accounts") @ResponseStatus(HttpStatus.CREATED) @Transactional void create(@Valid @RequestBody BankRequest r){jdbc.sql("INSERT INTO payment_bank_account(account_name,bank_name,account_number,branch_name,sort_order,status) VALUES(:accountName,:bankName,:accountNumber,:branchName,:sortOrder,:status)").paramSource(r).update();}
+ @PutMapping("/api/admin/content/bank-accounts/{id}") @Transactional void update(@PathVariable long id,@Valid @RequestBody BankRequest r){int changed=jdbc.sql("UPDATE payment_bank_account SET account_name=:accountName,bank_name=:bankName,account_number=:accountNumber,branch_name=:branchName,sort_order=:sortOrder,status=:status WHERE id=:id AND deleted_at IS NULL").params(Map.of("id",id,"accountName",r.accountName(),"bankName",r.bankName(),"accountNumber",r.accountNumber(),"branchName",r.branchName()==null?"":r.branchName(),"sortOrder",r.sortOrder(),"status",r.status())).update();if(changed==0)throw new IllegalArgumentException("收款银行不存在");}
+ @DeleteMapping("/api/admin/content/bank-accounts/{id}") @ResponseStatus(HttpStatus.NO_CONTENT) void delete(@PathVariable long id){jdbc.sql("UPDATE payment_bank_account SET deleted_at=NOW(),status=0 WHERE id=:id").param("id",id).update();}
+ public record BankRequest(@NotBlank String accountName,@NotBlank String bankName,@NotBlank String accountNumber,String branchName,@NotNull Integer sortOrder,@NotNull Integer status){}
+}

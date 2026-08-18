@@ -275,7 +275,7 @@ public class ClientController {
               o.refund_status AS refundStatus,o.refund_amount AS refundAmount,o.refund_reason AS refundReason,
               DATE_FORMAT(o.refunded_at,'%Y-%m-%d %H:%i:%s') AS refundedAt,
               DATE_FORMAT(o.payment_due_at,'%Y-%m-%d %H:%i:%s') AS paymentDueAt,
-              DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
+              o.payment_bank_snapshot AS paymentBankSnapshot,DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
             FROM order_main o WHERE o.id=:id AND o.user_id=:userId
             """).params(Map.of("id",id,"userId",userId())).query().listOfRows();
         if(orders.isEmpty())throw new IllegalArgumentException("订单不存在");
@@ -306,6 +306,11 @@ public class ClientController {
         var existing = jdbc.sql("SELECT id,order_no AS orderNo FROM order_main WHERE enterprise_id=:enterpriseId AND idempotency_key=:key")
             .params(Map.of("enterpriseId", enterpriseId(), "key", idempotencyKey)).query().listOfRows();
         if (!existing.isEmpty()) return existing.getFirst();
+        if(request==null||request.bankAccountId()==null)throw new IllegalArgumentException("请选择收款银行账号");
+        var bankAccounts=jdbc.sql("SELECT id,account_name AS accountName,bank_name AS bankName,account_number AS accountNumber,branch_name AS branchName FROM payment_bank_account WHERE id=:id AND status=1 AND deleted_at IS NULL")
+            .param("id",request.bankAccountId()).query().listOfRows();
+        if(bankAccounts.isEmpty())throw new IllegalArgumentException("所选收款银行账号不存在或已停用");
+        var bankAccount=bankAccounts.getFirst();
 
         Long agreementId = jdbc.sql("""
             SELECT id FROM agreement WHERE enterprise_id=:enterpriseId AND status=1 AND deleted_at IS NULL
@@ -385,11 +390,13 @@ public class ClientController {
             + String.format("%06d", ThreadLocalRandom.current().nextInt(1_000_000));
         jdbc.sql("""
             INSERT INTO order_main(order_no,enterprise_id,user_id,agreement_id,item_amount,freight_amount,
-              payable_amount,payment_status,order_status,price_version,idempotency_key,payment_due_at)
-            VALUES(:orderNo,:enterpriseId,:userId,:agreementId,:amount,0,:amount,0,0,:priceVersion,:key,DATE_ADD(NOW(),INTERVAL 48 HOUR))
+              payable_amount,payment_status,order_status,price_version,idempotency_key,payment_due_at,payment_bank_account_id,payment_bank_snapshot)
+            VALUES(:orderNo,:enterpriseId,:userId,:agreementId,:amount,0,:amount,0,0,:priceVersion,:key,DATE_ADD(NOW(),INTERVAL 48 HOUR),:bankId,
+              JSON_OBJECT('accountName',:accountName,'bankName',:bankName,'accountNumber',:accountNumber,'branchName',:branchName))
             """).param("orderNo",orderNo).param("enterpriseId",enterpriseId()).param("userId",userId())
             .param("agreementId",agreementId).param("amount",amount).param("priceVersion",UUID.randomUUID().toString())
-            .param("key",idempotencyKey).update();
+            .param("key",idempotencyKey).param("bankId",request.bankAccountId()).param("accountName",bankAccount.get("accountName"))
+            .param("bankName",bankAccount.get("bankName")).param("accountNumber",bankAccount.get("accountNumber")).param("branchName",bankAccount.get("branchName")).update();
         long orderId = jdbc.sql("SELECT id FROM order_main WHERE order_no=:orderNo").param("orderNo", orderNo).query(Long.class).single();
         Map<Long, Long> subOrderByAddress = new HashMap<>();
         for (var allocation : allocations) {
@@ -455,7 +462,7 @@ public class ClientController {
 
     public record CartRequest(@NotNull Long skuId, Long solutionId, @Min(1) @Max(9999) int quantity) {}
     public record CartUpdateRequest(@Min(1) @Max(9999) int quantity, int selected) {}
-    public record CheckoutRequest(String idempotencyKey,List<DeliveryAllocation> allocations) {}
+    public record CheckoutRequest(String idempotencyKey,List<DeliveryAllocation> allocations,Long bankAccountId) {}
     public record DeliveryAllocation(Long skuId,Long addressId,int quantity) {}
     public record AddressRequest(@NotBlank String contactName,@NotBlank String contactPhone,
         @NotBlank String province,@NotBlank String city,@NotBlank String district,@NotBlank String detail,int isDefault) {}

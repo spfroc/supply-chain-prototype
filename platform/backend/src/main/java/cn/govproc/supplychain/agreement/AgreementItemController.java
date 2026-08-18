@@ -68,10 +68,10 @@ public class AgreementItemController {
     Map<String, Object> update(@PathVariable long agreementId, @PathVariable long itemId,
                                @Valid @RequestBody UpdatePrice request) {
         int changed = jdbc.sql("""
-            UPDATE agreement_item SET agreement_price = :price, updated_at = CURRENT_TIMESTAMP
+            UPDATE agreement_item SET agreement_price = :price,status=COALESCE(:status,status), updated_at = CURRENT_TIMESTAMP
             WHERE id = :itemId AND agreement_id = :agreementId AND deleted_at IS NULL
             """).param("price", request.agreementPrice()).param("itemId", itemId)
-            .param("agreementId", agreementId).update();
+            .param("agreementId", agreementId).param("status",request.status()).update();
         return Map.of("updated", changed == 1, "itemId", itemId, "agreementPrice", request.agreementPrice());
     }
 
@@ -87,5 +87,5 @@ public class AgreementItemController {
 
     public record SaveItem(@NotNull Long skuId,
                            @NotNull @DecimalMin(value = "0.00") BigDecimal agreementPrice) {}
-    public record UpdatePrice(@NotNull @DecimalMin(value = "0.00") BigDecimal agreementPrice) {}
+    public record UpdatePrice(@NotNull @DecimalMin(value = "0.00") BigDecimal agreementPrice,Integer status) {}
 }

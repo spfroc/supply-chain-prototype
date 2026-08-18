@@ -1,0 +1,3 @@
+ALTER TABLE product_spu
+  ADD COLUMN model VARCHAR(120) NOT NULL DEFAULT '' COMMENT '商品型号' AFTER title;
+

@@ -160,11 +160,22 @@ public class ContentAdminController {
 
     @DeleteMapping("/platform/{platformId}/products/{id}") @ResponseStatus(HttpStatus.NO_CONTENT) @Transactional
     void deletePlatformProduct(@PathVariable long platformId,@PathVariable long id) {
+        Long productId=jdbc.sql("""
+            SELECT s.spu_id FROM product_platform pp JOIN product_sku s ON s.id=pp.sku_id
+            WHERE pp.id=:id AND pp.platform_id=:platformId AND pp.deleted_at IS NULL
+            """).param("id",id).param("platformId",platformId).query(Long.class).optional()
+            .orElseThrow(()->new ResponseStatusException(HttpStatus.NOT_FOUND, "平台商品不存在"));
         int changed=jdbc.sql("""
             UPDATE product_platform SET deleted_at=NOW()
             WHERE id=:id AND platform_id=:platformId AND deleted_at IS NULL
             """).param("id",id).param("platformId",platformId).update();
         if(changed==0) throw new ResponseStatusException(HttpStatus.NOT_FOUND, "平台商品不存在");
+        jdbc.sql("""
+            UPDATE product_spu p SET p.badge_type=NULL,p.badge_platform_id=NULL,p.custom_badge=NULL
+            WHERE p.id=:productId AND p.badge_type='PLATFORM' AND p.badge_platform_id=:platformId
+              AND NOT EXISTS(SELECT 1 FROM product_platform pp JOIN product_sku s ON s.id=pp.sku_id
+                WHERE s.spu_id=p.id AND pp.platform_id=:platformId AND pp.deleted_at IS NULL)
+            """).param("productId",productId).param("platformId",platformId).update();
     }
 
     @GetMapping("/solution/{solutionId}/products")

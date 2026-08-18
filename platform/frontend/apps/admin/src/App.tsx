@@ -23,6 +23,7 @@ import {
   Table as AntTable,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
   Upload,
 } from "antd";
@@ -34,6 +35,8 @@ type Row = Record<string, any>;
 
 type ManagedTableProps<T extends Row> = TableProps<T> & {
   searchPlaceholder?: string;
+  toolbarExtra?: ReactNode;
+  selectionActions?: (selected: T[], clearSelection: () => void) => ReactNode;
   server?: {
     total: number;
     page: number;
@@ -53,6 +56,8 @@ function Table<T extends Row>({
   rowKey = "id",
   rowSelection,
   server,
+  selectionActions,
+  toolbarExtra,
   searchPlaceholder = "搜索当前列表的名称、编码或关键字段",
   ...props
 }: ManagedTableProps<T>) {
@@ -111,12 +116,17 @@ function Table<T extends Row>({
   };
   return <div className="managed-table">
     <div className="managed-table-toolbar">
-      <Space wrap>
+      <Space wrap className="managed-table-search-row">
         <Input.Search allowClear value={server ? server.keyword : keyword} onChange={(event) => server ? server.setKeyword(event.target.value) : setKeyword(event.target.value)} placeholder={searchPlaceholder} style={{ width: 320 }} />
         {(hasStatus || server) && <Select allowClear value={server ? server.status : status} onChange={(value) => server ? server.setStatus(value) : setStatus(value)} placeholder="全部状态" style={{ width: 150 }} options={server?.statusOptions || [{ label: "启用 / 正常 / 在售", value: "1" }, { label: "停用 / 禁用 / 下架", value: "0" }]} />}
+        {toolbarExtra}
       </Space>
-      <Space>
+      <Space wrap className="managed-table-batch-row">
         <span className="selection-summary">已选 {selectedRowKeys.length} 项</span>
+        {selectionActions?.(selected, () => {
+          setSelectedRowKeys([]);
+          rowSelection?.onChange?.([], [], { type: "none" });
+        })}
         <Button disabled={!selected.length} onClick={exportSelected}>批量导出选中</Button>
         <Button disabled={!selectedRowKeys.length} onClick={() => {
           setSelectedRowKeys([]);
@@ -157,9 +167,14 @@ type Module =
   | "navigations"
   | "banners"
   | "homeFloors"
+  | "homeAds"
   | "solutions"
   | "solutionProducts"
   | "contents"
+  | "contactSettings"
+  | "serviceFeatures"
+  | "footerSettings"
+  | "seoSettings"
   | "enterprises"
   | "enterpriseUsers"
   | "agreements"
@@ -176,6 +191,23 @@ const expandProductSkus=(products:Row[])=>products.flatMap((product)=>{
   const skus:Row[]=typeof product.skus==="string"?JSON.parse(product.skus||"[]"):(product.skus||[]);
   return skus.length?skus.map((sku)=>({...sku,title:product.title,mainImage:sku.skuImage||product.mainImage,spuId:product.id})):[product];
 });
+const parseTemplateList=(value:unknown):Row[]=>{
+  try{return Array.isArray(value)?value:JSON.parse(String(value||"[]"));}catch{return [];}
+};
+const mergeOrderListItems=(value:unknown):Row[]=>{
+  const merged=new Map<string,Row>();
+  parseTemplateList(value).forEach((item)=>{
+    const key=String(item.skuId||item.skuCode||item.title||item.id);
+    const current=merged.get(key);
+    if(current){
+      current.quantity=Number(current.quantity||0)+Number(item.quantity||0);
+      current.totalPrice=Number(current.totalPrice||0)+Number(item.totalPrice||0);
+      return;
+    }
+    merged.set(key,{...item,quantity:Number(item.quantity||0),totalPrice:Number(item.totalPrice||0)});
+  });
+  return [...merged.values()];
+};
 const apiHeaders = () => ({
   "Content-Type": "application/json",
   Authorization: `Basic ${adminCredential()}`,
@@ -223,10 +255,18 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json();
 }
 
+const inflightRootRequests = new Map<string, Promise<unknown>>();
 async function rootApi<T>(path: string): Promise<T> {
-  const response = await fetch(path, { headers: apiHeaders() });
-  if (!response.ok) throw new Error(`请求失败（${response.status}）`);
-  return response.json();
+  const existing=inflightRootRequests.get(path);
+  if(existing)return existing as Promise<T>;
+  const request=(async()=>{
+    const response = await fetch(path, { headers: apiHeaders() });
+    if (!response.ok) throw new Error(`请求失败（${response.status}）`);
+    return response.json() as Promise<T>;
+  })();
+  inflightRootRequests.set(path,request);
+  try{return await request;}
+  finally{if(inflightRootRequests.get(path)===request)inflightRootRequests.delete(path);}
 }
 async function rootMutation(path: string, init: RequestInit) {
   const response = await fetch(path, { ...init, headers: { ...apiHeaders(), ...init.headers } });
@@ -282,7 +322,7 @@ function ProductImageUpload({
   value?: string;
   onChange?: (value: string) => void;
   multiple?: boolean;
-  kind?: "main" | "gallery" | "brand" | "banner" | "portal" | "contentIcon" | "solutionMobile";
+  kind?: "main" | "gallery" | "brand" | "banner" | "portal" | "contentIcon" | "solutionMobile" | "qr" | "adWeb" | "adH5";
 }) {
   const { message } = AntApp.useApp();
   const [uploadError, setUploadError] = useState("");
@@ -294,7 +334,10 @@ function ProductImageUpload({
     banner: { minWidth: 1200, minHeight: 400, maxWidth: 3840, maxHeight: 1280, ratio: 3, ratioLabel: "3:1", maxMb: 5, title: "轮播图" },
     portal: { minWidth: 800, minHeight: 450, maxWidth: 3840, maxHeight: 2160, ratio: 16 / 9, ratioLabel: "16:9", maxMb: 5, title: "展示图" },
     contentIcon: { minWidth: 128, minHeight: 128, maxWidth: 1024, maxHeight: 1024, ratio: 1, ratioLabel: "1:1", maxMb: 2, title: "文章图标" },
+    qr: { minWidth: 300, minHeight: 300, maxWidth: 2000, maxHeight: 2000, ratio: 1, ratioLabel: "1:1", maxMb: 2, title: "二维码" },
     solutionMobile: { minWidth: 720, minHeight: 1280, maxWidth: 2160, maxHeight: 3840, ratio: 9 / 16, ratioLabel: "9:16", maxMb: 5, title: "H5竖版海报" },
+    adWeb: { minWidth: 800, minHeight: 160, maxWidth: 6000, maxHeight: 3000, ratio: 0, ratioLabel: "不限比例", maxMb: 8, title: "Web广告图" },
+    adH5: { minWidth: 600, minHeight: 240, maxWidth: 3000, maxHeight: 4000, ratio: 0, ratioLabel: "不限比例", maxMb: 8, title: "H5广告图" },
   };
   const profile = profiles[kind];
   const urls = String(value || "")
@@ -325,7 +368,7 @@ function ProductImageUpload({
         throw new Error(
           `图片尺寸须在${profile.minWidth}×${profile.minHeight}至${profile.maxWidth}×${profile.maxHeight}之间`,
         );
-      if (Math.abs(width / height - profile.ratio) / profile.ratio > 0.03)
+      if (profile.ratio > 0 && Math.abs(width / height - profile.ratio) / profile.ratio > 0.03)
         throw new Error(`图片须为${profile.ratioLabel}比例`);
       const body = new FormData();
       body.append("file", file);
@@ -443,6 +486,8 @@ function RichTextEditor({
   const { message } = AntApp.useApp();
   const editor = useRef<HTMLDivElement>(null);
   const localImageInput = useRef<HTMLInputElement>(null);
+  const savedRange = useRef<Range|null>(null);
+  const [uploadingLocalImage,setUploadingLocalImage]=useState(false);
   useEffect(() => {
     if (editor.current && editor.current.innerHTML !== (value || ""))
       editor.current.innerHTML = value || "";
@@ -463,33 +508,29 @@ function RichTextEditor({
   const insertElement = (element: HTMLElement) => {
     command("insertHTML", element.outerHTML);
   };
+  const chooseLocalImage = () => {
+    const selection=window.getSelection();
+    if(selection?.rangeCount&&editor.current?.contains(selection.getRangeAt(0).commonAncestorContainer))
+      savedRange.current=selection.getRangeAt(0).cloneRange();
+    localImageInput.current?.click();
+  };
   const uploadLocalImage = async (file?: File) => {
-    if (!file) return;
+    if(!file)return;
     try {
-      const body = new FormData();
-      body.append("file", file);
-      body.append("kind", "rich");
-      const response = await fetch("/api/admin/business/uploads/images", {
-        method: "POST",
-        headers: { Authorization: `Basic ${adminCredential()}` },
-        body,
-      });
-      if (!response.ok) throw new Error(await uploadFailure(response));
-      const result = await response.json();
-      const image = document.createElement("img");
-      image.src = result.url;
-      image.alt = file.name.replace(/\.[^.]+$/, "");
-      image.loading = "lazy";
-      insertElement(image);
-      message.success("图片已插入详情");
-    } catch (error) {
-      message.error({
-        content: error instanceof TypeError ? "无法连接图片上传服务，请检查网络或服务器状态" : (error as Error).message,
-        duration: 6,
-      });
-    } finally {
-      if (localImageInput.current) localImageInput.current.value = "";
-    }
+      setUploadingLocalImage(true);
+      if(!["image/jpeg","image/png"].includes(file.type))throw new Error("仅支持 JPG、PNG 图片");
+      if(file.size>8*1024*1024)throw new Error("图片不能超过8MB");
+      const body=new FormData();body.append("file",file);body.append("kind","rich");
+      const response=await fetch("/api/admin/business/uploads/images",{method:"POST",headers:{Authorization:`Basic ${adminCredential()}`},body});
+      if(!response.ok)throw new Error(await uploadFailure(response));
+      const result=await response.json();
+      const image=document.createElement("img");image.src=result.url;image.alt=file.name.replace(/\.[^.]+$/g,"")||"商品详情图片";image.loading="lazy";
+      const selection=window.getSelection();
+      if(savedRange.current&&selection){selection.removeAllRanges();selection.addRange(savedRange.current);insertElement(image);}
+      else if(editor.current){editor.current.insertAdjacentHTML("beforeend",image.outerHTML);onChange?.(editor.current.innerHTML);}
+      message.success("本地图片已上传并插入商品详情");
+    } catch(error){message.error((error as Error).message||"本地图片上传失败");}
+    finally{setUploadingLocalImage(false);if(localImageInput.current)localImageInput.current.value="";savedRange.current=null;}
   };
   return (
     <div className="rich-editor">
@@ -505,9 +546,6 @@ function RichTextEditor({
         </button>
         <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => command("insertUnorderedList")}>
           列表
-        </button>
-        <button type="button" onClick={() => localImageInput.current?.click()}>
-          本地图片
         </button>
         <button
           type="button"
@@ -527,6 +565,10 @@ function RichTextEditor({
         >
           网络图片
         </button>
+        <button className="rich-local-image-button" type="button" disabled={uploadingLocalImage} onMouseDown={(event)=>event.preventDefault()} onClick={chooseLocalImage}>
+          {uploadingLocalImage?"上传中…":"本地图片"}
+        </button>
+        <input ref={localImageInput} hidden style={{display:"none"}} className="rich-media-input" type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" onChange={(event)=>void uploadLocalImage(event.target.files?.[0])}/>
         <button
           type="button"
           onClick={() => {
@@ -559,16 +601,6 @@ function RichTextEditor({
           清除格式
         </button>
       </div>
-      <input
-        ref={localImageInput}
-        className="rich-media-input"
-        type="file"
-        hidden
-        aria-hidden="true"
-        tabIndex={-1}
-        accept=".jpg,.jpeg,.png"
-        onChange={(event) => void uploadLocalImage(event.target.files?.[0])}
-      />
       <div
         ref={editor}
         className="rich-content"
@@ -654,7 +686,12 @@ const navItems = [
       { key: "navigations", label: "导航栏管理", icon: <MenuIcon name="navigation" /> },
       { key: "banners", label: "首页轮播图", icon: <MenuIcon name="banner" /> },
       { key: "homeFloors", label: "首页楼层管理", icon: <MenuIcon name="content" /> },
+      { key: "homeAds", label: "首页广告位", icon: <MenuIcon name="banner" /> },
       { key: "contents", label: "内容管理", icon: <MenuIcon name="content" /> },
+      { key: "contactSettings", label: "联系方式", icon: <MenuIcon name="user" /> },
+      { key: "serviceFeatures", label: "服务保障", icon: <MenuIcon name="content" /> },
+      { key: "footerSettings", label: "页脚配置", icon: <MenuIcon name="config" /> },
+      { key: "seoSettings", label: "SEO/GEO配置", icon: <MenuIcon name="config" /> },
     ],
   },
   {
@@ -674,8 +711,8 @@ const modulePermission: Partial<Record<Module, string>> = {
   attributes: "product:manage", brands: "product:manage", platforms: "product:manage",
   platformProducts: "product:manage", platformOrders: "order:manage",
   navigations: "product:manage", banners: "product:manage", solutions: "product:manage",
-  homeFloors: "product:manage",
-  contents: "product:manage", enterprises: "enterprise:manage", enterpriseUsers: "enterprise:manage",
+  homeFloors: "product:manage", homeAds:"product:manage",
+  contents: "product:manage", contactSettings: "product:manage", serviceFeatures: "product:manage", footerSettings: "product:manage", seoSettings:"product:manage", enterprises: "enterprise:manage", enterpriseUsers: "enterprise:manage",
   agreements: "agreement:manage", agreementProducts: "agreement:manage", agreementOrders: "order:manage",
   solutionProducts: "product:manage",
   orders: "order:manage", users: "system:user", roles: "system:role",
@@ -823,9 +860,14 @@ function AdminApp({ logout }: { logout: () => void }) {
     ],
     banners: ["首页轮播图管理", "配置 Web 与 H5 首页活动内容、图片和跳转链接"],
     homeFloors: ["首页楼层管理", "配置 Web 与 H5 首页商品、方案、分类和内容楼层"],
+    homeAds: ["首页广告位", "配置首页广告组版式、插入位置、Web/H5 图片和跳转链接"],
     solutions: ["方案管理", "维护企业采购场景方案及客户端展示内容"],
     solutionProducts: ["方案商品管理", "按采购方案维护必选商品、可选商品、数量与排序"],
     contents: ["内容管理", "维护采购指南、服务说明及其他门户内容"],
+    contactSettings: ["联系方式", "配置 Web 门户右侧悬浮栏中的座机、手机、微信二维码和邮箱"],
+    serviceFeatures: ["服务保障", "配置 Web 门户页脚上方的服务保障图片、标题、副标题、顺序和显示状态"],
+    footerSettings: ["页脚配置", "配置门户页脚简介、地址、版权主体和各类备案许可证信息"],
+    seoSettings: ["SEO/GEO配置", "配置全站搜索引擎、地域搜索和生成式搜索优化信息"],
     enterprises: ["企业管理", "查看企业客户、成员账户和有效采购协议"],
     enterpriseUsers: ["企业用户管理", "以用户维度查看、创建、编辑和维护全部企业账号"],
     agreements: ["协议管理", "维护协议商品关联及企业专属成交价格"],
@@ -912,13 +954,14 @@ function AdminApp({ logout }: { logout: () => void }) {
           {(
             ["products", "enterprises", "agreements", "orders"] as Module[]
           ).includes(module) && <BusinessModule module={module} />}
-          {module === "agreementProducts" && <BusinessModule module="agreements" listTitle="采购协议列表（进入商品管理）" />}
+          {module === "agreementProducts" && <AssociationProducts type="AGREEMENT" />}
           {module === "agreementOrders" && <BusinessModule module="orders" endpointOverride="/agreement-orders" listTitle="协议订单列表" extraColumn="agreementName" />}
           {module === "platformOrders" && <BusinessModule module="orders" endpointOverride="/platform-orders" listTitle="平台关联商品订单列表" extraColumn="platformNames" />}
           {module === "enterpriseUsers" && <EnterpriseUsers />}
           {module === "categories" && <Categories />}
           {module === "attributes" && <AttributeTemplates />}
           {module === "homeFloors" && <HomeFloors />}
+          {module === "homeAds" && <HomeAds />}
           {(
             [
               "brands",
@@ -926,11 +969,15 @@ function AdminApp({ logout }: { logout: () => void }) {
               "navigations",
               "banners",
               "solutions",
-              "contents",
             ] as Module[]
           ).includes(module) && <PortalManager module={module} />}
-          {module === "platformProducts" && <PortalManager module="platforms" />}
-          {module === "solutionProducts" && <PortalManager module="solutions" />}
+          {module === "contents" && <Articles />}
+          {module === "contactSettings" && <ContactSettings />}
+          {module === "serviceFeatures" && <ServiceFeatures />}
+          {module === "footerSettings" && <FooterSettings />}
+          {module === "seoSettings" && <SeoSettings />}
+          {module === "platformProducts" && <AssociationProducts type="PLATFORM" />}
+          {module === "solutionProducts" && <AssociationProducts type="SOLUTION" />}
           {module === "users" && <Users />}
           {module === "roles" && <Roles />}
           {module === "permissions" && <Permissions />}
@@ -978,11 +1025,11 @@ function EnterpriseUsers() {
     <Card className="data-card" title="企业用户列表" extra={<Space>
       <Button type="primary" onClick={()=>show()}>＋ 新增企业用户</Button>
     </Space>}>
-      <Table rowKey="id" loading={users.loading} dataSource={users.data} server={users.server} searchPlaceholder="搜索企业、账号、姓名或手机" columns={[
+      <Table rowKey="id" loading={users.loading} dataSource={users.data} server={{...users.server,statusOptions:[{label:"待审核",value:"2"},{label:"已启用",value:"1"},{label:"已停用 / 未通过",value:"0"}]}} searchPlaceholder="搜索企业、账号、姓名或手机" columns={[
         {title:"用户",render:(_:unknown,row:Row)=><div className="user-cell"><i>{String(row.realName||"用").slice(0,1)}</i><span><strong>{row.realName}</strong><small>@{row.username}</small></span></div>},
         {title:"所属企业",dataIndex:"enterpriseName"},{title:"手机号码",dataIndex:"phone"},
         {title:"企业角色",dataIndex:"roleCode",render:(value)=>value==="ENTERPRISE_ADMIN"?<Tag color="blue">企业管理员</Tag>:<Tag>采购员</Tag>},
-        {title:"状态",dataIndex:"status",render:(value)=><Tag color={Number(value)===1?"green":"default"}>{Number(value)===1?"启用":"停用"}</Tag>},
+        {title:"状态",dataIndex:"status",render:(value)=>Number(value)===2?<Tag color="orange">待审核</Tag>:Number(value)===1?<Tag color="green">已启用</Tag>:<Tag>已停用 / 未通过</Tag>},
         {title:"创建时间",dataIndex:"createdAt",render:dateTime},
         {title:"操作",render:(_:unknown,row:Row)=><Button type="link" onClick={()=>show(row)}>编辑</Button>},
       ]}/>
@@ -995,7 +1042,7 @@ function EnterpriseUsers() {
         <Form.Item name="realName" label="姓名" rules={[{required:true,message:"请输入姓名"}]}><Input/></Form.Item>
         <Form.Item name="phone" label="手机号码" rules={[{required:true,message:"请输入手机号码"},{pattern:/^1\d{10}$/,message:"请输入11位手机号码"}]}><Input/></Form.Item>
         <Form.Item name="roleCode" label="企业角色" rules={[{required:true}]}><Select options={[{value:"BUYER",label:"采购员"},{value:"ENTERPRISE_ADMIN",label:"企业管理员"}]}/></Form.Item>
-        <Form.Item name="status" label="账号状态" rules={[{required:true}]}><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]}/></Form.Item>
+        <Form.Item name="status" label="账号状态" rules={[{required:true}]}><Select options={[{value:2,label:"待审核"},{value:1,label:"审核通过 / 启用"},{value:0,label:"审核不通过 / 停用"}]}/></Form.Item>
       </Form>
     </Modal>
   </>;
@@ -1005,6 +1052,12 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
   module: Module; endpointOverride?: string; listTitle?: string; extraColumn?: "agreementName"|"platformNames";
 }) {
   const { message, modal } = AntApp.useApp();
+  const [badgeFilter,setBadgeFilter]=useState<string>();
+  const [productCategoryFilter,setProductCategoryFilter]=useState<number>();
+  const [productBrandFilter,setProductBrandFilter]=useState<number>();
+  const [productSelfFilter,setProductSelfFilter]=useState<number>();
+  const [productStockMin,setProductStockMin]=useState<number|null>(null);
+  const [productStockMax,setProductStockMax]=useState<number|null>(null);
   const endpoint =
     module === "products"
       ? "/products"
@@ -1013,31 +1066,52 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
         : module === "agreements"
           ? "/agreements"
           : "/orders";
-  const regularRows = useLoad<Row[]>(
-    () => rootApi(`/api/admin/business${endpointOverride||endpoint}`),
-    [module,endpointOverride],
-  );
-  const serverEnabled = true;
-  const pagedRows = usePagedLoad(`/api/admin/business${endpointOverride||endpoint}`, 10, [module,endpointOverride]);
-  const rows = serverEnabled ? pagedRows : regularRows;
+  const productSearchParams=new URLSearchParams();
+  if(badgeFilter)productSearchParams.set("badgeType",badgeFilter);
+  if(productCategoryFilter!=null)productSearchParams.set("categoryId",String(productCategoryFilter));
+  if(productBrandFilter!=null)productSearchParams.set("brandId",String(productBrandFilter));
+  if(productSelfFilter!=null)productSearchParams.set("selfOperated",String(productSelfFilter));
+  if(productStockMin!=null)productSearchParams.set("stockMin",String(productStockMin));
+  if(productStockMax!=null)productSearchParams.set("stockMax",String(productStockMax));
+  const pagedEndpoint=`/api/admin/business${endpointOverride||endpoint}${module==="products"&&productSearchParams.size?`?${productSearchParams}`:""}`;
+  const pagedRows = usePagedLoad(pagedEndpoint, 10, [module,endpointOverride,badgeFilter,productCategoryFilter,productBrandFilter,productSelfFilter,productStockMin,productStockMax]);
+  const rows = pagedRows;
   const enterprises = useLoad<Row[]>(() =>
     rootApi("/api/admin/business/enterprises"),
-  );
+  [],["agreements","orders"].includes(module));
   const products = useLoad<Row[]>(() =>
     rootApi("/api/admin/business/products"),
-  );
+  [],["agreements","orders"].includes(module));
   const selectableSkus=expandProductSkus(products.data||[]).filter((sku)=>Number(sku.status)===1);
   const categories = useLoad<Row[]>(() =>
     rootApi("/api/admin/business/categories"),
-  );
+  [],module==="products");
   const brands = useLoad<Row[]>(() =>
     rootApi("/api/admin/content/brands/list"),
-  );
+  [],module==="products");
+  const platforms = useLoad<Row[]>(() =>
+    rootApi("/api/admin/content/platform"),
+  [],module==="products");
+  const agreementOptions = useLoad<Row[]>(() =>
+    rootApi("/api/admin/business/agreements"),
+  [],module==="products");
   const logisticsCompanies = useLoad<Row[]>(() =>
     rootApi("/api/admin/system/options?type=LOGISTICS_COMPANY&enabled=true"),
-  );
+  [],module==="orders");
+  const productServices=useLoad<Row[]>(()=>rootApi("/api/admin/business/product-service-options"),[],module==="products");
+  const productBadgeOptions=useLoad<Row[]>(()=>rootApi("/api/admin/business/product-badge-options"),[],module==="products");
+  const stockConfig=useLoad<Row>(()=>rootApi("/api/admin/business/product-default-stock"),[],module==="products");
+  const productTemplates=useLoad<Row>(()=>rootApi("/api/admin/business/product-content-templates"),[],module==="products");
+  const defaultSkuStock=Number(stockConfig.data?.stock||10000);
+  const deliveryTemplates=parseTemplateList(productTemplates.data?.deliveryTemplates);
+  const afterSalesTemplates=parseTemplateList(productTemplates.data?.afterSalesTemplates);
   const [form] = Form.useForm();
+  const [batchStockForm] = Form.useForm();
+  const [platformForm] = Form.useForm();
+  const [productAgreementForm] = Form.useForm();
+  const [listBadgeForm] = Form.useForm();
   const selectedProductCategory = Form.useWatch("categoryId", form);
+  const listBadgeType = Form.useWatch("badgeType", listBadgeForm);
   const [attributeTemplate, setAttributeTemplate] = useState<Row[]>([]);
   useEffect(() => {
     if (module !== "products" || !selectedProductCategory) { setAttributeTemplate([]); return; }
@@ -1052,6 +1126,11 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
   const savingRef = useRef(false);
   const [productTab,setProductTab]=useState("basic");
   const [editing, setEditing] = useState<Row>();
+  const [batchStockRows, setBatchStockRows] = useState<Row[]>([]);
+  const [platformProduct, setPlatformProduct] = useState<Row>();
+  const [agreementProduct, setAgreementProduct] = useState<Row>();
+  const [badgeProduct, setBadgeProduct] = useState<Row>();
+  const [inlineBadgeProductId,setInlineBadgeProductId]=useState<number>();
   const [mode, setMode] = useState<"entity" | "stock" | "item">("entity");
   const [agreement, setAgreement] = useState<Row>();
   const [items, setItems] = useState<Row[]>([]);
@@ -1087,21 +1166,30 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
     else if (module === "products")
       form.setFieldsValue(
         row
-          ? { ...row, status: Number(row.status), spec: "标准规格",
+          ? { ...row, status: Number(row.status), badgeType: row.badgeType || "NONE", spec: "标准规格",
               skus:(typeof row.skus==="string"?JSON.parse(row.skus||"[]"):row.skus||[]).map((sku:Row)=>({
                 ...sku,status:Number(sku.status),specification:Object.entries(typeof sku.specValues==="string"?JSON.parse(sku.specValues||"{}"):sku.specValues||{})
                   .map(([key,value])=>`${key}=${value}`).join("；")
               })),
-              attributeValues: typeof row.attributeValues === "string" ? JSON.parse(row.attributeValues || "{}") : (row.attributeValues || {}) }
+              attributeValues: typeof row.attributeValues === "string" ? JSON.parse(row.attributeValues || "{}") : (row.attributeValues || {}),
+              serviceOptionIds:(typeof row.serviceOptionIds==="string"?JSON.parse(row.serviceOptionIds||"[]"):row.serviceOptionIds||[]).map(Number) }
           : {
+              title: [
+                (brands.data || []).find((x)=>Number(x.status)===1)?.name,
+                (categories.data || []).find((x)=>Number(x.level)===3&&Number(x.status)===1)?.name,
+              ].filter(Boolean).join(" "),
               categoryId: (categories.data || []).find(
                 (x) => Number(x.level) === 3,
               )?.id,
               brandId: (brands.data || []).find((x)=>Number(x.status)===1)?.id,
-              selfOperated: 1,
+              selfOperated: 0,
               status: 1,
+              badgeType: "NONE",
+              serviceOptionIds:(productServices.data||[]).map((item)=>Number(item.id)),
+              deliveryDescription:String(deliveryTemplates.find((item)=>item.isDefault)?.content||""),
+              afterSalesHtml:String(afterSalesTemplates.find((item)=>item.isDefault)?.content||""),
               stock: 0,
-              skus:[{skuCode:"",specification:"规格=标准",skuImage:"",marketPrice:0,memberPrice:0,stock:0,status:1}],
+              skus:[{skuCode:"",skuTitle:"",specification:"",skuImage:"",skuGallery:"",marketPrice:0,memberPrice:0,stock:defaultSkuStock,status:1}],
             },
       );
     else if (module === "enterprises")
@@ -1118,6 +1206,16 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
       );
     setOpen(true);
   };
+  useEffect(()=>{
+    if(!open||module!=="products"||editing)return;
+    const current=form.getFieldValue("serviceOptionIds");
+    if(!Array.isArray(current)||current.length===0)
+      form.setFieldValue("serviceOptionIds",(productServices.data||[]).map((item)=>Number(item.id)));
+    if(!form.getFieldValue("deliveryDescription"))
+      form.setFieldValue("deliveryDescription",String(deliveryTemplates.find((item)=>item.isDefault)?.content||""));
+    if(!form.getFieldValue("afterSalesHtml"))
+      form.setFieldValue("afterSalesHtml",String(afterSalesTemplates.find((item)=>item.isDefault)?.content||""));
+  },[open,module,editing,productServices.data,productTemplates.data]);
   const save = async () => {
     if (savingRef.current) return;
     savingRef.current = true;
@@ -1154,7 +1252,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
       const first=error.errorFields?.[0]?.name?.[0];
       if(module==="products"&&first){
         const tab=first==="skus"||first==="stock"||first==="marketPrice"||first==="memberPrice"||first==="spec"
-          ?"sales":first==="mainImage"||first==="gallery"?"images"
+          ?"sales":first==="mainImage"||first==="gallery"?"basic"
           :first==="attributeValues"||first==="attributes"?"attributes"
           :first==="detailHtml"||first==="deliveryDescription"||first==="afterSalesHtml"?"detail":"basic";
         setProductTab(tab);
@@ -1206,6 +1304,156 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
     } catch (e) {
       message.error((e as Error).message);
     }
+  };
+  const batchStatus = async (selected: Row[], status: number, clearSelection: () => void) => {
+    try {
+      await Promise.all(selected.map((row) => business(`/products/${row.id}/status`, {
+        method: "PUT", body: JSON.stringify({ status }),
+      })));
+      message.success(`已批量${status === 1 ? "上架" : "下架"} ${selected.length} 个商品`);
+      clearSelection();
+      void rows.refresh();
+    } catch (e) { message.error((e as Error).message); }
+  };
+  const batchSelfOperated=async(selected:Row[],selfOperated:0|1,clearSelection:()=>void)=>{
+    try{
+      await business("/products/batch-self-operated",{method:"PUT",body:JSON.stringify({ids:selected.map((row)=>Number(row.id)),selfOperated})});
+      message.success(`已将 ${selected.length} 个商品设为${selfOperated?"自营":"非自营"}`);clearSelection();void rows.refresh();
+    }catch(error){message.error((error as Error).message);}
+  };
+  const showBatchStock = (selected: Row[]) => {
+    setBatchStockRows(selected);
+    batchStockForm.resetFields();
+    setMode("stock");
+  };
+  const saveBatchStock = async () => {
+    try {
+      const { stock } = await batchStockForm.validateFields();
+      await Promise.all(batchStockRows.map((row) => business(`/products/${row.id}/stock`, {
+        method: "PUT", body: JSON.stringify({ stock }),
+      })));
+      message.success(`已修改 ${batchStockRows.length} 个商品的库存`);
+      setBatchStockRows([]);
+      void rows.refresh();
+    } catch (e) { if (e instanceof Error) message.error(e.message); }
+  };
+  const showPlatformAdd = (row: Row) => {
+    const skus = typeof row.skus === "string" ? JSON.parse(row.skus || "[]") : row.skus || [];
+    setPlatformProduct(row);
+    platformForm.resetFields();
+    platformForm.setFieldsValue({ skuId: skus[0]?.id || row.skuId, platformPrice: skus[0]?.memberPrice || row.memberPrice, productUrl: "", listingStatus: 1 });
+  };
+  const savePlatformAdd = async () => {
+    try {
+      const values = await platformForm.validateFields();
+      const response = await fetch(`/api/admin/content/platform/${values.platformId}/products`, {
+        method: "POST", headers: apiHeaders(), body: JSON.stringify(values),
+      });
+      if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.detail || "添加到平台失败"); }
+      message.success("商品已添加到平台");
+      setPlatformProduct(undefined);
+      void rows.refresh();
+    } catch (e) { if (e instanceof Error) message.error(e.message); }
+  };
+  const productAgreementRelations = (row: Row): Row[] => {
+    if (Array.isArray(row.agreementRelations)) return row.agreementRelations;
+    try { return JSON.parse(row.agreementRelations || "[]"); } catch { return []; }
+  };
+  const showProductAgreements = (row: Row) => {
+    const agreementIds=[...new Set(productAgreementRelations(row).filter((relation)=>Number(relation.status)===1).map((relation)=>Number(relation.agreementId)))];
+    setAgreementProduct(row);
+    productAgreementForm.resetFields();
+    productAgreementForm.setFieldsValue({agreementIds});
+  };
+  const saveProductAgreements = async () => {
+    if (!agreementProduct) return;
+    try {
+      const {agreementIds=[]}=await productAgreementForm.validateFields();
+      const selectedIds=(agreementIds as number[]).map(Number);
+      const relations=productAgreementRelations(agreementProduct);
+      const skus=(typeof agreementProduct.skus==="string"?JSON.parse(agreementProduct.skus||"[]"):agreementProduct.skus||[])
+        .filter((sku:Row)=>Number(sku.status)===1);
+      const requests:Promise<void>[]=[];
+      selectedIds.forEach((agreementId)=>skus.forEach((sku:Row)=>{
+        const exists=relations.some((relation)=>Number(relation.agreementId)===agreementId&&Number(relation.skuId)===Number(sku.id)&&Number(relation.status)===1);
+        if (!exists) requests.push(fetch(`/api/admin/agreements/${agreementId}/items`,{
+          method:"POST",headers:apiHeaders(),body:JSON.stringify({skuId:Number(sku.id),agreementPrice:Number(sku.memberPrice??agreementProduct.memberPrice??0)}),
+        }).then(async(response)=>{if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"添加协议关联失败");}}));
+      }));
+      relations.filter((relation)=>!selectedIds.includes(Number(relation.agreementId))).forEach((relation)=>{
+        requests.push(fetch(`/api/admin/agreements/${relation.agreementId}/items/${relation.id}`,{
+          method:"DELETE",headers:apiHeaders(),
+        }).then(async(response)=>{if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"移除协议关联失败");}}));
+      });
+      await Promise.all(requests);
+      message.success("商品协议关联已更新");
+      setAgreementProduct(undefined);
+      void rows.refresh();
+    } catch (e) { if (e instanceof Error) message.error(e.message); }
+  };
+  const productPlatformRelations = (row: Row): Row[] => {
+    if (Array.isArray(row.platformRelations)) return row.platformRelations;
+    try { return JSON.parse(row.platformRelations || "[]"); } catch { return []; }
+  };
+  const updateProductPlatforms = async (row: Row, nextPlatformIds: number[]) => {
+    const relations = productPlatformRelations(row);
+    const currentPlatformIds = [...new Set(relations.map((relation) => Number(relation.platformId)))];
+    const added = nextPlatformIds.filter((id) => !currentPlatformIds.includes(id));
+    const removed = currentPlatformIds.filter((id) => !nextPlatformIds.includes(id));
+    const skus = typeof row.skus === "string" ? JSON.parse(row.skus || "[]") : row.skus || [];
+    const sku = skus[0] || { id: row.skuId, memberPrice: row.memberPrice };
+    try {
+      await Promise.all([
+        ...added.map((platformId) => fetch(`/api/admin/content/platform/${platformId}/products`, {
+          method: "POST", headers: apiHeaders(), body: JSON.stringify({
+            skuId: Number(sku.id), platformPrice: Number(sku.memberPrice), productUrl: "", listingStatus: 1,
+          }),
+        }).then(async (response) => { if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.detail || "添加平台失败"); } })),
+        ...relations.filter((relation) => removed.includes(Number(relation.platformId))).map((relation) =>
+          fetch(`/api/admin/content/platform/${relation.platformId}/products/${relation.id}`, {
+            method: "DELETE", headers: apiHeaders(),
+          }).then(async (response) => { if (!response.ok) { const data = await response.json().catch(() => ({})); throw new Error(data.detail || "取消平台关联失败"); } }),
+        ),
+      ]);
+      message.success("商品平台关联已更新");
+      void rows.refresh();
+    } catch (e) { message.error((e as Error).message); }
+  };
+  const badgeLabel = (row: Row) => {
+    if (row.badgeType === "AGREEMENT") return "协议专属";
+    if (row.badgeType === "CUSTOM") return row.customBadge || "自定义";
+    if (row.badgeType === "PLATFORM") {
+      const platform=(platforms.data || []).find((item) => Number(item.id) === Number(row.badgePlatformId));
+      const prefix=String(platform?.pricePrefix || platform?.title || "平台");
+      return prefix.endsWith("平台") ? prefix : `${prefix}平台`;
+    }
+    return "未定义";
+  };
+  const saveQuickBadge=async(row:Row,value:string)=>{try{
+    await business(`/products/${row.id}`,{method:"PUT",body:JSON.stringify({
+      title:row.title,categoryId:Number(row.categoryId),brandId:Number(row.brandId),selfOperated:Number(row.selfOperated),status:Number(row.status),summary:row.summary,
+      badgeType:value==="__UNDEFINED__"?"NONE":"CUSTOM",badgePlatformId:null,customBadge:value==="__UNDEFINED__"?null:value,
+    })});message.success("商品角标已更新");setInlineBadgeProductId(undefined);void rows.refresh();
+  }catch(error){message.error((error as Error).message);}};
+  const toggleSkuStatus=async(product:Row,sku:Row)=>{try{await business(`/products/${product.id}/skus/${sku.id}/status`,{method:"PUT",body:JSON.stringify({status:Number(sku.status)===1?0:1})});message.success(Number(sku.status)===1?"SKU已停用":"SKU已启用");void rows.refresh();}catch(error){message.error((error as Error).message);}};
+  const showBadgeConfig = (row: Row) => {
+    setBadgeProduct(row);
+    listBadgeForm.resetFields();
+    listBadgeForm.setFieldsValue({badgeType:row.badgeType || "NONE",badgePlatformId:row.badgePlatformId,customBadge:row.customBadge});
+  };
+  const saveBadgeConfig = async () => {
+    if (!badgeProduct) return;
+    try {
+      const badge = await listBadgeForm.validateFields();
+      await business(`/products/${badgeProduct.id}`, {method:"PUT",body:JSON.stringify({
+        title:badgeProduct.title,categoryId:Number(badgeProduct.categoryId),brandId:Number(badgeProduct.brandId),
+        selfOperated:Number(badgeProduct.selfOperated),status:Number(badgeProduct.status),summary:badgeProduct.summary,
+        ...badge,
+      })});
+      message.success("商品角标已更新");
+      setBadgeProduct(undefined);
+      void rows.refresh();
+    } catch (e) { if (e instanceof Error) message.error(e.message); }
   };
   const openItems = async (row: Row) => {
     setAgreement(row);
@@ -1378,8 +1626,9 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
     columns = [
       {
         title: "商品信息",
+        width: 320,
         render: (_, r) => (
-          <div className="user-cell">
+          <div className="user-cell product-main-cell">
             <span className="solution-admin-cover">
               <i>{r.title?.slice(0, 1) || "商"}</i>
               {r.mainImage && (
@@ -1393,35 +1642,45 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
                 />
               )}
             </span>
-            <span>
+            <span className="product-main-info">
               <strong>{r.title}</strong>
-              <small>{r.spuCode} · {Number(r.skuCount||1)} 个 SKU {Number(r.selfOperated) === 1 && <Tag color="blue">自营</Tag>}</small>
+              <small>{r.spuCode} · {Number(r.skuCount||1)} 个 SKU</small>
             </span>
           </div>
         ),
       },
       {
-        title: "市场价",
-        dataIndex: "marketPrice",
-        render: (v) => `¥${Number(v).toFixed(2)}`,
+        title: "所属平台",
+        width: 135,
+        render: (_, row) => String(row.platformNames || "").trim()
+          ? <div className="product-platform-lines">{String(row.platformNames).split("、").filter(Boolean).map((name)=><Tag color="blue" key={name}>{name}</Tag>)}</div>
+          : <Typography.Text type="secondary">未关联</Typography.Text>,
       },
       {
-        title: "会员价",
-        dataIndex: "memberPrice",
-        render: (v) => `¥${Number(v).toFixed(2)}`,
+        title: "商品角标",
+        width: 112,
+        render: (_, row) => inlineBadgeProductId===Number(row.id)
+          ? <Select autoFocus open style={{width:112}} value={row.badgeType==="CUSTOM"?row.customBadge:"__UNDEFINED__"} onBlur={()=>setInlineBadgeProductId(undefined)} onChange={(value)=>void saveQuickBadge(row,value)} options={[{value:"__UNDEFINED__",label:"未定义"},...(productBadgeOptions.data||[]).map((item)=>({value:String(item.label),label:item.label}))]}/>
+          : <span className="quick-badge-cell" title="双击修改角标" onDoubleClick={()=>setInlineBadgeProductId(Number(row.id))}>{badgeLabel(row)}</span>,
       },
+      {title:<span className="table-nowrap">经营类型</span>,width:100,dataIndex:"selfOperated",render:(value)=><Tag color={Number(value)===1?"blue":"default"}>{Number(value)===1?"自营":"非自营"}</Tag>},
+      {title:"价格",width:122,render:(_,r)=><div className="product-price-cell"><strong>市场价 ¥{Number(r.marketPrice||0).toFixed(2)}</strong><small>会员价 ¥{Number(r.memberPrice||0).toFixed(2)}</small></div>},
+      {title:"创建 / 更新时间",width:165,render:(_,r)=><div className="product-time-cell"><span>创建 {r.createdAt||"-"}</span><span>更新 {r.updatedAt||"-"}</span></div>},
       {
-        title: "销量",
+        title: <span className="table-nowrap">销量</span>,
+        width: 78,
         dataIndex: "soldCount",
-        render: (v) => `${Number(v || 0)} 件`,
+        render: (v) => <span className="table-nowrap">{Number(v || 0)} 件</span>,
       },
       {
-        title: "订单 / 销售额",
+        title: <span className="table-nowrap">订单 / 销售额</span>,
+        width: 145,
         render: (_, r) =>
-          `${Number(r.orderCount || 0)} 单 / ¥${Number(r.salesAmount || 0).toFixed(2)}`,
+          <span className="table-nowrap">{Number(r.orderCount || 0)} 单 / ¥{Number(r.salesAmount || 0).toFixed(2)}</span>,
       },
       {
-        title: "库存",
+        title: <Tooltip title="前面的数字为可售库存，后面的数字为总库存；可售库存 = 总库存 - 已占用库存">可售 / 总库存</Tooltip>,
+        width: 125,
         render: (_, r) => (
           <Tag color={r.stock - r.reservedStock > 10 ? "green" : "orange"}>
             {r.stock - r.reservedStock} / {r.stock}
@@ -1430,6 +1689,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
       },
       {
         title: "状态",
+        width: 78,
         dataIndex: "status",
         render: (v) => (
           <Tag color={Number(v) === 1 ? "green" : "default"}>
@@ -1439,16 +1699,19 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
       },
       {
         title: "操作",
+        width: 105,
         render: (_, r) => (
-          <Space>
+          <div className="product-actions">
             <Button type="link" onClick={() => show(r)}>
               编辑
             </Button>
             {Number(r.skuCount||1)===1&&<Button type="link" onClick={() => show(r, "stock")}>库存</Button>}
+            <Button type="link" onClick={() => showPlatformAdd(r)}>平台</Button>
+            <Button type="link" onClick={() => showProductAgreements(r)}>协议</Button>
             <Button type="link" onClick={() => void toggle(r)}>
               {Number(r.status) === 1 ? "下架" : "上架"}
             </Button>
-          </Space>
+          </div>
         ),
       },
     ];
@@ -1550,66 +1813,23 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
   if (module === "orders")
     columns = [
       {
-        title: "订单号",
-        dataIndex: "orderNo",
-        render: (v) => <strong>{v}</strong>,
-      },
-      { title: "企业", dataIndex: "enterpriseName" },
-      {
-        title: "商品",
-        render: (_, r) => `${r.itemKinds} 种 / ${r.itemCount} 件`,
-      },
-      {
-        title: "金额",
-        dataIndex: "payableAmount",
-        render: (v) => `¥${Number(v).toFixed(2)}`,
-      },
-      {
-        title: "付款",
-        dataIndex: "paymentStatus",
-        render: (v) => (
-          <Tag color={v === 2 ? "green" : "orange"}>
-            {["待付款", "待确认", "已确认"][v]}
-          </Tag>
-        ),
-      },
-      {
-        title: "状态",
-        dataIndex: "orderStatus",
-        render: (v) => (
-          <Tag color="blue">
-            {["待付款", "待发货", "运输中", "已完成", "已取消", "部分发货"][v]}
-          </Tag>
-        ),
-      },
-      { title: "下单时间", dataIndex: "createdAt", render: dateTime },
-      {
-        title: "操作",
-        render: (_, r) => (
-          <Space>
-            <Button type="link" onClick={() => void orderDetail(r)}>
-              详情
-            </Button>
-            {[0, 2].includes(Number(r.orderStatus)) && (
-              <Button type="link" onClick={() => void advanceOrder(r)}>
-                {Number(r.orderStatus) === 0 ? "确认到账" : "确认完成"}
-              </Button>
-            )}
-            {Number(r.orderStatus) === 3 && Number(r.refundStatus || 0) === 0 && (
-              <Button type="link" danger onClick={() => showRefund(r)}>
-                退款
-              </Button>
-            )}
-            {Number(r.refundStatus || 0) === 1 && <Tag color="red">已退款</Tag>}
-          </Space>
-        ),
+        title:<div className="order-card-column-head"><span>商品信息</span><span>订单金额</span><span>买方信息</span><span>订单状态</span><span>操作</span></div>,
+        render: (_,r) => <article className="admin-order-card">
+          <header><span>订单编号：<Typography.Text copyable>{r.orderNo}</Typography.Text></span><span>{dateTime(r.createdAt)} 下单</span>{r.updatedAt&&<span>{dateTime(r.updatedAt)} 更新</span>}<div>{extraColumn&&r[extraColumn]?<Tag color="blue">{r[extraColumn]}</Tag>:r.agreementName?<Tag color="green">{r.agreementName}</Tag>:<Tag>非协议订单</Tag>}</div></header>
+          <div className="admin-order-card-body">
+            <div className="order-product-list">{mergeOrderListItems(r.items).map((item)=><div className="order-product-row" key={item.skuId||item.skuCode||item.id}>
+              <div className="order-product-image">{item.mainImage?<img src={item.mainImage} alt={item.title}/>:<span>商</span>}</div>
+              <div className="order-product-main"><strong>{item.title}</strong><small>SKU：{item.skuCode}</small></div>
+              <div className="order-product-price"><strong>¥{Number(item.unitPrice||0).toFixed(2)}</strong><small>× {item.quantity}</small><span>小计 ¥{Number(item.totalPrice||0).toFixed(2)}</span></div>
+            </div>)}</div>
+            <div className="order-amount-cell"><strong>¥{Number(r.payableAmount).toFixed(2)}</strong><span>商品：¥{Number(r.itemAmount||0).toFixed(2)}</span><span>运费：¥{Number(r.freightAmount||0).toFixed(2)}</span><small>{mergeOrderListItems(r.items).length} 种 / {r.itemCount} 件</small></div>
+            <div className="order-buyer-cell"><strong>{r.enterpriseName}</strong><span>{r.buyerName||"—"}{r.buyerUsername?`（${r.buyerUsername}）`:""}</span><small>{r.buyerPhone||"未填写联系电话"}</small></div>
+            <div className="order-status-cell"><Tag color={Number(r.orderStatus)===3?"green":Number(r.orderStatus)===4?"default":"blue"}>{["待付款", "待发货", "运输中", "已完成", "已取消", "部分发货"][Number(r.orderStatus)]}</Tag><Tag color={Number(r.paymentStatus)===2?"green":"orange"}>{["待付款", "待确认", "已确认"][Number(r.paymentStatus)]}</Tag>{Number(r.refundStatus||0)===1&&<Tag color="red">已退款</Tag>}</div>
+            <div className="order-card-actions"><Button type="link" onClick={()=>void orderDetail(r)}>订单详情</Button>{[0,2].includes(Number(r.orderStatus))&&<Button type={Number(r.orderStatus)===0?"primary":"link"} onClick={()=>void advanceOrder(r)}>{Number(r.orderStatus)===0?"确认到账":"确认完成"}</Button>}{Number(r.orderStatus)===3&&Number(r.refundStatus||0)===0&&<Button type="link" danger onClick={()=>showRefund(r)}>退款</Button>}</div>
+          </div>
+        </article>,
       },
     ];
-  if(module === "orders" && extraColumn) columns.splice(2,0,{
-    title: extraColumn==="agreementName"?"采购协议":"关联平台",
-    dataIndex: extraColumn,
-    render: (value) => value || "—",
-  });
   const defaultListTitle =
     module === "products"
       ? "商品列表"
@@ -1637,18 +1857,94 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
         }
       >
         <Table
+          className={module==="orders"?"order-card-table":undefined}
           rowKey="id"
           loading={rows.loading}
           dataSource={rows.data}
           columns={columns}
-          scroll={{ x: 1000 }}
-          server={serverEnabled ? {...pagedRows.server,statusOptions:module === "orders" ? [
+          scroll={{ x: module==="products" ? 1550 : module==="orders" ? 1320 : 1000 }}
+          expandable={module==="products"?{
+            rowExpandable:(record)=>Number(record.skuCount)>1,
+            expandedRowRender:(record)=>{
+              const skus=parseTemplateList(record.skus);
+              return <div className="product-sku-inline-list">{skus.map((sku:Row)=>{
+                const spec=typeof sku.specValues==="string"?JSON.parse(sku.specValues||"{}"):sku.specValues||{};
+                const specification=Object.entries(spec).map(([key,value])=>`${key}：${value}`).join("；")||"标准规格";
+                const available=Number(sku.stock||0)-Number(sku.reservedStock||0);
+                return <div className="product-sku-inline-row" key={sku.id}>
+                  <span className="sku-list-image">{(sku.skuImage||record.mainImage)?<img src={sku.skuImage||record.mainImage} alt={sku.skuTitle||record.title}/>:"无图"}</span>
+                  <div className="product-sku-inline-main"><strong>{sku.skuTitle||record.title}</strong><small><b>SKU编码：</b>{sku.skuCode||"-"}</small><small><b>销售规格：</b>{specification}</small></div>
+                  <div className="product-sku-inline-metric"><small>市场价</small><strong>¥{Number(sku.marketPrice||0).toFixed(2)}</strong><span>会员价 ¥{Number(sku.memberPrice||0).toFixed(2)}</span></div>
+                  <div className="product-sku-inline-metric"><small>可售 / 总库存</small><strong>{available} / {Number(sku.stock||0)}</strong><span>占用 {Number(sku.reservedStock||0)}</span></div>
+                  <div className="product-sku-inline-time"><span>创建 {sku.createdAt||"-"}</span><span>更新 {sku.updatedAt||"-"}</span></div>
+                  <div className="product-sku-inline-status"><Tag color={Number(sku.status)===1?"green":"default"}>{Number(sku.status)===1?"启用":"停用"}</Tag><Button type="link" size="small" onClick={()=>void toggleSkuStatus(record,sku)}>{Number(sku.status)===1?"停用":"启用"}</Button></div>
+                </div>;
+              })}</div>;
+            },
+          }:undefined}
+          server={{...pagedRows.server,statusOptions:module === "orders" ? [
             {label:"待付款",value:"0"},{label:"待发货",value:"1"},{label:"运输中",value:"2"},{label:"已完成",value:"3"},{label:"已取消",value:"4"},{label:"部分发货",value:"5"},
           ] : module === "agreements" ? [{label:"生效中",value:"1"},{label:"已停用",value:"2"}]
-            : module === "products" ? [{label:"在售",value:"1"},{label:"草稿",value:"0"},{label:"已下架",value:"2"}] : undefined} : undefined}
-          searchPlaceholder={module === "enterprises" ? "搜索企业名称、信用代码、联系人或手机" : module === "agreements" ? "搜索协议名称、协议号或签约企业" : module === "orders" ? "搜索订单号、企业、协议或平台" : undefined}
+            : module === "products" ? [{label:"在售",value:"1"},{label:"草稿",value:"0"},{label:"已下架",value:"2"}] : undefined}}
+          searchPlaceholder={module === "enterprises" ? "搜索企业名称、信用代码、联系人或手机" : module === "agreements" ? "搜索协议名称、协议号或签约企业" : module === "orders" ? "搜索订单号、企业、下单用户、手机、协议或平台" : undefined}
+          toolbarExtra={module === "products" ? <>
+            <Select allowClear showSearch optionFilterProp="label" value={productCategoryFilter} onChange={setProductCategoryFilter} placeholder="全部分类" style={{width:190}}
+              options={(categories.data||[]).filter((item)=>Number(item.level)===3&&Number(item.status)===1).map((item)=>({value:Number(item.id),label:`${item.parentName?`${item.parentName} / `:""}${item.name}`}))}/>
+            <Select allowClear showSearch optionFilterProp="label" value={productBrandFilter} onChange={setProductBrandFilter} placeholder="全部品牌" style={{width:145}}
+              options={(brands.data||[]).filter((item)=>Number(item.status)===1).map((item)=>({value:Number(item.id),label:item.name}))}/>
+            <Select allowClear value={productSelfFilter} onChange={setProductSelfFilter} placeholder="全部经营类型" style={{width:135}} options={[{value:1,label:"自营"},{value:0,label:"非自营"}]}/>
+            <span className="product-stock-filter"><InputNumber min={0} precision={0} value={productStockMin} onChange={setProductStockMin} placeholder="最低库存"/><span>至</span><InputNumber min={0} precision={0} value={productStockMax} onChange={setProductStockMax} placeholder="最高库存"/></span>
+            <Select allowClear value={badgeFilter} onChange={setBadgeFilter} placeholder="全部角标" style={{width:135}} options={[
+              {value:"AUTO",label:"自动"},{value:"AGREEMENT",label:"协议专属"},{value:"PLATFORM",label:"指定平台"},{value:"CUSTOM",label:"自定义角标"},
+            ]}/>
+          </> : undefined}
+          selectionActions={module === "products" ? (selected, clearSelection) => <>
+            <Button disabled={!selected.length} onClick={() => void batchStatus(selected, 1, clearSelection)}>批量上架</Button>
+            <Button disabled={!selected.length} onClick={() => void batchStatus(selected, 2, clearSelection)}>批量下架</Button>
+            <Button disabled={!selected.length} onClick={() => void batchSelfOperated(selected,1,clearSelection)}>设为自营</Button>
+            <Button disabled={!selected.length} onClick={() => void batchSelfOperated(selected,0,clearSelection)}>设为非自营</Button>
+            <Button disabled={!selected.length} onClick={() => showBatchStock(selected)}>批量改库存</Button>
+          </> : undefined}
         />
       </Card>
+      <Modal open={Boolean(badgeProduct)} title={`角标配置 · ${badgeProduct?.title || ""}`} onCancel={() => setBadgeProduct(undefined)} onOk={() => void saveBadgeConfig()}>
+        <Form form={listBadgeForm} layout="vertical">
+          <Form.Item name="badgeType" label="角标类型" rules={[{required:true}]}><Select options={[
+            {value:"NONE",label:"自动"},{value:"AGREEMENT",label:"协议专属"},{value:"PLATFORM",label:"指定平台"},{value:"CUSTOM",label:"自定义角标"},
+          ]} /></Form.Item>
+          {listBadgeType === "PLATFORM" && <Form.Item name="badgePlatformId" label="角标平台" rules={[{required:true,message:"请选择商品已关联的平台"}]}>
+            <Select showSearch optionFilterProp="label" options={(platforms.data || []).filter((platform) => Number(platform.status) === 1 &&
+              productPlatformRelations(badgeProduct || {}).some((relation) => Number(relation.platformId) === Number(platform.id)))
+              .map((platform) => ({value:Number(platform.id),label:`${platform.title}（显示：${platform.pricePrefix || platform.title}${String(platform.pricePrefix || platform.title).endsWith("平台") ? "" : "平台"}）`}))} />
+          </Form.Item>}
+          {listBadgeType === "CUSTOM" && <Form.Item name="customBadge" label="自定义角标" rules={[
+            {required:true,message:"请输入自定义角标"},{pattern:/^[\u3400-\u9fff]{2,5}$/,message:"请输入2至5个汉字"},
+          ]}><Input maxLength={5} showCount placeholder="2～5个汉字" /></Form.Item>}
+          {listBadgeType === "AGREEMENT" && <Alert type="info" showIcon message="仅当当前登录用户所属企业命中该商品协议价格时显示“协议专属”。" />}
+        </Form>
+      </Modal>
+      <Modal open={batchStockRows.length > 0} title={`批量修改库存（${batchStockRows.length} 个商品）`} onCancel={() => setBatchStockRows([])} onOk={() => void saveBatchStock()}>
+        <Alert type="info" showIcon message="将为所选商品的全部 SKU 设置相同库存；库存不能低于已占用库存。" style={{marginBottom:16}} />
+        <Form form={batchStockForm} layout="vertical"><Form.Item name="stock" label="新库存" rules={[{required:true,message:"请输入库存"}]}><InputNumber min={0} precision={0} style={{width:"100%"}} /></Form.Item></Form>
+      </Modal>
+      <Modal open={Boolean(platformProduct)} title={`平台 · ${platformProduct?.title || ""}`} onCancel={() => setPlatformProduct(undefined)} onOk={() => void savePlatformAdd()}>
+        <Form form={platformForm} layout="vertical">
+          <Form.Item name="platformId" label="采购平台" rules={[{required:true,message:"请选择平台"}]}><Select showSearch optionFilterProp="label" options={(platforms.data || []).filter(row => Number(row.status) === 1).map(row => ({value:Number(row.id),label:row.title}))} /></Form.Item>
+          <Form.Item name="skuId" label="商品 SKU" rules={[{required:true,message:"请选择 SKU"}]}><Select showSearch optionFilterProp="label" options={(platformProduct ? (typeof platformProduct.skus === "string" ? JSON.parse(platformProduct.skus || "[]") : platformProduct.skus || []) : []).map((sku:Row) => ({value:Number(sku.id),label:`${sku.skuCode} · ¥${Number(sku.memberPrice).toFixed(2)}`}))} /></Form.Item>
+          <Form.Item name="platformPrice" label="平台售价" rules={[{required:true,message:"请输入平台售价"}]}><InputNumber min={0} precision={2} prefix="¥" style={{width:"100%"}} /></Form.Item>
+          <Form.Item name="productUrl" label="平台商品链接"><Input placeholder="可选，填写后客户端可跳转" /></Form.Item>
+          <Form.Item name="listingStatus" label="平台状态" rules={[{required:true}]}><Select options={[{value:1,label:"上架"},{value:0,label:"下架"}]} /></Form.Item>
+        </Form>
+      </Modal>
+      <Modal open={Boolean(agreementProduct)} title={`协议 · ${agreementProduct?.title || ""}`} onCancel={() => setAgreementProduct(undefined)} onOk={() => void saveProductAgreements()}>
+        <Alert type="info" showIcon message="可同时关联多个协议；新增关联默认使用各 SKU 的会员价作为协议价，已有协议价不会被覆盖。" style={{marginBottom:16}} />
+        <Form form={productAgreementForm} layout="vertical">
+          <Form.Item name="agreementIds" label="关联协议">
+            <Select mode="multiple" allowClear showSearch optionFilterProp="label" placeholder="请选择一个或多个协议"
+              options={(agreementOptions.data||[]).filter((row)=>Number(row.status)===1).map((row)=>({value:Number(row.id),label:row.name}))} />
+          </Form.Item>
+        </Form>
+      </Modal>
       <Modal
         open={open}
         title={
@@ -1663,7 +1959,16 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
         keyboard={!saving}
         width={module === "products" && mode !== "stock" ? 920 : 760}
       >
-        <Form form={form} layout="vertical" className="two-column-form">
+        <Form form={form} layout="vertical" className="two-column-form" onValuesChange={(changed,values)=>{
+          if(module!=="products")return;
+          const specificationChanged=Array.isArray(changed.skus)&&changed.skus.some((sku:Row)=>sku&&Object.prototype.hasOwnProperty.call(sku,"specification"));
+          if("title" in changed||specificationChanged){
+            (values.skus||[]).forEach((sku:Row,index:number)=>{
+              const skuTitle=[values.title,String(sku.specification||"").trim()].filter(Boolean).join(" ");
+              if(skuTitle&&sku.skuTitle!==skuTitle)form.setFieldValue(["skus",index,"skuTitle"],skuTitle);
+            });
+          }
+        }}>
           {mode === "stock" ? (
             <Form.Item name="stock" label="总库存" rules={[{ required: true }]}>
               <InputNumber min={0} style={{ width: "100%" }} />
@@ -1671,12 +1976,19 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
           ) : module === "products" ? (
             <Tabs className="full" destroyOnHidden={false} activeKey={productTab} onChange={setProductTab} items={[
               { key: "basic", label: "基本信息", children: <div className="two-column-form">
-                <Form.Item name="title" label="商品标题" className="full" rules={[{ required: true }]}><Input /></Form.Item>
-                <Form.Item name="categoryId" label="三级分类" rules={[{ required: true, message: "请选择三级分类" }]}><Select options={(categories.data || []).filter((x) => Number(x.level) === 3 && Number(x.status) === 1).map((x) => ({ value: x.id, label: `${x.parentName || ""} / ${x.name}` }))} /></Form.Item>
-                <Form.Item name="brandId" label="品牌" rules={[{required:true,message:"请选择品牌"}]}><Select loading={brands.loading} showSearch optionFilterProp="label" options={(brands.data||[]).filter((x)=>Number(x.status)===1).map((x)=>({ value:x.id,label:x.name }))} placeholder="请选择已启用品牌" /></Form.Item>
-                <Form.Item name="selfOperated" label="经营类型" rules={[{required:true,message:"请选择经营类型"}]}><Radio.Group options={[{value:1,label:"自营"},{value:0,label:"非自营"}]} /></Form.Item>
-                <Form.Item name="status" label="状态"><Select options={[{ value: 1, label: "在售" },{ value: 0, label: "草稿" },{ value: 2, label: "下架" }]} /></Form.Item>
-                <Form.Item name="summary" label="商品摘要" className="full"><Input.TextArea rows={3} /></Form.Item>
+                <Form.Item name="categoryId" label="分类" className="full" rules={[{ required: true, message: "请选择三级分类" }]}><Select options={(categories.data || []).filter((x) => Number(x.level) === 3 && Number(x.status) === 1).map((x) => ({ value: x.id, label: `${x.parentName || ""} / ${x.name}` }))} /></Form.Item>
+                <div className="full product-brand-model-row">
+                  <Form.Item name="brandId" label="品牌" rules={[{required:true,message:"请选择品牌"}]}><Select loading={brands.loading} showSearch optionFilterProp="label" options={(brands.data||[]).filter((x)=>Number(x.status)===1).map((x)=>({ value:x.id,label:x.name }))} placeholder="请选择已启用品牌" /></Form.Item>
+                  <Form.Item name="model" label="型号"><Input placeholder="请输入商品型号" /></Form.Item>
+                  <Form.Item name="selfOperated" label="是否自营" getValueProps={(value)=>({checked:Number(value)===1})} getValueFromEvent={(checked)=>checked?1:0}><Switch checkedChildren="自营" unCheckedChildren="非自营" /></Form.Item>
+                </div>
+                <Form.Item name="title" label="商品标题" className="full" rules={[{ required: true, message:"请输入商品标题" }]}><Input placeholder="请输入完整商品标题" /></Form.Item>
+                <Form.Item name="status" hidden><Input /></Form.Item>
+                <Form.Item name="badgeType" hidden><Input /></Form.Item>
+                <Form.Item name="badgePlatformId" hidden><Input /></Form.Item>
+                <Form.Item name="customBadge" hidden><Input /></Form.Item>
+                <Form.Item name="mainImage" label="商品主图" className="full" rules={[{ required: true, message: "请上传商品主图" }]}><ProductImageUpload /></Form.Item>
+                <Form.Item name="gallery" label="商品轮播图" className="full"><ProductImageUpload multiple /></Form.Item>
               </div> },
               { key: "sales", label: "规格与 SKU", children: <div className="full">
                 <Alert type="info" showIcon message="每行代表一个可独立销售的 SKU。规格格式示例：颜色=黑色；容量=256GB。SKU 编码留空时由系统自动生成。" />
@@ -1686,23 +1998,23 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
                       extra={fields.length>1?<Button type="link" danger onClick={()=>remove(name)}>移除</Button>:null}>
                       <div className="two-column-form">
                         <Form.Item name={[name,"id"]} hidden><Input /></Form.Item>
-                        <Form.Item name={[name,"skuCode"]} label="SKU 编码"><Input placeholder="留空自动生成" /></Form.Item>
-                        <Form.Item name={[name,"specification"]} label="销售规格" rules={[{required:true,message:"请填写销售规格"}]}><Input placeholder="颜色=黑色；容量=256GB" /></Form.Item>
-                        <Form.Item name={[name,"marketPrice"]} label="市场价" rules={[{required:true}]}><InputNumber min={0} precision={2} style={{width:"100%"}} /></Form.Item>
-                        <Form.Item name={[name,"memberPrice"]} label="会员价" rules={[{required:true}]}><InputNumber min={0} precision={2} style={{width:"100%"}} /></Form.Item>
-                        <Form.Item name={[name,"stock"]} label="库存" rules={[{required:true}]}><InputNumber min={0} style={{width:"100%"}} /></Form.Item>
-                        <Form.Item name={[name,"status"]} label="状态" rules={[{required:true}]}><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]} /></Form.Item>
-                        <Form.Item name={[name,"skuImage"]} label="SKU 图片" className="full"><ProductImageUpload /></Form.Item>
+                        <Form.Item name={[name,"skuCode"]} hidden><Input /></Form.Item>
+                        <Form.Item name={[name,"skuTitle"]} label="SKU 标题" className="full" extra="默认按“商品标题 + 销售规格”生成，可继续修改。"><Input /></Form.Item>
+                        <Form.Item name={[name,"specification"]} label="销售规格" className="full" rules={[{required:true,message:"请填写销售规格"}]}><Input placeholder="规格=标准；或 颜色=黑色；容量=256GB" /></Form.Item>
+                        <div className="full sku-price-stock-row">
+                          <Form.Item name={[name,"marketPrice"]} label="市场价" rules={[{required:true}]}><InputNumber min={0} precision={2} style={{width:"100%"}} /></Form.Item>
+                          <Form.Item name={[name,"memberPrice"]} label="会员价" rules={[{required:true}]}><InputNumber min={0} precision={2} style={{width:"100%"}} /></Form.Item>
+                          <Form.Item name={[name,"stock"]} label={<span>库存 <Tooltip title="默认库存请在：系统设置 → 基本设置 → 库存配置 中设置"><span style={{cursor:"help",color:"#1677ff"}}>ⓘ</span></Tooltip></span>} rules={[{required:true}]}><InputNumber min={0} style={{width:"100%"}} /></Form.Item>
+                        </div>
+                        {editing ? <Form.Item name={[name,"status"]} label="SKU 状态" rules={[{required:true}]}><Select options={[{value:1,label:"开启"},{value:0,label:"停用"}]} /></Form.Item> : <Form.Item name={[name,"status"]} hidden><Input /></Form.Item>}
+                        <Form.Item name={[name,"skuImage"]} label="SKU 主图" className="full" extra={name===0?"主 SKU 未上传主图时，自动使用 SPU 商品主图。":"建议上传与当前销售规格一致的正方形主图。"}><ProductImageUpload /></Form.Item>
+                        <Form.Item name={[name,"skuGallery"]} label="SKU 轮播图" className="full" extra="最多上传6张，可拖动调整顺序。"><ProductImageUpload multiple /></Form.Item>
                       </div>
                     </Card>)}
-                    <Button block type="dashed" style={{marginTop:12}} onClick={()=>add({skuCode:"",specification:"",skuImage:"",marketPrice:0,memberPrice:0,stock:0,status:1})}>＋ 添加 SKU</Button>
+                    <Button block type="dashed" style={{marginTop:12}} onClick={()=>add({skuCode:"",skuTitle:"",specification:"",skuImage:"",skuGallery:"",marketPrice:0,memberPrice:0,stock:defaultSkuStock,status:1})}>＋ 添加 SKU</Button>
                     <Form.ErrorList errors={errors}/>
                   </>}
                 </Form.List>
-              </div> },
-              { key: "images", label: "图片素材", children: <div className="two-column-form">
-                <Form.Item name="mainImage" label="商品主图" className="full" rules={[{ required: true, message: "请上传商品主图" }]}><ProductImageUpload /></Form.Item>
-                <Form.Item name="gallery" label="商品配图" className="full"><ProductImageUpload multiple /></Form.Item>
               </div> },
               { key: "attributes", label: `规格属性${attributeTemplate.length ? `（${attributeTemplate.length}）` : ""}`, children: <div className="two-column-form">
                 <div className="full"><Alert type="info" showIcon message="以下字段根据所选三级分类生成；标有“继承自上级分类”的属性由一级或二级分类自动提供。" /></div>
@@ -1711,15 +2023,17 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
                   const name = ["attributeValues", String(attribute.id)];
                   const rules = Number(attribute.requiredFlag) === 1 ? [{ required: true, message: `请填写${attribute.name}` }] : [];
                   const options = (attribute.options || []).filter((x: Row) => Number(x.status) === 1).map((x: Row) => ({ label: x.optionLabel, value: Number(x.id) }));
-                  const label = `${attribute.name}${attribute.unit ? `（${attribute.unit}）` : ""}${Number(attribute.inheritedLevel) > 0 ? " · 继承自上级分类" : ""}`;
+                  const scopeLabel = attribute.scopeSource === "GLOBAL" ? " · 全局通用" : Number(attribute.inheritedLevel) > 0 ? " · 继承自上级分类" : "";
+                  const label = `${attribute.name}${attribute.unit ? `（${attribute.unit}）` : ""}${scopeLabel}`;
                   return <Form.Item key={attribute.id} name={name} label={label} rules={rules}>{attribute.inputType === "NUMBER" ? <InputNumber style={{width:"100%"}} /> : attribute.inputType === "SELECT" ? <Select options={options} allowClear /> : attribute.inputType === "RADIO" ? <Radio.Group options={options} /> : attribute.inputType === "CHECKBOX" ? <Checkbox.Group options={options} /> : attribute.inputType === "SWITCH" ? <Select options={[{label:"是",value:"是"},{label:"否",value:"否"}]} /> : attribute.inputType === "DATE" ? <Input type="date" /> : <Input />}</Form.Item>;
                 })}
-                <Form.Item name="attributes" label="历史字符串属性（兼容）" className="full"><Input.TextArea rows={2} placeholder="仅用于旧商品兼容，新商品请使用结构化属性" /></Form.Item>
               </div> },
               { key: "detail", label: "详情与服务", children: <div className="two-column-form">
-                <Form.Item name="detailHtml" label="富文本详情" className="full"><RichTextEditor /></Form.Item>
-                <Form.Item name="deliveryDescription" label="配送说明" className="full"><Input.TextArea rows={3} placeholder="填写配送范围、预计时效、运费及安装等说明" /></Form.Item>
-                <Form.Item name="afterSalesHtml" label="售后政策" className="full"><Input.TextArea rows={4} placeholder="填写退换货、质保、维修及售后联系方式，支持 HTML" /></Form.Item>
+                <Form.Item name="serviceOptionIds" label={<span>商品服务 <Tooltip title="新建商品默认全选；服务选项在系统设置 → 基本设置 → 商品服务中维护。"><span className="form-help-icon">?</span></Tooltip></span>} className="full"><Checkbox.Group options={(productServices.data||[]).map((item)=>({value:Number(item.id),label:item.label}))}/></Form.Item>
+                <Form.Item name="summary" label="商品摘要" className="full product-summary-field"><Input.TextArea autoSize={{minRows:1,maxRows:3}} /></Form.Item>
+                <Form.Item name="detailHtml" label="商品详情" className="full product-detail-editor"><RichTextEditor /></Form.Item>
+                <Form.Item name="deliveryDescription" label="配送说明模板"><Select allowClear placeholder="请选择配送说明模板" options={deliveryTemplates.map((item)=>({value:String(item.content||""),label:`${item.title}${item.isDefault?"（默认）":""}`}))}/></Form.Item>
+                <Form.Item name="afterSalesHtml" label="售后政策模板"><Select allowClear placeholder="请选择售后政策模板" options={afterSalesTemplates.map((item)=>({value:String(item.content||""),label:`${item.title}${item.isDefault?"（默认）":""}`}))}/></Form.Item>
               </div> },
             ]} />
           ) : module === "enterprises" ? (
@@ -2065,8 +2379,12 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
                 {
                   key: "buyer",
                   label: "采购人",
-                  children: detail.order.buyerName,
+                  children: `${detail.order.buyerName||"—"}${detail.order.buyerUsername?`（${detail.order.buyerUsername}）`:""}`,
                 },
+                { key: "phone", label: "联系电话", children: detail.order.buyerPhone||"—" },
+                { key: "agreement", label: "采购协议", children: detail.order.agreementName||"非协议订单" },
+                { key: "itemAmount", label: "商品金额", children: `¥${Number(detail.order.itemAmount||0).toFixed(2)}` },
+                { key: "freightAmount", label: "运费", children: `¥${Number(detail.order.freightAmount||0).toFixed(2)}` },
                 {
                   key: "amount",
                   label: "应付金额",
@@ -2077,6 +2395,8 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
                   label: "下单时间",
                   children: dateTime(detail.order.createdAt),
                 },
+                { key: "updatedAt", label: "最后更新时间", children: dateTime(detail.order.updatedAt) },
+                { key: "paymentDueAt", label: "付款截止时间", children: detail.order.paymentDueAt?dateTime(detail.order.paymentDueAt):"—" },
                 {
                   key: "status",
                   label: "付款状态",
@@ -2131,11 +2451,12 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
                   title: "配送地址",
                   dataIndex: "addressSnapshot",
                   width: 310,
-                  render: (value: any) => (
-                    <div className="admin-delivery-address">
-                      {deliveryAddress(value)}
-                    </div>
-                  ),
+                  render: (value: any, row:Row, index:number) => {
+                    const addressKey=String(row.subOrderNo||JSON.stringify(value||{}));
+                    const sameRows=(detail.items||[]).filter((item:Row)=>String(item.subOrderNo||JSON.stringify(item.addressSnapshot||{}))===addressKey);
+                    const firstIndex=(detail.items||[]).findIndex((item:Row)=>String(item.subOrderNo||JSON.stringify(item.addressSnapshot||{}))===addressKey);
+                    return {children:firstIndex===index?<div className="admin-delivery-address"><strong>同址配送 · {sameRows.length} 款商品</strong><span>{deliveryAddress(value)}</span><small>配送单：{row.subOrderNo}</small></div>:null,props:{rowSpan:firstIndex===index?sameRows.length:0}};
+                  },
                 },
                 {
                   title: "发货状态",
@@ -2300,9 +2621,11 @@ function AttributeTemplates() {
   const [editing, setEditing] = useState<Row>();
   const [optionOwner, setOptionOwner] = useState<Row>();
   const [optionEditing, setOptionEditing] = useState<Row>();
+  const globalFlag = Form.useWatch("globalFlag", form);
   const save = async () => {
     try {
       const values = await form.validateFields();
+      if (Number(values.globalFlag) === 1) values.categoryIds = [];
       await rootMutation(`/api/admin/business/attributes${editing ? `/${editing.id}` : ""}`, {
         method: editing ? "PUT" : "POST",
         body: JSON.stringify(values),
@@ -2319,18 +2642,32 @@ function AttributeTemplates() {
       message.success("选项已保存"); setOptionEditing(undefined); optionForm.resetFields(); void rows.refresh();
     } catch (error) { if (error instanceof Error) message.error(error.message); }
   };
+  const removeAttribute = (row: Row) => modal.confirm({
+    title: `删除属性模板“${row.name}”？`,
+    content: "删除后将取消其分类关联；已被商品使用的属性模板不能删除，请先停用。",
+    okText: "确认删除",
+    cancelText: "取消",
+    okButtonProps: { danger: true },
+    onOk: async () => {
+      try {
+        await rootMutation(`/api/admin/business/attributes/${row.id}`, { method: "DELETE" });
+        message.success("属性模板已删除");
+        void rows.refresh();
+      } catch (error) { message.error((error as Error).message); }
+    },
+  });
   const columns: ColumnsType<Row> = [
     { title: "属性", render: (_, row) => <><strong>{row.name}</strong><br/><small>{row.code}</small></> },
     { title: "分组", dataIndex: "groupName" },
     { title: "用途", dataIndex: "attributeType", render: (v) => ({ BASIC:"基础属性",SPEC:"销售规格",EXTENDED:"扩展属性" }[v as string] || v) },
     { title: "输入方式", dataIndex: "inputType", render: (v) => ({ TEXT:"文本",NUMBER:"数字",SELECT:"下拉单选",RADIO:"单选",CHECKBOX:"多选",SWITCH:"开关",DATE:"日期" }[v as string] || v) },
     { title: "规则", render: (_,r) => <Space wrap>{Number(r.requiredFlag)===1&&<Tag color="red">必填</Tag>}{Number(r.filterable)===1&&<Tag color="blue">可筛选</Tag>}{Number(r.visibleFlag)===1&&<Tag color="green">前台展示</Tag>}</Space> },
-    { title: "关联分类", render: (_,r) => `${r.categoryIds?.length || 0} 个` },
-    { title: "操作", render: (_,r) => <Space><Button type="link" onClick={()=>{setEditing(r);form.setFieldsValue({...r,categoryIds:(r.categoryIds||[]).map(Number)});setOpen(true);}}>编辑</Button>{["SELECT","RADIO","CHECKBOX"].includes(r.inputType)&&<Button type="link" onClick={()=>{setOptionOwner(r);setOptionEditing(undefined);optionForm.resetFields();}}>管理选项</Button>}</Space> },
+    { title: "适用范围", render: (_,r) => Number(r.globalFlag)===1 ? <Tag color="purple">全局通用</Tag> : <><Tag color="blue">分类通用</Tag><small>{r.categoryIds?.length || 0} 个直接关联</small></> },
+    { title: "操作", render: (_,r) => <Space><Button type="link" onClick={()=>{setEditing(r);form.setFieldsValue({...r,categoryIds:(r.categoryIds||[]).map(Number)});setOpen(true);}}>编辑</Button>{["SELECT","RADIO","CHECKBOX"].includes(r.inputType)&&<Button type="link" onClick={()=>{setOptionOwner(r);setOptionEditing(undefined);optionForm.resetFields();}}>管理选项</Button>}<Button type="link" danger onClick={()=>removeAttribute(r)}>删除</Button></Space> },
   ];
   return <>
-    <Card title="属性模板列表" extra={<Button type="primary" onClick={()=>{setEditing(undefined);form.resetFields();form.setFieldsValue({groupName:"规格参数",attributeType:"BASIC",inputType:"TEXT",requiredFlag:0,filterable:0,searchable:0,visibleFlag:1,allowCustom:0,sortOrder:0,status:1});setOpen(true);}}>新增属性</Button>}>
-      <Alert type="info" showIcon message="属性会从一级分类向下继承；下级分类可以追加自己的属性。已被商品使用的属性只能停用。" style={{marginBottom:16}} />
+    <Card title="规格属性管理" extra={<Button type="primary" onClick={()=>{setEditing(undefined);form.resetFields();form.setFieldsValue({groupName:"规格参数",attributeType:"BASIC",inputType:"TEXT",requiredFlag:0,filterable:0,searchable:0,visibleFlag:1,allowCustom:0,globalFlag:0,sortOrder:0,status:1});setOpen(true);}}>新增属性</Button>}>
+      <Alert type="info" showIcon message="属性适用范围说明" description={<div>全局通用：适用于全部商品分类；分类通用：关联一级分类后由其二、三级分类继承，关联二级分类后由其三级分类继承，关联三级分类时仅当前分类使用。相同含义的属性请复用已有模板并关联分类，不要重复创建；下级分类仍可追加自己的专用属性。已被商品使用的属性只能停用。</div>} style={{marginBottom:16}} />
       <Table rowKey="id" loading={rows.loading} dataSource={rows.data || []} columns={columns} server={rows.server} searchPlaceholder="搜索属性名称、编码、分组或输入方式" />
     </Card>
     <Modal open={open} title={`${editing?"编辑":"新增"}属性`} onCancel={()=>setOpen(false)} onOk={save} width={760}>
@@ -2341,7 +2678,8 @@ function AttributeTemplates() {
         <Form.Item name="attributeType" label="属性用途" rules={[{required:true}]}><Radio.Group options={[{label:"基础属性",value:"BASIC"},{label:"销售规格",value:"SPEC"},{label:"扩展属性",value:"EXTENDED"}]} /></Form.Item>
         <Form.Item name="inputType" label="输入组件" rules={[{required:true}]}><Select options={[{label:"文本",value:"TEXT"},{label:"数字",value:"NUMBER"},{label:"下拉单选",value:"SELECT"},{label:"Radio单选",value:"RADIO"},{label:"Checkbox多选",value:"CHECKBOX"},{label:"开关",value:"SWITCH"},{label:"日期",value:"DATE"}]} /></Form.Item>
         <Form.Item name="unit" label="单位"><Input placeholder="GB、W、米、个月" /></Form.Item>
-        <Form.Item name="categoryIds" label="适用分类" className="full" extra="可留空；留空时保留属性模板，但不关联任何分类"><Select mode="multiple" showSearch optionFilterProp="label" options={(categories.data||[]).map(c=>({value:Number(c.id),label:`${"　".repeat(Number(c.level)-1)}${c.name}（${c.level}级）`}))} /></Form.Item>
+        <Form.Item name="globalFlag" label="适用范围" className="full" rules={[{required:true}]} extra={Number(globalFlag)===1 ? "自动应用到全部分类，无需逐个关联" : "分类属性会自动向其下级分类继承"}><Radio.Group options={[{label:"全局通用",value:1},{label:"指定分类",value:0}]} /></Form.Item>
+        {Number(globalFlag)!==1 && <Form.Item name="categoryIds" label="适用分类" className="full" extra="可选择一个或多个分类；选择上级分类即可覆盖其全部下级分类"><Select mode="multiple" showSearch optionFilterProp="label" options={(categories.data||[]).map(c=>({value:Number(c.id),label:`${"　".repeat(Number(c.level)-1)}${c.name}（${c.level}级）`}))} /></Form.Item>}
         <Form.Item name="requiredFlag" label="是否必填"><Radio.Group options={[{label:"必填",value:1},{label:"选填",value:0}]} /></Form.Item>
         <Form.Item name="visibleFlag" label="前台展示"><Radio.Group options={[{label:"展示",value:1},{label:"隐藏",value:0}]} /></Form.Item>
         <Form.Item name="filterable" label="参与筛选"><Radio.Group options={[{label:"是",value:1},{label:"否",value:0}]} /></Form.Item>
@@ -2366,13 +2704,16 @@ function Categories() {
   const [form] = Form.useForm();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Row>();
+  const [childParent,setChildParent]=useState<Row>();
   const [attributeOwner, setAttributeOwner] = useState<Row>();
   const [selectedAttributeIds, setSelectedAttributeIds] = useState<number[]>([]);
   const [attributeAddOpen, setAttributeAddOpen] = useState(false);
   const [pendingAttributeIds, setPendingAttributeIds] = useState<number[]>([]);
+  const [expandedCategoryKeys,setExpandedCategoryKeys]=useState<Key[]>([]);
   const associatedAttributePage = usePagedLoad(`/api/admin/business/attributes?categoryId=${attributeOwner?.id || 0}&associated=true`,10,[attributeOwner?.id],Boolean(attributeOwner));
   const unassociatedAttributePage = usePagedLoad(`/api/admin/business/attributes?categoryId=${attributeOwner?.id || 0}&associated=false`,10,[attributeOwner?.id],Boolean(attributeOwner));
   const show = (row?: Row) => {
+    setChildParent(undefined);
     setEditing(row);
     form.resetFields();
     form.setFieldsValue(
@@ -2380,6 +2721,13 @@ function Categories() {
         ? { ...row, parentId: row.parentId || undefined }
         : { level: 1, sortOrder: 0, status: 1 },
     );
+    setOpen(true);
+  };
+  const showChild=(parent:Row)=>{
+    if(Number(parent.level)>=3){message.warning("商品分类最多三级");return;}
+    const siblings=(rows.data||[]).filter((row)=>Number(row.parentId)===Number(parent.id));
+    setEditing(undefined);setChildParent(parent);form.resetFields();
+    form.setFieldsValue({level:Number(parent.level)+1,parentId:Number(parent.id),sortOrder:(siblings.length+1)*10,status:1});
     setOpen(true);
   };
   const save = async () => {
@@ -2398,6 +2746,7 @@ function Categories() {
         throw new Error(data.detail || "分类保存失败");
       }
       setOpen(false);
+      setChildParent(undefined);
       message.success("分类已保存");
       void rows.refresh();
     } catch (error) {
@@ -2445,6 +2794,27 @@ function Categories() {
       .map((item) => ({ ...item, children: item.children.length ? sort(item.children) : undefined }));
     return sort(roots);
   }, [rows.data]);
+  useEffect(()=>{
+    setExpandedCategoryKeys((current)=>current.length?current:(rows.data||[]).filter((row)=>Number(row.childCount)>0).map((row)=>row.id));
+  },[rows.data]);
+  const moveCategory=async(row:Row,direction:-1|1)=>{
+    const siblings=(rows.data||[]).filter((item)=>Number(item.parentId||0)===Number(row.parentId||0))
+      .sort((a,b)=>Number(a.sortOrder||0)-Number(b.sortOrder||0)||Number(a.id)-Number(b.id));
+    const index=siblings.findIndex((item)=>Number(item.id)===Number(row.id));
+    const target=index+direction;if(index<0||target<0||target>=siblings.length)return;
+    [siblings[index],siblings[target]]=[siblings[target],siblings[index]];
+    try{
+      await Promise.all(siblings.map((item,position)=>rootMutation(`/api/admin/business/categories/${item.id}`,{
+        method:"PUT",body:JSON.stringify({name:item.name,parentId:item.parentId||null,level:Number(item.level),sortOrder:(position+1)*10,icon:item.icon||"",status:Number(item.status)}),
+      })));
+      message.success(direction<0?"分类已上移":"分类已下移");void rows.refresh();
+    }catch(error){message.error((error as Error).message);}
+  };
+  const siblingPosition=(row:Row)=>{
+    const siblings=(rows.data||[]).filter((item)=>Number(item.parentId||0)===Number(row.parentId||0))
+      .sort((a,b)=>Number(a.sortOrder||0)-Number(b.sortOrder||0)||Number(a.id)-Number(b.id));
+    return {index:siblings.findIndex((item)=>Number(item.id)===Number(row.id)),total:siblings.length};
+  };
   const showAttributes = (row: Row) => {
     setAttributeOwner(row);
     setSelectedAttributeIds([]);
@@ -2487,14 +2857,11 @@ function Categories() {
     {
       title: "分类名称",
       render: (_, row) => (
-        <div className="user-cell">
-          <i>{row.level}</i>
-          <span>
-            <strong>{row.name}</strong>
-            <small>
-              {row.parentName ? `上级：${row.parentName}` : "一级分类"}
-            </small>
-          </span>
+        <div className="category-tree-name" style={{paddingLeft:(Number(row.level)-1)*30}}>
+          {Number(row.childCount)>0
+            ? <button type="button" className={`category-expand-toggle${expandedCategoryKeys.includes(row.id)?" is-expanded":""}`} aria-label={expandedCategoryKeys.includes(row.id)?"收起分类":"展开分类"} onClick={()=>setExpandedCategoryKeys((keys)=>keys.includes(row.id)?keys.filter((key)=>key!==row.id):[...keys,row.id])}>›</button>
+            : <span className="category-expand-placeholder" />}
+          <span className="category-title-cell"><strong>{row.name}</strong><small>{row.parentName ? `上级：${row.parentName}` : "一级分类"}</small></span>
         </div>
       ),
     },
@@ -2515,7 +2882,11 @@ function Categories() {
         </Tag>
       ),
     },
-    { title: "排序", dataIndex: "sortOrder" },
+    { title: "排序", width:130,render:(_,row)=>{const position=siblingPosition(row);return <Space size={2}>
+      <Button size="small" aria-label="上移" disabled={position.index<=0} onClick={()=>void moveCategory(row,-1)}>↑</Button>
+      <Button size="small" aria-label="下移" disabled={position.index<0||position.index>=position.total-1} onClick={()=>void moveCategory(row,1)}>↓</Button>
+      <Typography.Text type="secondary">{row.sortOrder}</Typography.Text>
+    </Space>;}},
     {
       title: "子分类",
       dataIndex: "childCount",
@@ -2539,6 +2910,7 @@ function Categories() {
       title: "操作",
       render: (_, row) => (
         <Space>
+          {Number(row.level)<3&&<Button type="link" onClick={()=>showChild(row)}>添加子分类</Button>}
           <Button type="link" onClick={() => show(row)}>
             编辑
           </Button>
@@ -2565,14 +2937,19 @@ function Categories() {
           loading={rows.loading}
           dataSource={treeData}
           columns={columns}
-          expandable={{ defaultExpandAllRows: true, indentSize: 24 }}
+          expandable={{
+            expandedRowKeys:expandedCategoryKeys,
+            onExpandedRowsChange:(keys)=>setExpandedCategoryKeys([...keys]),
+            indentSize:0,
+            expandIcon:()=>null,
+          }}
           searchPlaceholder="搜索分类名称、上级分类或级别"
         />
       </Card>
       <Modal
         open={open}
-        title={`${editing ? "编辑" : "新增"}分类`}
-        onCancel={() => setOpen(false)}
+        title={editing?"编辑分类":childParent?`添加子分类 · ${childParent.name}`:"新增分类"}
+        onCancel={() => {setOpen(false);setChildParent(undefined);}}
         onOk={() => void save()}
       >
         <Form form={form} layout="vertical">
@@ -2585,6 +2962,7 @@ function Categories() {
           </Form.Item>
           <Form.Item name="level" label="分类级别" rules={[{ required: true }]}>
             <Select
+              disabled={Boolean(childParent)}
               onChange={() => form.setFieldValue("parentId", undefined)}
               options={[1, 2, 3].map((value) => ({
                 value,
@@ -2598,7 +2976,7 @@ function Categories() {
               label="上级分类"
               rules={[{ required: true, message: "请选择上级分类" }]}
             >
-              <Select options={parentOptions} />
+              <Select disabled={Boolean(childParent)} options={parentOptions} />
             </Form.Item>
           )}
           <Form.Item name="icon" label="分类图标">
@@ -2672,6 +3050,271 @@ function Categories() {
   );
 }
 
+function SeoSettings(){const {message}=AntApp.useApp();const result=useLoad<Row>(()=>rootApi("/api/admin/content/seo-settings"));const [form]=Form.useForm();useEffect(()=>{if(result.data)form.setFieldsValue(result.data)},[result.data,form]);const save=async()=>{try{const v=await form.validateFields();await rootMutation("/api/admin/content/seo-settings",{method:"PUT",body:JSON.stringify(v)});message.success("SEO/GEO配置已保存");}catch(e){if(e instanceof Error)message.error(e.message)}};return <Card className="data-card settings-card" title="全站 SEO / GEO 配置" extra={<Button type="primary" onClick={()=>void save()}>保存配置</Button>}><Form form={form} layout="vertical" className="settings-form"><section className="form-section"><header><strong>搜索展示</strong><span>应用于 Web 全站标题和搜索结果摘要</span></header><div className="form-grid"><Form.Item className="form-span-2" name="title" label="网站标题" rules={[{required:true}]}><Input/></Form.Item><Form.Item className="form-span-2" name="description" label="网站描述" rules={[{required:true}]}><Input.TextArea rows={3}/></Form.Item><Form.Item className="form-span-2" name="keywords" label="SEO关键词" rules={[{required:true}]}><Input.TextArea rows={2} placeholder="使用逗号分隔"/></Form.Item><Form.Item className="form-span-2" name="geoKeywords" label="GEO地域/生成式搜索关键词" rules={[{required:true}]}><Input.TextArea rows={2} placeholder="使用逗号分隔"/></Form.Item><Form.Item name="organizationName" label="组织名称" rules={[{required:true}]}><Input/></Form.Item></div></section></Form></Card>}
+
+function BankAccounts(){const {message,modal}=AntApp.useApp();const rows=usePagedLoad("/api/admin/content/bank-accounts",10);const [form]=Form.useForm();const [editing,setEditing]=useState<Row>();const [open,setOpen]=useState(false);const show=(r?:Row)=>{setEditing(r);form.resetFields();form.setFieldsValue(r||{sortOrder:10,status:1,branchName:""});setOpen(true)};const save=async()=>{try{const v=await form.validateFields();await rootMutation(`/api/admin/content/bank-accounts${editing?`/${editing.id}`:""}`,{method:editing?"PUT":"POST",body:JSON.stringify(v)});message.success("收款账号已保存");setOpen(false);void rows.refresh()}catch(e){if(e instanceof Error)message.error(e.message)}};const remove=(r:Row)=>modal.confirm({title:`删除收款账号“${r.bankName}”？`,okButtonProps:{danger:true},onOk:async()=>{await rootMutation(`/api/admin/content/bank-accounts/${r.id}`,{method:"DELETE"});void rows.refresh()}});return <><Card className="data-card" title="收款银行账号" extra={<Button type="primary" onClick={()=>show()}>＋ 新增账号</Button>}><Table rowKey="id" loading={rows.loading} dataSource={rows.data} server={rows.server} columns={[{title:"开户名称",dataIndex:"accountName"},{title:"开户银行",dataIndex:"bankName"},{title:"银行账号",dataIndex:"accountNumber"},{title:"开户支行",dataIndex:"branchName"},{title:"顺序",dataIndex:"sortOrder",width:80},{title:"状态",dataIndex:"status",width:90,render:v=><Tag color={Number(v)===1?"green":"default"}>{Number(v)===1?"启用":"停用"}</Tag>},{title:"操作",width:150,render:(_,r)=><Space><Button type="link" onClick={()=>show(r)}>编辑</Button><Button danger type="link" onClick={()=>remove(r)}>删除</Button></Space>}]}/></Card><Modal open={open} title={`${editing?"编辑":"新增"}收款账号`} onCancel={()=>setOpen(false)} onOk={()=>void save()}><Form form={form} layout="vertical"><Form.Item name="accountName" label="开户名称" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="bankName" label="开户银行" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="accountNumber" label="银行账号" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="branchName" label="开户支行"><Input/></Form.Item><Form.Item name="sortOrder" label="排序" rules={[{required:true}]}><InputNumber min={0} style={{width:"100%"}}/></Form.Item><Form.Item name="status" label="状态" rules={[{required:true}]}><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]}/></Form.Item></Form></Modal></>}
+
+function FooterSettings() {
+  const {message}=AntApp.useApp();
+  const result=useLoad<Row>(()=>rootApi("/api/admin/content/footer-settings"));
+  const [form]=Form.useForm();
+  useEffect(()=>{if(result.data)form.setFieldsValue(result.data);},[result.data,form]);
+  const save=async()=>{try{const values=await form.validateFields();await rootMutation("/api/admin/content/footer-settings",{method:"PUT",body:JSON.stringify(values)});
+    message.success("页脚配置已保存");void result.refresh();}catch(error){if(error instanceof Error)message.error(error.message);}};
+  return <Card className="data-card settings-card" title="门户页脚配置">
+    <Tabs items={[{key:"base",label:"基础与备案",children:<><div className="settings-action"><Button type="primary" onClick={()=>void save()}>保存配置</Button></div><Form form={form} layout="vertical" className="settings-form">
+      <section className="form-section"><header><strong>栏目标题</strong><span>配置 Web 门户页脚四个固定栏目的显示名称，限2～6个汉字</span></header><div className="form-grid">
+        <Form.Item name="aboutTitle" label="关于栏目" rules={[{required:true},{pattern:/^[\u3400-\u9fff]{2,6}$/,message:"请输入2至6个汉字"}]}><Input maxLength={6} showCount placeholder="关于壹采" /></Form.Item>
+        <Form.Item name="officialTitle" label="平台栏目" rules={[{required:true},{pattern:/^[\u3400-\u9fff]{2,6}$/,message:"请输入2至6个汉字"}]}><Input maxLength={6} showCount placeholder="官方平台" /></Form.Item>
+        <Form.Item name="serviceTitle" label="服务栏目" rules={[{required:true},{pattern:/^[\u3400-\u9fff]{2,6}$/,message:"请输入2至6个汉字"}]}><Input maxLength={6} showCount placeholder="我们的服务" /></Form.Item>
+        <Form.Item name="contactTitle" label="联系栏目" rules={[{required:true},{pattern:/^[\u3400-\u9fff]{2,6}$/,message:"请输入2至6个汉字"}]}><Input maxLength={6} showCount placeholder="联系我们" /></Form.Item>
+      </div></section>
+      <section className="form-section"><header><strong>基础信息</strong><span>用于页脚的公司介绍和联系信息</span></header><div className="form-grid">
+        <Form.Item className="form-span-2" name="about" label="关于我们" rules={[{required:true,message:"请输入公司简介"}]}><Input.TextArea rows={4} showCount maxLength={300}/></Form.Item>
+        <Form.Item className="form-span-2" name="address" label="联系地址" rules={[{required:true}]}><Input /></Form.Item>
+      </div></section>
+      <section className="form-section"><header><strong>版权信息</strong><span>显示在页脚底部版权横条</span></header><div className="form-grid">
+        <Form.Item name="copyrightYears" label="版权年份" rules={[{required:true}]}><Input placeholder="例如：2023-2025" /></Form.Item>
+        <Form.Item name="companyName" label="公司名称" rules={[{required:true}]}><Input /></Form.Item>
+      </div></section>
+      <section className="form-section"><header><strong>备案与许可证</strong><span>备案号将在 Web 页脚展示并链接至官方查询平台</span></header><div className="form-grid form-grid-3">
+        <Form.Item name="icpFiling" label="ICP备案号" rules={[{required:true}]}><Input /></Form.Item>
+        <Form.Item name="telecomLicense" label="电信增值业务许可证" rules={[{required:true}]}><Input /></Form.Item>
+        <Form.Item name="policeFiling" label="公安备案号" rules={[{required:true}]}><Input /></Form.Item>
+      </div></section>
+    </Form></>},{key:"official",label:"官方平台",children:<FooterLinks group="OFFICIAL"/>},{key:"service",label:"我们的服务",children:<FooterLinks group="SERVICE"/>}]}/>
+  </Card>;
+}
+
+function FooterLinks({group}:{group:"OFFICIAL"|"SERVICE"}){const {message,modal}=AntApp.useApp();const rows=usePagedLoad(`/api/admin/content/footer-links?group=${group}`,10,[group]);const [form]=Form.useForm();const [editing,setEditing]=useState<Row>();const [open,setOpen]=useState(false);const label=group==="OFFICIAL"?"官方平台":"我们的服务";const show=(r?:Row)=>{setEditing(r);form.resetFields();form.setFieldsValue(r||{linkGroup:group,openTarget:"SELF",sortOrder:10,status:1});setOpen(true)};const save=async()=>{try{const v=await form.validateFields();await rootMutation(`/api/admin/content/footer-links${editing?`/${editing.id}`:""}`,{method:editing?"PUT":"POST",body:JSON.stringify({...v,linkGroup:group})});message.success("页脚链接已保存");setOpen(false);void rows.refresh()}catch(e){if(e instanceof Error)message.error(e.message)}};const remove=(r:Row)=>modal.confirm({title:`删除“${r.title}”？`,okButtonProps:{danger:true},onOk:async()=>{await rootMutation(`/api/admin/content/footer-links/${r.id}`,{method:"DELETE"});void rows.refresh()}});return <><div className="footer-link-tab"><Button type="primary" onClick={()=>show()}>＋ 新增链接</Button></div><Table rowKey="id" loading={rows.loading} dataSource={rows.data} server={rows.server} columns={[{title:"标题",dataIndex:"title"},{title:"链接",dataIndex:"linkUrl",render:v=><Typography.Text copyable>{v}</Typography.Text>},{title:"打开方式",dataIndex:"openTarget",width:120,render:v=>v==="BLANK"?"新页面":"当前页面"},{title:"排序",dataIndex:"sortOrder",width:80},{title:"状态",dataIndex:"status",width:90,render:v=><Tag color={Number(v)===1?"green":"default"}>{Number(v)===1?"显示":"隐藏"}</Tag>},{title:"操作",width:150,render:(_,r)=><Space><Button type="link" onClick={()=>show(r)}>编辑</Button><Button type="link" danger onClick={()=>remove(r)}>删除</Button></Space>}]}/><Modal open={open} title={`${editing?"编辑":"新增"}${label}链接`} onCancel={()=>setOpen(false)} onOk={()=>void save()}><Form form={form} layout="vertical"><Form.Item name="title" label="标题" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="linkUrl" label="链接地址" rules={[{required:true}]}><Input placeholder="站内路径或完整网址"/></Form.Item><Form.Item name="openTarget" label="打开方式" rules={[{required:true}]}><Select options={[{value:"SELF",label:"当前页面打开"},{value:"BLANK",label:"新页面打开"}]}/></Form.Item><Form.Item name="sortOrder" label="排序" rules={[{required:true}]}><InputNumber min={0} style={{width:"100%"}}/></Form.Item><Form.Item name="status" label="是否显示" rules={[{required:true}]}><Select options={[{value:1,label:"显示"},{value:0,label:"隐藏"}]}/></Form.Item></Form></Modal></>}
+
+function ServiceFeatures() {
+  const {message,modal}=AntApp.useApp();
+  const rows=usePagedLoad("/api/admin/content/service-features",10);
+  const [form]=Form.useForm();
+  const [open,setOpen]=useState(false);
+  const [editing,setEditing]=useState<Row>();
+  const show=(row?:Row)=>{setEditing(row);form.resetFields();form.setFieldsValue(row||{sortOrder:(rows.data?.length||0)*10+10,status:1});setOpen(true);};
+  const save=async()=>{try{
+    const values=await form.validateFields();
+    await rootMutation(`/api/admin/content/service-features${editing?`/${editing.id}`:""}`,{method:editing?"PUT":"POST",body:JSON.stringify(values)});
+    message.success("服务保障配置已保存");setOpen(false);void rows.refresh();
+  }catch(error){if(error instanceof Error)message.error(error.message);}};
+  const remove=(row:Row)=>modal.confirm({title:`删除“${row.title}”？`,content:"删除后 Web 门户将不再显示此项。",okButtonProps:{danger:true},onOk:async()=>{
+    await rootMutation(`/api/admin/content/service-features/${row.id}`,{method:"DELETE"});message.success("服务保障项已删除");void rows.refresh();}});
+  const fourHan={validator:(_:unknown,value:string)=>/^[\u3400-\u9fff]{4}$/.test(value||"")?Promise.resolve():Promise.reject(new Error("标题必须为4个汉字"))};
+  const subtitleHan={validator:(_:unknown,value:string)=>/^[\u3400-\u9fff]{8,10}$/.test(value||"")?Promise.resolve():Promise.reject(new Error("副标题必须为8至10个汉字"))};
+  return <>
+    <Card className="data-card" title="服务保障配置" extra={<Button type="primary" onClick={()=>show()}>＋ 新增保障项</Button>}>
+      <Table rowKey="id" loading={rows.loading} dataSource={rows.data} server={rows.server} searchPlaceholder="搜索标题或副标题" columns={[
+        {title:"图片",dataIndex:"imageUrl",width:90,render:(value)=><img src={value} alt="" style={{width:52,height:52,objectFit:"contain"}}/>},
+        {title:"标题",dataIndex:"title"},{title:"副标题",dataIndex:"subtitle"},{title:"顺序",dataIndex:"sortOrder",width:90},
+        {title:"是否显示",dataIndex:"status",width:110,render:(value)=><Tag color={Number(value)===1?"green":"default"}>{Number(value)===1?"显示":"隐藏"}</Tag>},
+        {title:"操作",width:150,render:(_,row)=><Space><Button type="link" onClick={()=>show(row)}>编辑</Button><Button type="link" danger onClick={()=>remove(row)}>删除</Button></Space>},
+      ]}/>
+    </Card>
+    <Modal open={open} title={`${editing?"编辑":"新增"}服务保障项`} onCancel={()=>setOpen(false)} onOk={()=>void save()}>
+      <Form form={form} layout="vertical">
+        <Form.Item name="imageUrl" label="图片" rules={[{required:true,message:"请上传图片"}]}><ProductImageUpload kind="contentIcon" /></Form.Item>
+        <Form.Item name="title" label="标题（4个汉字）" rules={[{required:true},fourHan]}><Input maxLength={4} showCount /></Form.Item>
+        <Form.Item name="subtitle" label="副标题（8～10个汉字）" rules={[{required:true},subtitleHan]}><Input maxLength={10} showCount /></Form.Item>
+        <Form.Item name="sortOrder" label="显示顺序" rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:"100%"}} /></Form.Item>
+        <Form.Item name="status" label="是否显示" rules={[{required:true}]}><Select options={[{value:1,label:"显示"},{value:0,label:"隐藏"}]} /></Form.Item>
+      </Form>
+    </Modal>
+  </>;
+}
+
+function ContactSettings() {
+  const {message}=AntApp.useApp();
+  const result=useLoad<Row>(()=>rootApi("/api/admin/content/contact-settings"));
+  const [form]=Form.useForm();
+  useEffect(()=>{if(result.data)form.setFieldsValue(result.data);},[result.data,form]);
+  const save=async()=>{try{
+    const values=await form.validateFields();
+    await rootMutation("/api/admin/content/contact-settings",{method:"PUT",body:JSON.stringify(values)});
+    message.success("门户联系方式已保存");void result.refresh();
+  }catch(error){if(error instanceof Error)message.error(error.message);}};
+  const qr=Form.useWatch("wechatQr",form);
+  return <Card className="settings-card" title="Web 门户悬浮联系方式" extra={<Button type="primary" onClick={()=>void save()}>保存配置</Button>}>
+    <Form form={form} layout="vertical" className="settings-form">
+      <section className="form-section"><header><strong>电话与邮箱</strong><span>用于 Web 端右侧悬浮联系栏</span></header><div className="form-grid">
+        <Form.Item name="landline" label="座机" rules={[{required:true,message:"请输入座机号码"}]}><Input placeholder="例如：0531-86099058" /></Form.Item>
+        <Form.Item name="mobile" label="手机" rules={[{required:true,message:"请输入手机号码"}]}><Input placeholder="例如：13105315957" /></Form.Item>
+        <Form.Item className="form-span-2" name="email" label="邮箱" rules={[{required:true,message:"请输入邮箱"},{type:"email",message:"请输入有效的邮箱地址"}]}><Input placeholder="name@example.com" /></Form.Item>
+      </div></section>
+      <section className="form-section"><header><strong>微信二维码</strong><span>可直接上传，也可继续使用外部图片链接</span></header>
+        <Form.Item name="wechatQr" label="图片链接" rules={[{required:true,message:"请上传图片或输入图片地址"}]}><Input placeholder="https://example.com/wechat-qr.png" /></Form.Item>
+        <Form.Item label="上传二维码" extra="仅支持 JPG/PNG，1:1，300×300～2000×2000 像素；上传成功后会自动填入上方链接。"><ProductImageUpload kind="qr" value={qr} onChange={(value)=>form.setFieldValue("wechatQr",value)} /></Form.Item>
+      </section>
+    </Form>
+  </Card>;
+}
+
+function HelpLinks() {
+  const {message,modal}=AntApp.useApp();
+  const rows=usePagedLoad("/api/admin/content/help-links",10);
+  const articles=useLoad<Row[]>(()=>rootApi("/api/admin/content/content"));
+  const [form]=Form.useForm();
+  const [open,setOpen]=useState(false);
+  const [editing,setEditing]=useState<Row>();
+  const iconOptions=[{value:"SHIELD",label:"盾牌"},{value:"USER",label:"用户"},{value:"SERVICE",label:"服务"},{value:"DELIVERY",label:"配送"}];
+  const show=(row?:Row)=>{setEditing(row);form.resetFields();form.setFieldsValue(row||{articleId:articles.data?.[0]?.id,icon:"SHIELD",sortOrder:0,status:1});setOpen(true);};
+  const save=async()=>{try{const values=await form.validateFields();const response=await fetch(`/api/admin/content/help-links${editing?`/${editing.id}`:""}`,{
+    method:editing?"PUT":"POST",headers:apiHeaders(),body:JSON.stringify(values),});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"链接保存失败");}
+    message.success("服务链接已保存");setOpen(false);void rows.refresh();}catch(error){if(error instanceof Error)message.error(error.message);}};
+  const remove=(row:Row)=>modal.confirm({title:`删除链接“${row.title}”？`,okButtonProps:{danger:true},onOk:async()=>{
+    await fetch(`/api/admin/content/help-links/${row.id}`,{method:"DELETE",headers:apiHeaders()});message.success("服务链接已删除");void rows.refresh();}});
+  return <>
+    <Card className="data-card" title="服务与帮助链接" extra={<Button type="primary" onClick={()=>show()}>＋ 新增链接</Button>}>
+      <Table rowKey="id" loading={rows.loading} dataSource={rows.data} server={rows.server} searchPlaceholder="搜索链接标题或关联文章" columns={[
+        {title:"链接标题",dataIndex:"title"},{title:"关联文章",dataIndex:"articleTitle"},{title:"文章链接",dataIndex:"articleLink",render:(value)=><Typography.Text copyable>{value}</Typography.Text>},
+        {title:"图标",dataIndex:"icon",width:90,render:(value)=>iconOptions.find(item=>item.value===value)?.label||value},
+        {title:"排序",dataIndex:"sortOrder",width:80},{title:"状态",dataIndex:"status",width:90,render:(value)=><Tag color={Number(value)===1?"green":"default"}>{Number(value)===1?"启用":"停用"}</Tag>},
+        {title:"操作",width:150,render:(_,row)=><Space><Button type="link" onClick={()=>show(row)}>编辑</Button><Button type="link" danger onClick={()=>remove(row)}>删除</Button></Space>},
+      ]}/>
+    </Card>
+    <Modal open={open} title={`${editing?"编辑":"新增"}服务链接`} onCancel={()=>setOpen(false)} onOk={()=>void save()}>
+      <Form form={form} layout="vertical">
+        <Form.Item name="title" label="链接标题" rules={[{required:true,message:"请输入链接标题"}]}><Input /></Form.Item>
+        <Form.Item name="articleId" label="链接文章" rules={[{required:true,message:"请选择文章"}]}><Select showSearch optionFilterProp="label" options={(articles.data||[]).filter(row=>Number(row.status)===1).map(row=>({value:Number(row.id),label:`${row.title}${row.subtitle?` · ${row.subtitle}`:""}`}))} /></Form.Item>
+        <Form.Item name="icon" label="图标" rules={[{required:true}]}><Select options={iconOptions} /></Form.Item>
+        <Form.Item name="sortOrder" label="排序" rules={[{required:true}]}><InputNumber min={0} style={{width:"100%"}} /></Form.Item>
+        <Form.Item name="status" label="状态" rules={[{required:true}]}><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]} /></Form.Item>
+      </Form>
+    </Modal>
+  </>;
+}
+
+function Articles() {
+  const {message,modal}=AntApp.useApp();
+  const rows=usePagedLoad("/api/admin/content/content",10);
+  const [form]=Form.useForm();
+  const [open,setOpen]=useState(false);
+  const [editing,setEditing]=useState<Row>();
+  const show=(row?:Row)=>{setEditing(row);form.resetFields();form.setFieldsValue(row||{status:1});setOpen(true);};
+  const save=async()=>{try{
+    const values=await form.validateFields();
+    const response=await fetch(`/api/admin/content/content${editing?`/${editing.id}`:""}`,{
+      method:editing?"PUT":"POST",headers:apiHeaders(),body:JSON.stringify({...values,sortOrder:editing?.sortOrder||0}),
+    });
+    if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"文章保存失败");}
+    message.success("文章已保存");setOpen(false);void rows.refresh();
+  }catch(error){if(error instanceof Error)message.error(error.message);}};
+  const remove=(row:Row)=>modal.confirm({title:`删除文章“${row.title}”？`,content:"已被门户楼层引用的文章将不再展示。",okButtonProps:{danger:true},onOk:async()=>{
+    const response=await fetch(`/api/admin/content/content/${row.id}`,{method:"DELETE",headers:apiHeaders()});
+    if(!response.ok)throw new Error("文章删除失败");message.success("文章已删除");void rows.refresh();
+  }});
+  return <>
+    <Card className="data-card" title="文章列表" extra={<Button type="primary" onClick={()=>show()}>＋ 新增文章</Button>}>
+      <Table rowKey="id" loading={rows.loading} dataSource={rows.data} server={rows.server} searchPlaceholder="搜索文章标题、副标题或正文"
+        columns={[
+          {title:"文章标题",render:(_,row)=><><strong>{row.title}</strong><small className="subline">{row.subtitle||"—"}</small></>},
+          {title:"正文摘要",dataIndex:"description",ellipsis:true,render:(value)=>String(value||"").replace(/<[^>]+>/g,"").slice(0,100)||"—"},
+          {title:"状态",dataIndex:"status",width:90,render:(value)=><Tag color={Number(value)===1?"green":"default"}>{Number(value)===1?"已发布":"未发布"}</Tag>},
+          {title:"更新时间",dataIndex:"updatedAt",width:180,render:dateTime},
+          {title:"操作",width:150,render:(_,row)=><Space><Button type="link" onClick={()=>show(row)}>编辑</Button><Button type="link" danger onClick={()=>remove(row)}>删除</Button></Space>},
+        ]}/>
+    </Card>
+    <Modal open={open} title={`${editing?"编辑":"新增"}文章`} width={860} onCancel={()=>setOpen(false)} onOk={()=>void save()}>
+      <Form form={form} layout="vertical">
+        <Form.Item name="title" label="文章标题" rules={[{required:true,message:"请输入文章标题"}]}><Input /></Form.Item>
+        <Form.Item name="subtitle" label="文章副标题"><Input /></Form.Item>
+        <Form.Item name="description" label="富文本正文" rules={[{required:true,message:"请输入文章正文"}]}><RichTextEditor /></Form.Item>
+        <Form.Item name="status" label="发布状态" rules={[{required:true}]}><Select options={[{value:1,label:"发布"},{value:0,label:"暂不发布"}]} /></Form.Item>
+      </Form>
+    </Modal>
+  </>;
+}
+
+function AssociationProducts({type}:{type:"PLATFORM"|"AGREEMENT"|"SOLUTION"}) {
+  const {message,modal}=AntApp.useApp();
+  const labels={PLATFORM:"所属平台",AGREEMENT:"所属协议",SOLUTION:"所属方案"};
+  const [targetFilter,setTargetFilter]=useState<number>();
+  const endpoint=`/api/admin/business/product-associations?type=${type}${targetFilter?`&targetId=${targetFilter}`:""}`;
+  const rows=usePagedLoad(endpoint,10,[type,targetFilter]);
+  const targets=useLoad<Row[]>(()=>rootApi(type==="AGREEMENT"?"/api/admin/business/agreements":`/api/admin/content/${type==="PLATFORM"?"platform":"solution"}`),[type]);
+  const [form]=Form.useForm();
+  const [open,setOpen]=useState(false);
+  const [editing,setEditing]=useState<Row>();
+  const products=useLoad<Row[]>(()=>rootApi("/api/admin/business/products"),[],open&&!editing);
+  const selectableSkus=expandProductSkus(products.data||[]).filter((row)=>Number(row.status)===1);
+  const targetOptions=(targets.data||[]).filter((row)=>Number(row.status)!==0).map((row)=>({value:Number(row.id),label:type==="AGREEMENT"?`${row.name} · ${row.enterpriseName}`:row.title}));
+  const request=async(path:string,init:RequestInit)=>{const response=await fetch(path,{...init,headers:{...apiHeaders(),...init.headers}});if(!response.ok){const data=await response.json().catch(()=>({}));throw new Error(data.detail||"操作失败");}};
+  const show=(row?:Row)=>{setEditing(row);form.resetFields();form.setFieldsValue(row?{
+    targetId:Number(row.targetId),skuId:Number(row.skuId),associationPrice:Number(row.associationPrice),productUrl:row.productUrl||"",relationStatus:Number(row.relationStatus),
+    defaultQuantity:Number(row.defaultQuantity||1),requiredItem:Number(row.requiredItem??1),sortOrder:Number(row.sortOrder||0),
+  }:{targetId:targetFilter||targetOptions[0]?.value,relationStatus:1,defaultQuantity:1,requiredItem:1,sortOrder:0});setOpen(true);};
+  const relationPath=(row:Row,targetId=Number(row.targetId))=>type==="PLATFORM"?`/api/admin/content/platform/${targetId}/products/${row.relationId}`:type==="AGREEMENT"?`/api/admin/agreements/${targetId}/items/${row.relationId}`:`/api/admin/content/solution/${targetId}/products/${row.relationId}`;
+  const save=async()=>{try{const values=await form.validateFields();const targetId=Number(values.targetId);let path:string;let body:Row;
+    if(type==="PLATFORM"){path=editing?relationPath(editing,targetId):`/api/admin/content/platform/${targetId}/products`;body={skuId:Number(values.skuId),platformPrice:Number(values.associationPrice),productUrl:values.productUrl||"",listingStatus:Number(values.relationStatus)};}
+    else if(type==="AGREEMENT"){path=editing?relationPath(editing,targetId):`/api/admin/agreements/${targetId}/items`;body={skuId:Number(values.skuId),agreementPrice:Number(values.associationPrice),status:Number(values.relationStatus)};}
+    else{path=editing?relationPath(editing,targetId):`/api/admin/content/solution/${targetId}/products`;body={skuId:Number(values.skuId),defaultQuantity:Number(values.defaultQuantity),requiredItem:Number(values.requiredItem),sortOrder:Number(values.sortOrder)};}
+    await request(path,{method:editing?"PUT":"POST",body:JSON.stringify(body)});message.success(editing?"关联已更新":"商品已加入");setOpen(false);void rows.refresh();
+  }catch(error){if(error instanceof Error)message.error(error.message);}};
+  const removeRows=(selected:Row[],clear?:()=>void)=>modal.confirm({title:`确认移除 ${selected.length} 条关联？`,okButtonProps:{danger:true},onOk:async()=>{await Promise.all(selected.map((row)=>request(relationPath(row),{method:"DELETE"})));message.success("关联已移除");clear?.();void rows.refresh();}});
+  const updateStatus=async(selected:Row[],status:number,clear?:()=>void)=>{await Promise.all(selected.map((row)=>request(relationPath(row),{method:"PUT",body:JSON.stringify(type==="PLATFORM"?{skuId:Number(row.skuId),platformPrice:Number(row.associationPrice),productUrl:row.productUrl||"",listingStatus:status}:{agreementPrice:Number(row.associationPrice),status})})));message.success(status?"已批量启用/上架":"已批量停用/下架");clear?.();void rows.refresh();};
+  const statusOptions=type==="PLATFORM"?[{label:"已上架",value:"1"},{label:"已下架",value:"0"}]:type==="AGREEMENT"?[{label:"已启用",value:"1"},{label:"已停用",value:"0"}]:undefined;
+  const associationBadge=(row:Row)=>row.badgeType==="AGREEMENT"?"协议专属":row.badgeType==="CUSTOM"?(row.customBadge||"自定义"):row.badgeType==="PLATFORM"?`${row.badgePlatformPrefix||"平台"}平台`:"自动";
+  const associationNameCell=(value:unknown)=>{
+    const text=String(value||"");
+    if(type!=="AGREEMENT")return <Tag className="association-name-tag" color={type==="PLATFORM"?"blue":"purple"}>{text}</Tag>;
+    const matched=text.match(/^(.*)（([^（）]+)）$/);
+    return <div className="association-target-cell"><strong>{matched?.[1]||text}</strong>{matched?.[2]&&<small>{matched[2]}</small>}</div>;
+  };
+  return <><Card className="data-card association-products-card" title={`商品列表 · ${labels[type]}`} extra={<Button type="primary" onClick={()=>show()}>＋ 加入商品</Button>}>
+    <Table size="small" rowKey="relationId" loading={rows.loading} dataSource={rows.data} server={{...rows.server,statusOptions}}
+      searchPlaceholder={`搜索商品名称、SPU、SKU或${labels[type]}`}
+      toolbarExtra={<Select allowClear showSearch optionFilterProp="label" value={targetFilter} onChange={(value)=>setTargetFilter(value)} placeholder={`全部${labels[type].slice(2)}`} style={{width:190}} options={targetOptions}/>} scroll={{x:type==="PLATFORM"?1450:1260}}
+      selectionActions={(selected,clear)=><><Button disabled={!selected.length} danger onClick={()=>removeRows(selected,clear)}>批量移除</Button>{type!=="SOLUTION"&&<><Button disabled={!selected.length} onClick={()=>void updateStatus(selected,1,clear)}>{type==="PLATFORM"?"批量上架":"批量启用"}</Button><Button disabled={!selected.length} onClick={()=>void updateStatus(selected,0,clear)}>{type==="PLATFORM"?"批量下架":"批量停用"}</Button></>}</>}
+      columns={[
+        {title:"商品信息",width:360,render:(_,row)=><div className="user-cell association-product-info">
+          <span className="solution-admin-cover"><i>{row.title?.slice(0,1)||"商"}</i>{row.mainImage&&<img src={row.mainImage} alt={row.title} />}</span>
+          <span><strong>{row.title}</strong><small>{row.spuCode} · {row.skuCode}</small></span>
+        </div>},
+        {title:"价格",width:130,render:(_,row)=><div className="product-price-cell"><strong>市场价 ¥{Number(row.marketPrice||0).toFixed(2)}</strong><small>会员价 ¥{Number(row.memberPrice||0).toFixed(2)}</small></div>},
+        {title:"经营类型",width:90,render:(_,row)=><Tag color={Number(row.selfOperated)===1?"blue":"default"}>{Number(row.selfOperated)===1?"自营":"非自营"}</Tag>},
+        {title:"商品角标",width:100,render:(_,row)=><Tag>{associationBadge(row)}</Tag>},
+        {title:"可售库存",dataIndex:"availableStock",width:90},
+        {title:labels[type],dataIndex:"associationName",width:type==="AGREEMENT"?250:180,render:associationNameCell},
+        {title:type==="AGREEMENT"?"协议价":type==="PLATFORM"?"平台价":"默认数量",width:100,render:(_,row)=>type==="SOLUTION"?`${row.defaultQuantity} 件`:`¥${Number(row.associationPrice||0).toFixed(2)}`},
+        ...(type==="PLATFORM"?[{title:"平台链接",dataIndex:"productUrl",width:180,render:(value:string)=>value?<Typography.Text copyable={{text:value}} ellipsis={{tooltip:value}}><a href={value} target="_blank" rel="noreferrer" onClick={(event)=>event.stopPropagation()}>复制 / 打开链接</a></Typography.Text>:<Typography.Text type="secondary">未填写</Typography.Text>}]:[]),
+        ...(type==="PLATFORM"?[{title:"点击",dataIndex:"clickCount",width:65}]:[]),
+        {title:"状态",dataIndex:"relationStatus",width:78,render:(value)=><Tag color={Number(value)===1?"green":"default"}>{type==="PLATFORM"?(Number(value)===1?"上架":"下架"):type==="AGREEMENT"?(Number(value)===1?"启用":"停用"):"关联"}</Tag>},
+        {title:"操作",width:130,fixed:"right",render:(_,row)=><div className="association-row-actions"><Button type="link" size="small" onClick={()=>show(row)}>编辑</Button>{type!=="SOLUTION"&&<Button type="link" size="small" onClick={()=>void updateStatus([row],Number(row.relationStatus)===1?0:1)}>{Number(row.relationStatus)===1?(type==="PLATFORM"?"下架":"停用"):(type==="PLATFORM"?"上架":"启用")}</Button>}<Button type="link" size="small" danger onClick={()=>removeRows([row])}>移除</Button></div>},
+      ]} />
+  </Card>
+  <Modal open={open} title={`${editing?"编辑关联":"加入商品"} · ${labels[type]}`} onCancel={()=>setOpen(false)} onOk={()=>void save()}>
+    <Form form={form} layout="vertical"><Form.Item name="targetId" label={labels[type]} rules={[{required:true}]}><Select disabled={Boolean(editing)} showSearch optionFilterProp="label" options={targetOptions}/></Form.Item>
+      <Form.Item name="skuId" label="商品 SKU" rules={[{required:!editing,message:"请选择商品 SKU"}]}><Select disabled={Boolean(editing)} loading={products.loading} showSearch optionFilterProp="label" options={selectableSkus.map((row)=>({value:Number(row.id||row.skuId),label:`${row.title} · ${row.skuCode}`}))}/></Form.Item>
+      {type!=="SOLUTION"&&<Form.Item name="associationPrice" label={type==="PLATFORM"?"平台售价":"协议价格"} rules={[{required:true}]}><InputNumber min={0} precision={2} style={{width:"100%"}}/></Form.Item>}
+      {type==="PLATFORM"&&<Form.Item name="productUrl" label="商品链接"><Input/></Form.Item>}
+      {type!=="SOLUTION"&&<Form.Item name="relationStatus" label="关联状态" rules={[{required:true}]}><Select options={type==="PLATFORM"?[{value:1,label:"上架"},{value:0,label:"下架"}]:[{value:1,label:"启用"},{value:0,label:"停用"}]}/></Form.Item>}
+      {type==="SOLUTION"&&<><Form.Item name="defaultQuantity" label="默认数量" rules={[{required:true}]}><InputNumber min={1} style={{width:"100%"}}/></Form.Item><Form.Item name="requiredItem" label="选择规则"><Select options={[{value:1,label:"必选商品"},{value:0,label:"可选商品"}]}/></Form.Item><Form.Item name="sortOrder" label="排序"><InputNumber min={0} style={{width:"100%"}}/></Form.Item></>}
+    </Form>
+  </Modal></>;
+}
+
+function HomeAds(){
+  const {message,modal}=AntApp.useApp();const rows=usePagedLoad("/api/admin/content/home-ads",10);const floors=useLoad<Row[]>(()=>rootApi("/api/admin/content/home-floors?page=1&pageSize=100")).data as any;
+  const floorRows=Array.isArray(floors)?floors:(floors?.records||floors?.content||[]);const [form]=Form.useForm();const [itemForm]=Form.useForm();const [open,setOpen]=useState(false);const [editing,setEditing]=useState<Row>();const [group,setGroup]=useState<Row>();const [items,setItems]=useState<Row[]>([]);const [itemsOpen,setItemsOpen]=useState(false);const [itemEditing,setItemEditing]=useState<Row>();const [itemEditorOpen,setItemEditorOpen]=useState(false);
+  const layouts:Row={FULL:"通栏横幅",DOUBLE:"双栏专区",TRIPLE:"三栏专区",GRID4:"四宫格",FEATURED:"左大右小",CAROUSEL:"轮播广告"};
+  const placements:Row={TOP:"首页顶部",BEFORE_FLOOR:"指定楼层之前",AFTER_FLOOR:"指定楼层之后",BOTTOM:"首页底部"};
+  const show=(row?:Row)=>{setEditing(row);form.resetFields();form.setFieldsValue(row||{layoutType:"DOUBLE",placement:"TOP",targetScope:"ALL",sortOrder:10,status:1,anchorFloorId:null,startsAt:null,endsAt:null});setOpen(true);};
+  const save=async()=>{try{const v=await form.validateFields();await rootMutation(`/api/admin/content/home-ads${editing?`/${editing.id}`:""}`,{method:editing?"PUT":"POST",body:JSON.stringify({...v,anchorFloorId:v.anchorFloorId||null,startsAt:v.startsAt||null,endsAt:v.endsAt||null})});message.success("广告组已保存");setOpen(false);void rows.refresh();}catch(e){message.error((e as Error).message)}};
+  const manage=async(row:Row)=>{setGroup(row);setItemsOpen(true);setItems(await rootApi<Row[]>(`/api/admin/content/home-ads/${row.id}/items`));};
+  const showItem=(row?:Row)=>{setItemEditing(row);itemForm.resetFields();itemForm.setFieldsValue(row||{title:"",openTarget:"SELF",sortOrder:items.length*10+10,status:1});setItemEditorOpen(true);};
+  const saveItem=async()=>{try{const v=await itemForm.validateFields();await rootMutation(`/api/admin/content/home-ads/${group!.id}/items${itemEditing?`/${itemEditing.id}`:""}`,{method:itemEditing?"PUT":"POST",body:JSON.stringify({...v,h5ImageUrl:v.h5ImageUrl||null,linkUrl:v.linkUrl||null})});message.success("广告图片已保存");setItemEditorOpen(false);await manage(group!);}catch(e){message.error((e as Error).message)}};
+  const removeItem=(row:Row)=>modal.confirm({title:"移除该广告图片？",okButtonProps:{danger:true},onOk:async()=>{await rootMutation(`/api/admin/content/home-ads/${group!.id}/items/${row.id}`,{method:"DELETE"});await manage(group!);}});
+  const remove=(row:Row)=>modal.confirm({title:`删除广告组“${row.name}”？`,okButtonProps:{danger:true},onOk:async()=>{await rootMutation(`/api/admin/content/home-ads/${row.id}`,{method:"DELETE"});void rows.refresh();}});
+  return <><Card className="data-card" title="首页广告组" extra={<Button type="primary" onClick={()=>show()}>＋ 新增广告组</Button>}><Table rowKey="id" loading={rows.loading} dataSource={rows.data} server={{...rows.server,statusOptions:[{label:"启用",value:"1"},{label:"停用",value:"0"}]}} searchPlaceholder="搜索广告组名称、版式或位置" columns={[
+    {title:"广告组",render:(_,r)=><><strong>{r.name}</strong><small className="subline">{layouts[r.layoutType]} · {r.itemCount} 张图片</small></>},{title:"插入位置",render:(_,r)=>`${placements[r.placement]||r.placement}${r.anchorFloorId?` · 楼层 #${r.anchorFloorId}`:""}`},{title:"显示端",dataIndex:"targetScope",render:v=>({ALL:"Web + H5",WEB:"Web",H5:"H5"} as Row)[v]},{title:"排序",dataIndex:"sortOrder",width:80},{title:"状态",dataIndex:"status",width:90,render:v=><Tag color={Number(v)===1?"green":"default"}>{Number(v)===1?"启用":"停用"}</Tag>},{title:"操作",width:210,render:(_,r)=><Space><Button type="link" onClick={()=>void manage(r)}>广告项</Button><Button type="link" onClick={()=>show(r)}>编辑</Button><Button type="link" danger onClick={()=>remove(r)}>删除</Button></Space>}
+  ]}/></Card>
+  <Modal open={open} title={`${editing?"编辑":"新增"}广告组`} width={760} onCancel={()=>setOpen(false)} onOk={()=>void save()}><Form form={form} layout="vertical" className="two-column-form"><Form.Item name="name" label="广告组名称" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="layoutType" label="展示版式" rules={[{required:true}]}><Select options={Object.entries(layouts).map(([value,label])=>({value,label}))}/></Form.Item><Form.Item name="placement" label="插入位置" rules={[{required:true}]}><Select options={Object.entries(placements).map(([value,label])=>({value,label}))}/></Form.Item><Form.Item noStyle shouldUpdate={(a,b)=>a.placement!==b.placement}>{({getFieldValue})=>["BEFORE_FLOOR","AFTER_FLOOR"].includes(getFieldValue("placement"))?<Form.Item name="anchorFloorId" label="指定楼层" rules={[{required:true}]}><Select options={(floorRows||[]).map((r:Row)=>({value:Number(r.id),label:r.title}))}/></Form.Item>:<span/>}</Form.Item><Form.Item name="targetScope" label="显示端"><Select options={[{value:"ALL",label:"Web + H5"},{value:"WEB",label:"仅 Web"},{value:"H5",label:"仅 H5"}]}/></Form.Item><Form.Item name="sortOrder" label="排序"><InputNumber min={0} style={{width:"100%"}}/></Form.Item><Form.Item name="startsAt" label="生效时间"><Input type="datetime-local"/></Form.Item><Form.Item name="endsAt" label="失效时间"><Input type="datetime-local"/></Form.Item><Form.Item name="status" label="状态"><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]}/></Form.Item></Form></Modal>
+  <Modal open={itemsOpen} title={`${group?.name||""} · 广告项`} width={900} footer={null} onCancel={()=>setItemsOpen(false)}><div style={{textAlign:"right",marginBottom:12}}><Button type="primary" onClick={()=>showItem()}>＋ 添加图片</Button></div><Table rowKey="id" pagination={false} dataSource={items} columns={[{title:"图片",width:160,render:(_,r)=><img src={r.webImageUrl} alt={r.title} style={{width:130,height:60,objectFit:"cover",borderRadius:6}}/>},{title:"标题",dataIndex:"title"},{title:"链接",dataIndex:"linkUrl",render:v=>v||"—"},{title:"打开方式",dataIndex:"openTarget",render:v=>v==="BLANK"?"新页面":"当前页面"},{title:"排序",dataIndex:"sortOrder",width:70},{title:"状态",dataIndex:"status",width:70,render:v=>Number(v)===1?"显示":"隐藏"},{title:"操作",width:130,render:(_,r)=><Space><Button type="link" onClick={()=>showItem(r)}>编辑</Button><Button type="link" danger onClick={()=>removeItem(r)}>移除</Button></Space>}]} /></Modal>
+  <Modal open={itemEditorOpen} title={`${itemEditing?"编辑":"新增"}广告项`} width={760} onCancel={()=>setItemEditorOpen(false)} onOk={()=>void saveItem()}><Form form={itemForm} layout="vertical" className="two-column-form"><Form.Item name="title" label="广告标题"><Input/></Form.Item><Form.Item name="linkUrl" label="跳转链接"><Input placeholder="站内路径或完整网址"/></Form.Item><Form.Item name="webImageUrl" label="Web 图片" className="full" rules={[{required:true,message:"请上传 Web 图片"}]}><ProductImageUpload kind="adWeb"/></Form.Item><Form.Item name="h5ImageUrl" label="H5 图片（不填则使用 Web 图片）" className="full"><ProductImageUpload kind="adH5"/></Form.Item><Form.Item name="openTarget" label="打开方式"><Select options={[{value:"SELF",label:"当前页面"},{value:"BLANK",label:"新页面"}]}/></Form.Item><Form.Item name="sortOrder" label="排序"><InputNumber min={0} style={{width:"100%"}}/></Form.Item><Form.Item name="status" label="状态"><Select options={[{value:1,label:"显示"},{value:0,label:"隐藏"}]}/></Form.Item></Form></Modal></>;
+}
+
 function HomeFloors() {
   const { message } = AntApp.useApp();
   const rows = usePagedLoad("/api/admin/content/home-floors", 10);
@@ -2679,6 +3322,7 @@ function HomeFloors() {
   const categories = useLoad<Row[]>(() => rootApi("/api/admin/business/categories"));
   const brands = useLoad<Row[]>(() => rootApi("/api/admin/content/brands/list"));
   const platforms = useLoad<Row[]>(() => rootApi("/api/admin/content/platform"));
+  const articles = useLoad<Row[]>(() => rootApi("/api/admin/content/content"));
   const selectableSkus = expandProductSkus(products.data || []).filter((row) => Number(row.status) === 1);
   const [form] = Form.useForm();
   const [itemForm] = Form.useForm();
@@ -2689,11 +3333,17 @@ function HomeFloors() {
   const [itemsOpen, setItemsOpen] = useState(false);
   const selectionRule = Form.useWatch("selectionRule", form);
   const contentType = Form.useWatch("contentType", form);
-  const show = (row?: Row) => {
+  const show = async (row?: Row) => {
     setEditing(row);
     form.resetFields();
     form.setFieldsValue(row || { contentType: "PRODUCT", selectionRule: "LATEST", displayCount: 4, targetScope: "ALL", sortOrder: 0, status: 1 });
     setOpen(true);
+    if(row?.selectionRule === "MANUAL") {
+      try {
+        const selected=await rootApi<Row[]>(`/api/admin/content/home-floors/${row.id}/items`);
+        form.setFieldValue("contentIds",selected.map((item)=>Number(item.contentId)));
+      } catch (error) { message.error((error as Error).message); }
+    }
   };
   const save = async () => {
     try {
@@ -2712,7 +3362,7 @@ function HomeFloors() {
   const addItem = async () => {
     try {
       const values = await itemForm.validateFields();
-      const response = await fetch(`/api/admin/content/home-floors/${floor!.id}/items`, { method: "POST", headers: apiHeaders(), body: JSON.stringify(values) });
+      const response = await fetch(`/api/admin/content/home-floors/${floor!.id}/items`, { method: "POST", headers: apiHeaders(), body: JSON.stringify({...values,sortOrder:items.length}) });
       if (!response.ok) throw new Error("内容添加失败");
       await manageItems(floor!); itemForm.resetFields(); message.success("楼层内容已添加");
     } catch (error) { if (error instanceof Error) message.error(error.message); }
@@ -2721,10 +3371,21 @@ function HomeFloors() {
     await fetch(`/api/admin/content/home-floors/${floor!.id}/items/${row.id}`, { method: "DELETE", headers: apiHeaders() });
     await manageItems(floor!); message.success("已从楼层移除");
   };
+  const moveItem = async (index:number,direction:-1|1) => {
+    const target=index+direction;
+    if(target<0||target>=items.length)return;
+    const ordered=[...items];
+    [ordered[index],ordered[target]]=[ordered[target],ordered[index]];
+    try{
+      await Promise.all(ordered.map((item,position)=>rootMutation(`/api/admin/content/home-floors/${floor!.id}/items`,{method:"POST",body:JSON.stringify({contentId:Number(item.contentId),sortOrder:position})})));
+      setItems(ordered.map((item,position)=>({...item,sortOrder:position})));
+      message.success("展示顺序已更新");
+    }catch(error){message.error((error as Error).message);}
+  };
   const typeLabels: Record<string,string> = { PRODUCT: "商品", SOLUTION: "方案", CATEGORY: "分类", CONTENT: "文章" };
   const ruleLabels: Record<string,string> = { MANUAL: "手动选择", LATEST: "最新上架", SALES: "销量排行", VIEWS: "浏览排行", CATEGORY: "指定分类", BRAND: "指定品牌", PLATFORM: "指定平台", AGREEMENT: "协议商品" };
   return <>
-    <Card className="data-card" title="首页楼层列表" extra={<Button type="primary" onClick={() => show()}>＋ 新增楼层</Button>}>
+    <Card className="data-card" title="首页楼层列表" extra={<Button type="primary" onClick={() => void show()}>＋ 新增楼层</Button>}>
       <Table rowKey="id" loading={rows.loading} dataSource={rows.data} server={rows.server} searchPlaceholder="搜索楼层名称、副标题或选品规则" columns={[
         { title: "楼层", render: (_, row) => <><strong>{row.title}</strong><small className="subline">{row.subtitle || "—"}</small></> },
         { title: "内容", render: (_, row) => `${typeLabels[row.contentType] || row.contentType} · ${ruleLabels[row.selectionRule] || row.selectionRule}` },
@@ -2732,7 +3393,7 @@ function HomeFloors() {
         { title: "展示端", dataIndex: "targetScope", width: 90, render: (v) => ({ALL:"Web + H5",WEB:"Web",H5:"H5"} as Row)[v] || v },
         { title: "排序", dataIndex: "sortOrder", width: 80 },
         { title: "状态", dataIndex: "status", width: 90, render: (v) => <Tag color={Number(v)===1?"green":"default"}>{Number(v)===1?"启用":"停用"}</Tag> },
-        { title: "操作", width: 210, render: (_, row) => <Space>{row.selectionRule === "MANUAL" && <Button type="link" onClick={() => void manageItems(row)}>内容管理</Button>}<Button type="link" onClick={() => show(row)}>编辑</Button></Space> },
+        { title: "操作", width: 210, render: (_, row) => <Space>{row.selectionRule === "MANUAL" && <Button type="link" onClick={() => void manageItems(row)}>内容管理</Button>}<Button type="link" onClick={() => void show(row)}>编辑</Button></Space> },
       ]} />
     </Card>
     <Modal open={open} title={`${editing?"编辑":"新增"}首页楼层`} width={720} onCancel={() => setOpen(false)} onOk={() => void save()}>
@@ -2741,6 +3402,10 @@ function HomeFloors() {
         <Form.Item name="subtitle" label="楼层副标题"><Input /></Form.Item>
         <Form.Item name="contentType" label="内容类型" rules={[{required:true}]}><Select options={Object.entries(typeLabels).map(([value,label])=>({value,label}))} /></Form.Item>
         <Form.Item name="selectionRule" label="选取规则" rules={[{required:true}]}><Select options={Object.entries(ruleLabels).filter(([value])=>contentType==="PRODUCT"||["MANUAL","LATEST"].includes(value)).map(([value,label])=>({value,label}))} /></Form.Item>
+        {selectionRule === "MANUAL" && ["PRODUCT","CONTENT"].includes(contentType) && <Form.Item name="contentIds" label={contentType==="PRODUCT"?"楼层商品":"楼层文章"} className="full" rules={[{required:true,type:"array",min:1,message:`请至少选择一${contentType==="PRODUCT"?"个商品":"篇文章"}`}]} extra="已选顺序即楼层展示顺序。">
+          <Select mode="multiple" showSearch optionFilterProp="label" placeholder="搜索并选择商品 SKU" maxTagCount="responsive"
+            options={(contentType==="PRODUCT"?selectableSkus:articles.data||[]).filter((row)=>Number(row.status)===1).map((row)=>({value:Number(row.id||row.skuId),label:contentType==="PRODUCT"?`${row.title} · ${row.skuCode}`:`${row.title}${row.subtitle?` · ${row.subtitle}`:""}`}))} />
+        </Form.Item>}
         {["CATEGORY","BRAND","PLATFORM"].includes(selectionRule) && <Form.Item name="referenceId" label={selectionRule==="CATEGORY"?"指定分类":selectionRule==="BRAND"?"指定品牌":"指定平台"} rules={[{required:true}]}><Select showSearch optionFilterProp="label" placeholder="请选择" options={(selectionRule==="CATEGORY"?categories.data||[]:selectionRule==="BRAND"?brands.data||[]:platforms.data||[]).map(row=>({value:Number(row.id),label:selectionRule==="CATEGORY"?`${"　".repeat(Math.max(0,Number(row.level)-1))}${row.name}`:row.name||row.title}))} /></Form.Item>}
         <Form.Item name="displayCount" label="展示数量" rules={[{required:true}]}><InputNumber min={1} max={50} style={{width:"100%"}} /></Form.Item>
         <Form.Item name="targetScope" label="展示端" rules={[{required:true}]}><Select options={[{value:"ALL",label:"Web + H5"},{value:"WEB",label:"仅 Web"},{value:"H5",label:"仅 H5"}]} /></Form.Item>
@@ -2749,17 +3414,18 @@ function HomeFloors() {
         <Form.Item name="status" label="状态"><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]} /></Form.Item>
       </Form>
     </Modal>
-    <Modal open={itemsOpen} title={`${floor?.title||""} · 内容管理`} width={820} footer={null} onCancel={() => setItemsOpen(false)}>
-      <Form form={itemForm}><Space.Compact style={{width:"100%",marginBottom:16}}>
-        <Form.Item name="contentId" noStyle rules={[{required:true,message:"请选择或输入内容"}]}>
+    <Modal open={itemsOpen} title={`${floor?.title||""} · 内容管理`} width={860} footer={null} className="floor-items-modal" onCancel={() => setItemsOpen(false)}>
+      <Form form={itemForm} className="floor-item-add-form">
+        <Form.Item name="contentId" label="添加楼层内容" rules={[{required:true,message:"请选择或输入内容"}]}>
           {floor?.contentType==="PRODUCT"
-            ? <Select showSearch optionFilterProp="label" style={{flex:1}} placeholder="选择商品 SKU" options={selectableSkus.map(row=>({value:Number(row.id||row.skuId),label:`${row.title} · ${row.skuCode}`}))} />
-            : <InputNumber min={1} style={{flex:1,width:"100%"}} placeholder="输入方案、分类或文章 ID" />}
+            ? <Select showSearch optionFilterProp="label" placeholder="输入商品名称或 SKU 搜索并选择" options={selectableSkus.map(row=>({value:Number(row.id||row.skuId),label:`${row.title} · ${row.skuCode}`}))} />
+            : floor?.contentType==="CONTENT"
+              ? <Select showSearch optionFilterProp="label" placeholder="输入文章标题搜索并选择" options={(articles.data||[]).filter(row=>Number(row.status)===1).map(row=>({value:Number(row.id),label:`${row.title}${row.subtitle?` · ${row.subtitle}`:""}`}))} />
+            : <InputNumber min={1} style={{width:"100%"}} placeholder="输入方案、分类或文章 ID" />}
         </Form.Item>
-        <Form.Item name="sortOrder" noStyle initialValue={0}><InputNumber min={0} placeholder="排序" /></Form.Item>
         <Button type="primary" onClick={() => void addItem()}>添加</Button>
-      </Space.Compact></Form>
-      <Table rowKey="id" pagination={false} dataSource={items} columns={[{title:"内容",render:(_,row)=><><strong>{row.title||`内容 #${row.contentId}`}</strong><small className="subline">{row.subtitle}</small></>},{title:"排序",dataIndex:"sortOrder",width:90},{title:"操作",width:90,render:(_,row)=><Button type="link" danger onClick={()=>void removeItem(row)}>移除</Button>}]} />
+      </Form>
+      <div className="floor-items-table"><Table rowKey="id" pagination={false} dataSource={items} columns={[{title:"内容",render:(_,row)=><><strong>{row.title||`内容 #${row.contentId}`}</strong><small className="subline">{row.subtitle}</small></>},{title:"展示顺序",width:150,render:(_,row,index)=><Space size={4}><Button className="sort-arrow-button" disabled={index===0} onClick={()=>void moveItem(index,-1)} title="上移">↑</Button><Button className="sort-arrow-button" disabled={index===items.length-1} onClick={()=>void moveItem(index,1)} title="下移">↓</Button><Typography.Text type="secondary">第 {index+1} 位</Typography.Text></Space>},{title:"操作",width:90,render:(_,row)=><Button type="link" danger onClick={()=>void removeItem(row)}>移除</Button>}]} /></div>
     </Modal>
   </>;
 }
@@ -3338,7 +4004,7 @@ function PortalManager({ module }: { module: Module }) {
   );
 }
 
-function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []) {
+function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = [], enabled = true) {
   const { message } = AntApp.useApp();
   const [data, setData] = useState<T>();
   const [loading, setLoading] = useState(true);
@@ -3353,8 +4019,9 @@ function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = []) {
     }
   };
   useEffect(() => {
+    if(!enabled){setLoading(false);return;}
     void refresh();
-  }, deps);
+  }, [enabled,...deps]);
   return { data, loading, refresh };
 }
 
@@ -4007,6 +4674,7 @@ function Configs() {
     () =>
       Object.entries(
         (result.data || []).reduce((a: Record<string, Row[]>, r) => {
+          if(r.groupName==="商品模板")return a;
           (a[r.groupName] ??= []).push(r);
           return a;
         }, {}),
@@ -4140,6 +4808,18 @@ function Configs() {
                 </div>
               ),
             })),
+            {
+              key:"product-services",label:"商品服务",children:<ProductServiceOptions />,
+            },
+            {
+              key:"delivery-templates",label:"配送模板",children:<ProductTemplateSettings config={(result.data||[]).find((row)=>row.configKey==="product.deliveryTemplates")} title="配送模板" onSaved={()=>void result.refresh()} />,
+            },
+            {
+              key:"after-sales-templates",label:"售后政策模板",children:<ProductTemplateSettings config={(result.data||[]).find((row)=>row.configKey==="product.afterSalesTemplates")} title="售后政策模板" onSaved={()=>void result.refresh()} />,
+            },
+            {
+              key:"bank-accounts",label:"收款银行",children:<BankAccounts />,
+            },
             {
               key: "option-management",
               label: "选项管理",
@@ -4356,6 +5036,72 @@ function Configs() {
   );
 }
 
+function ProductTemplateSettings({config,title,onSaved}:{config?:Row;title:string;onSaved:()=>void}){
+  const {message,modal}=AntApp.useApp();
+  const [form]=Form.useForm();
+  const [open,setOpen]=useState(false);
+  const [editing,setEditing]=useState<Row>();
+  const templates=parseTemplateList(config?.configValue);
+  const persist=async(next:Row[])=>{
+    if(!config)throw new Error("模板配置尚未初始化，请刷新页面后重试");
+    const normalized=next.length&&!next.some((item)=>item.isDefault)
+      ? next.map((item,index)=>({...item,isDefault:index===0})) : next;
+    await api(`/configs/${config.id}`,{method:"PUT",body:JSON.stringify({configValue:JSON.stringify(normalized),description:config.description,isPublic:Number(config.isPublic||0)})});
+    onSaved();
+  };
+  const show=(row?:Row)=>{setEditing(row);form.resetFields();form.setFieldsValue(row||{title:"",content:"",isDefault:templates.length===0});setOpen(true);};
+  const save=async()=>{try{
+    const values=await form.validateFields();
+    const id=editing?.id||`${Date.now()}-${Math.random().toString(36).slice(2,8)}`;
+    let next=editing?templates.map((item)=>String(item.id)===String(editing.id)?{...item,...values,id}:item):[...templates,{...values,id}];
+    if(values.isDefault)next=next.map((item)=>({...item,isDefault:String(item.id)===String(id)}));
+    await persist(next);message.success(`${title}已保存`);setOpen(false);
+  }catch(error){if(error instanceof Error)message.error(error.message);}};
+  const remove=(row:Row)=>modal.confirm({title:`删除模板“${row.title}”？`,okButtonProps:{danger:true},onOk:async()=>{await persist(templates.filter((item)=>String(item.id)!==String(row.id)));message.success("模板已删除");}});
+  const setDefault=async(row:Row)=>{await persist(templates.map((item)=>({...item,isDefault:String(item.id)===String(row.id)})));message.success(`已将“${row.title}”设为默认模板`);};
+  return <><div className="footer-link-tab"><Button type="primary" onClick={()=>show()}>＋ 新增{title}</Button></div>
+    <Table rowKey="id" dataSource={templates} columns={[
+      {title:"模板名称",dataIndex:"title",width:220},{title:"模板内容",dataIndex:"content",ellipsis:true},
+      {title:"默认模板",dataIndex:"isDefault",width:110,render:(value,row)=>value?<Tag color="green">默认</Tag>:<Button type="link" onClick={()=>void setDefault(row)}>设为默认</Button>},
+      {title:"操作",width:150,render:(_,row)=><Space><Button type="link" onClick={()=>show(row)}>编辑</Button><Button type="link" danger onClick={()=>remove(row)}>删除</Button></Space>},
+    ]}/>
+    <Modal open={open} title={`${editing?"编辑":"新增"}${title}`} onCancel={()=>setOpen(false)} onOk={()=>void save()}>
+      <Form form={form} layout="vertical"><Form.Item name="title" label="模板名称" rules={[{required:true,message:"请输入模板名称"}]}><Input maxLength={80}/></Form.Item>
+        <Form.Item name="content" label="模板内容" rules={[{required:true,message:"请输入模板内容"}]}><Input.TextArea rows={7}/></Form.Item>
+        <Form.Item name="isDefault" label="默认模板" valuePropName="checked"><Switch checkedChildren="默认" unCheckedChildren="普通"/></Form.Item>
+      </Form>
+    </Modal>
+  </>;
+}
+
+function ProductServiceOptions(){
+  const {message,modal}=AntApp.useApp();
+  const rows=usePagedLoad("/api/admin/system/options?type=PRODUCT_SERVICE",10);
+  const [form]=Form.useForm();const [open,setOpen]=useState(false);const [editing,setEditing]=useState<Row>();
+  const show=(row?:Row)=>{setEditing(row);form.resetFields();form.setFieldsValue(row||{label:"",optionValue:"",sortOrder:(rows.data.length+1)*10,status:1});setOpen(true);};
+  const save=async()=>{try{const values=await form.validateFields();await api(editing?`/options/${editing.id}`:"/options",{
+    method:editing?"PUT":"POST",body:JSON.stringify({...values,optionType:"PRODUCT_SERVICE"}),
+  });message.success("商品服务已保存");setOpen(false);void rows.refresh();}catch(error){if(error instanceof Error)message.error(error.message);}};
+  const remove=(row:Row)=>modal.confirm({title:`删除商品服务“${row.label}”？`,content:"删除后，已选择该服务的商品将自动取消关联。",okButtonProps:{danger:true},onOk:async()=>{
+    await api(`/options/${row.id}`,{method:"DELETE"});message.success("商品服务已删除");void rows.refresh();
+  }});
+  return <><div className="footer-link-tab"><Button type="primary" onClick={()=>show()}>＋ 新增商品服务</Button></div>
+    <Table rowKey="id" loading={rows.loading} dataSource={rows.data} server={rows.server} searchPlaceholder="搜索商品服务名称或编码" columns={[
+      {title:"服务名称",dataIndex:"label"},{title:"服务编码",dataIndex:"optionValue",render:(value)=><Typography.Text code>{value}</Typography.Text>},
+      {title:"排序",dataIndex:"sortOrder",width:90},{title:"状态",dataIndex:"status",width:90,render:(value)=><Tag color={Number(value)===1?"green":"default"}>{Number(value)===1?"启用":"停用"}</Tag>},
+      {title:"操作",width:150,render:(_,row)=><Space><Button type="link" onClick={()=>show(row)}>编辑</Button><Button type="link" danger onClick={()=>remove(row)}>删除</Button></Space>},
+    ]}/>
+    <Modal open={open} title={`${editing?"编辑":"新增"}商品服务`} onCancel={()=>setOpen(false)} onOk={()=>void save()}>
+      <Form form={form} layout="vertical">
+        <Form.Item name="label" label="服务名称" rules={[{required:true,message:"请输入服务名称"}]}><Input placeholder="例如：全国配送" maxLength={120}/></Form.Item>
+        <Form.Item name="optionValue" label="服务编码" extra="用于系统识别，建议使用大写英文和下划线。" rules={[{required:true,message:"请输入服务编码"},{pattern:/^[A-Z][A-Z0-9_]*$/,message:"请使用大写英文、数字和下划线"}]}><Input disabled={Boolean(editing)} placeholder="NATIONWIDE_DELIVERY" maxLength={160}/></Form.Item>
+        <Form.Item name="sortOrder" label="排序" rules={[{required:true}]}><InputNumber min={0} precision={0} style={{width:"100%"}}/></Form.Item>
+        <Form.Item name="status" label="状态" rules={[{required:true}]}><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]}/></Form.Item>
+      </Form>
+    </Modal>
+  </>;
+}
+
 function ConfigRow({
   row,
   saving,
@@ -4363,19 +5109,20 @@ function ConfigRow({
 }: {
   row: Row;
   saving: boolean;
-  save: (value: any) => void;
+  save: (value: any) => void | Promise<void>;
 }) {
   const [value, setValue] = useState<any>(row.configValue);
   useEffect(() => setValue(row.configValue), [row.configValue]);
+  const isLogo=row.configKey==="platform.logo";
   return (
-    <div className="config-row">
+    <div className={`config-row${isLogo?" config-row-upload":""}`}>
       <div>
         <strong>{row.description}</strong>
         <small>
           {row.configKey} · 最近更新 {dateTime(row.updatedAt)}
         </small>
       </div>
-      {row.valueType === "BOOLEAN" ? (
+      {isLogo ? <div><Input value={value} onChange={(e)=>setValue(e.target.value)} placeholder="上传图片或输入 Logo 链接" /><ProductImageUpload kind="brand" value={value} onChange={(next)=>{setValue(next);if(next.trim())void save(next);}} /></div> : row.valueType === "BOOLEAN" ? (
         <Switch
           checked={value === "true"}
           onChange={(checked) => {
