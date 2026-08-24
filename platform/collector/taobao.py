@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import html
 import http.cookiejar
 import json
@@ -71,11 +72,20 @@ def _request_data(item_id: str, sku_id: str | None) -> str:
 
 
 def fetch_detail(item_id: str, sku_id: str | None, cookie: str | None = None) -> dict:
-    raw_cookie = cookie if cookie is not None else os.environ.get("TAOBAO_MTOP_COOKIE", "")
+    if cookie is not None:
+        raw_cookie = cookie
+    else:
+        raw_cookie = os.environ.get("TAOBAO_MTOP_COOKIE", "")
+        encoded = os.environ.get("TAOBAO_MTOP_COOKIE_BASE64", "").strip()
+        if not raw_cookie and encoded:
+            try:
+                raw_cookie = base64.b64decode(encoded, validate=True).decode("utf-8")
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise CollectError("taobao_auth_required", "TAOBAO_MTOP_COOKIE_BASE64 配置格式不正确", status=401) from exc
     if not raw_cookie.strip():
         raise CollectError(
             "taobao_auth_required",
-            "淘宝/天猫要求登录采集，请先在服务器安全配置 TAOBAO_MTOP_COOKIE",
+            "淘宝/天猫要求登录采集，请先在服务器安全配置 TAOBAO_MTOP_COOKIE_BASE64",
             status=401,
         )
     jar = _cookie_jar(raw_cookie)

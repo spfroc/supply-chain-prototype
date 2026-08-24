@@ -75,6 +75,7 @@ services:
       SUPPLY_API_BASE: http://api:8080
       COLLECTOR_BROWSER_PROXY: ${COLLECTOR_BROWSER_PROXY:-}
       TAOBAO_MTOP_COOKIE: ${TAOBAO_MTOP_COOKIE:-}
+      TAOBAO_MTOP_COOKIE_BASE64: ${TAOBAO_MTOP_COOKIE_BASE64:-}
       NO_PROXY: localhost,127.0.0.1,api,redis,collector,frontend
       no_proxy: localhost,127.0.0.1,api,redis,collector,frontend
     healthcheck:
