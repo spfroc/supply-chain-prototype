@@ -759,6 +759,6 @@ async def scrape_jd(pool: BrowserPool, url: str) -> dict:
     # 京东会按出口/IP临时隐藏图文。保留已验证的轮播图作为详情素材，
     # importer 同时渲染结构化参数，避免生成空详情或只有标题的页面。
     if len(details) <= 1:
-        details = list(dict.fromkeys(details + list(product.get("images") or [])))
+        details = uniquify_images(details + list(product.get("images") or []), limit=40)
     product["detailImages"] = details
     return product
