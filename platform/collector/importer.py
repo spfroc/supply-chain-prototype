@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import io
+import ipaddress
 import json
 import os
 import re
+import socket
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -49,17 +51,45 @@ def graphic_url(path: str) -> str:
     return graphic_path_url(path)
 
 
+def _validate_public_http_url(url: str) -> None:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise RuntimeError("仅允许下载 HTTP/HTTPS 图片")
+    try:
+        addresses = socket.getaddrinfo(
+            parsed.hostname,
+            parsed.port or (443 if parsed.scheme == "https" else 80),
+        )
+    except socket.gaierror as exc:
+        raise RuntimeError(f"无法解析图片域名：{parsed.hostname}") from exc
+    for address in addresses:
+        if not ipaddress.ip_address(address[4][0]).is_global:
+            raise RuntimeError(f"禁止访问非公网图片地址：{parsed.hostname}")
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _validate_public_http_url(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
 def http_get(url: str, timeout: int = 20) -> bytes:
+    _validate_public_http_url(url)
     req = urllib.request.Request(url, headers={"User-Agent": UA, "Referer": url})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read()
+        opener = urllib.request.build_opener(_SafeRedirectHandler())
+        with opener.open(req, timeout=timeout) as resp:
+            length = int(resp.headers.get("Content-Length") or 0)
+            if length > 20 * 1024 * 1024:
+                raise RuntimeError("图片文件超过20MB")
+            data = resp.read(20 * 1024 * 1024 + 1)
+            if len(data) > 20 * 1024 * 1024:
+                raise RuntimeError("图片文件超过20MB")
+            return data
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"GET {url} -> {exc.code}") from exc
-    except (ssl.SSLError, urllib.error.URLError):
-        ctx = ssl._create_unverified_context()
-        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
-            return resp.read()
+    except (ssl.SSLError, urllib.error.URLError) as exc:
+        raise RuntimeError(f"安全下载图片失败：{url}") from exc
 
 
 def square_jpeg(data: bytes, size: int = 800) -> bytes:

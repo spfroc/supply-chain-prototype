@@ -113,22 +113,18 @@ def detect_platform(url: str, platform: str | None) -> str:
         "taobao.com", "tmall.com", "tmall.hk",
     )):
         detected = "taobao"
-    elif host.endswith("miniappss.com") or host.endswith("huiecai.com") or "goodsinfo/" in path:
+    elif host == "miniappss.com" or host.endswith(".miniappss.com") or host == "huiecai.com" or host.endswith(".huiecai.com"):
         detected = "huiecai"
-    elif (
-        host.endswith("shandong.gov.cn")
-        or "gpfa-main-web" in path
-        or "goodslibrary" in path
-        or "goodspriceguid" in query
-        or "scshortlistedgoodslibrary" in path
-    ):
+    elif host == "shandong.gov.cn" or host.endswith(".shandong.gov.cn"):
         detected = "qilu"
     elif re.fullmatch(r"\d{6,}", (url or "").strip()):
-        detected = requested
+        detected = "jd"
     if requested:
         if requested not in SUPPORTED_PLATFORMS:
             raise CollectError("unsupported_platform", f"不支持的平台：{requested}")
-        if detected and detected != requested:
+        if not detected:
+            raise CollectError("invalid_url", "商品链接域名不在所选平台白名单中")
+        if detected != requested:
             raise CollectError("platform_mismatch", "选择的平台与商品链接不一致")
         return requested
     if detected:

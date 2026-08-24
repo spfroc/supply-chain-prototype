@@ -79,7 +79,7 @@ services:
       interval: 20s
       timeout: 5s
       retries: 10
-    networks: [internal, global_network]
+    networks: [internal, collector_egress]
 
   frontend:
     build:
@@ -114,6 +114,7 @@ volumes:
 networks:
   internal:
     internal: true
+  collector_egress:
   global_network:
     external: true
     name: ${GLOBAL_NETWORK_NAME:-global_network}

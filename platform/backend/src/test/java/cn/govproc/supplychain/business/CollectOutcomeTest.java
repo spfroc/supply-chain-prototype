@@ -42,5 +42,11 @@ class CollectOutcomeTest {
         assertThat(CollectJobService.detectPlatform(
             "https://ggzyjyzx.shandong.gov.cn:8182/gpfa-main-web/goodslibrary/gpfa/goodsDetail?goodspriceguid=1"
         )).isEqualTo("qilu");
+        assertThat(CollectJobService.detectPlatform(
+            "http://127.0.0.1/goodsInfo/84395.html"
+        )).isEqualTo("unknown");
+        assertThat(CollectJobService.detectPlatform(
+            "http://169.254.169.254/goodsDetail?goodspriceguid=1"
+        )).isEqualTo("unknown");
     }
 }
