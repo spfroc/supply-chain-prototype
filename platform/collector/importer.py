@@ -132,17 +132,16 @@ def detail_html(params: dict, title: str, detail_urls: list[str] | None = None) 
         f'<p style="margin:0;text-align:center"><img src="{url}" alt="{title}" loading="lazy" style="max-width:100%;height:auto"></p>'
         for url in (detail_urls or [])
     )
-    if images:
-        return images
     rows = "".join(
         f"<tr><th style='text-align:left;padding:6px 12px;background:#f7f7f7'>{k}</th>"
         f"<td style='padding:6px 12px'>{v}</td></tr>"
         for k, v in params.items()
     )
-    return (
-        f"<h3>{title}</h3><table border='1' cellspacing='0' cellpadding='0'"
+    specs = (
+        f"<h3 style='margin:24px 0 12px'>{title}</h3><table border='1' cellspacing='0' cellpadding='0'"
         f" style='border-collapse:collapse;width:100%'>{rows}</table>"
-    )
+    ) if rows else f"<h3>{title}</h3>"
+    return images + specs
 
 
 class Admin:
@@ -667,7 +666,7 @@ def import_scraped(product: dict, authorization: str) -> dict:
         category_id = int(exists["categoryId"])
         attribute_values = map_attribute_values(admin, category_id, params, spec, extra_text_from_product(product))
         detail_urls = upload_detail_images(admin, product.get("detailImages") or [])
-        html = detail_html(params, title, detail_urls) if detail_urls else None
+        html = detail_html(params, title, detail_urls)
         overlays = {
             "model": model,
             "attributeValues": attribute_values,

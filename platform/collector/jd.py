@@ -460,8 +460,62 @@ async def _detail_images_from_page(page: Page, sku: str) -> list[str]:
     return parse_graphic_images("\n".join(chunks))
 
 
+async def _detail_images_from_mobile(pool: BrowserPool, sku: str) -> list[str]:
+    """让京东页面生成 h5st 签名后监听图文接口；不可自行拼接已失效的旧请求。"""
+    page = await pool.new_page(mobile=True)
+    captured: list[str] = []
+
+    async def on_response(response) -> None:
+        try:
+            if "item_intruduce_info" not in (response.url or "") or not response.ok:
+                return
+            text = await response.text()
+            captured.extend(parse_graphic_images(text))
+        except Exception:
+            return
+
+    page.on("response", on_response)
+    try:
+        await page.goto(
+            f"https://item.m.jd.com/product/{sku}.html",
+            wait_until="commit",
+            timeout=60000,
+        )
+        await page.wait_for_timeout(1800)
+        try:
+            detail = page.locator("#detail")
+            if await detail.count():
+                await detail.scroll_into_view_if_needed(timeout=5000)
+            tab = page.locator("#detailTab .item").first
+            if await tab.count():
+                await tab.click(timeout=3000)
+        except Exception:
+            pass
+        await page.wait_for_timeout(4500)
+        if captured:
+            return list(dict.fromkeys(captured))[:40]
+        # 接口被限流时页面有时已写入部分详情，仍应保留可验证的内容。
+        chunks = []
+        for selector in ("#commDesc", "#detail1", "#detail"):
+            try:
+                locator = page.locator(selector)
+                if await locator.count():
+                    chunks.append(await locator.first.inner_html())
+            except Exception:
+                continue
+        return parse_graphic_images("\n".join(chunks))
+    finally:
+        await _close_page(page)
+
+
 async def fetch_detail_images(pool: BrowserPool, sku: str) -> list[str]:
-    """独立打开 www.jd.com 拉取图文，避免 item 页 403/跳转导致 fetch 失败。"""
+    """优先使用页面签名的移动详情接口，再兼容旧 PC 图文接口。"""
+    try:
+        mobile = await _detail_images_from_mobile(pool, sku)
+        if mobile:
+            return mobile
+    except Exception:
+        pass
     page = await pool.new_page(mobile=False)
     try:
         for home in ("https://www.jd.com/", "https://item.jd.com/"):
@@ -702,5 +756,9 @@ async def scrape_jd(pool: BrowserPool, url: str) -> dict:
         details = await fetch_detail_images(pool, sku)
     except Exception:
         details = []
+    # 京东会按出口/IP临时隐藏图文。保留已验证的轮播图作为详情素材，
+    # importer 同时渲染结构化参数，避免生成空详情或只有标题的页面。
+    if not details:
+        details = list(product.get("images") or [])
     product["detailImages"] = details
     return product
