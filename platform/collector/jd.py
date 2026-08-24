@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import re
 import urllib.request
 from urllib.parse import quote
@@ -348,9 +349,14 @@ class BrowserPool:
         if self._browser and self._browser.is_connected():
             return
         self._playwright = await async_playwright().start()
+        proxy_url = os.getenv("COLLECTOR_BROWSER_PROXY", "").strip()
+        launch_options = {}
+        if proxy_url:
+            launch_options["proxy"] = {"server": proxy_url}
         self._browser = await self._playwright.chromium.launch(
             headless=True,
             args=["--no-sandbox", "--disable-dev-shm-usage", "--disable-blink-features=AutomationControlled"],
+            **launch_options,
         )
 
     async def stop(self) -> None:
@@ -574,9 +580,21 @@ async def _scrape_mobile(pool: BrowserPool, sku: str) -> dict:
     page = await pool.new_page(mobile=True)
     try:
         await page.goto(page_url, wait_until="domcontentloaded", timeout=60000)
+        if "risk_handler" in page.url or "cfe.m.jd.com/privatedomain" in page.url:
+            raise CollectError(
+                "blocked",
+                "京东限制了当前服务器的采集访问，请稍后重试或切换采集出口",
+                status=502,
+            )
         deadline = asyncio.get_event_loop().time() + 15
         info = None
         while asyncio.get_event_loop().time() < deadline:
+            if "risk_handler" in page.url or "cfe.m.jd.com/privatedomain" in page.url:
+                raise CollectError(
+                    "blocked",
+                    "京东限制了当前服务器的采集访问，请稍后重试或切换采集出口",
+                    status=502,
+                )
             info = await page.evaluate("() => window._itemInfo || null")
             if info and (info.get("product") or info.get("item")):
                 break
