@@ -579,7 +579,10 @@ async def _scrape_mobile(pool: BrowserPool, sku: str) -> dict:
     page_url = f"https://item.m.jd.com/product/{sku}.html"
     page = await pool.new_page(mobile=True)
     try:
-        await page.goto(page_url, wait_until="domcontentloaded", timeout=60000)
+        # JD keeps several analytics requests open when reached through a
+        # forwarding proxy. Waiting for DOMContentLoaded can therefore time
+        # out even though window._itemInfo is already available.
+        await page.goto(page_url, wait_until="commit", timeout=60000)
         if "risk_handler" in page.url or "cfe.m.jd.com/privatedomain" in page.url:
             raise CollectError(
                 "blocked",
