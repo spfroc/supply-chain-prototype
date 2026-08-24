@@ -226,7 +226,68 @@ public class CollectJobService {
         return job;
     }
 
+    public Map<String, Object> retryFailed(long jobId, String authorization) {
+        requireCollector(authorization);
+        Integer claimed = tx.execute(status -> {
+            int updated = jdbc.sql("""
+                UPDATE collect_job j
+                SET status='PENDING', error_message=NULL, started_at=NULL, finished_at=NULL
+                WHERE j.id=:id
+                  AND j.status NOT IN ('PENDING','RUNNING')
+                  AND EXISTS (
+                    SELECT 1 FROM collect_job_item i
+                    WHERE i.job_id=j.id AND i.status='FAILED'
+                  )
+                """).param("id", jobId).update();
+            if (updated == 0) {
+                return 0;
+            }
+            jdbc.sql("""
+                UPDATE collect_job_item
+                SET status='PENDING', attempt_count=0,
+                    error_code=NULL, error_message=NULL,
+                    product_id=NULL, sku_code=NULL, title=NULL,
+                    started_at=NULL, finished_at=NULL
+                WHERE job_id=:id AND status='FAILED'
+                """).param("id", jobId).update();
+            return updated;
+        });
+        if (claimed == null || claimed == 0) {
+            boolean exists = jdbc.sql("SELECT COUNT(*) FROM collect_job WHERE id=:id")
+                .param("id", jobId).query(Integer.class).single() > 0;
+            if (!exists) {
+                throw new ResponseStatusException(HttpStatus.NOT_FOUND, "采集任务不存在");
+            }
+            String status = jdbc.sql("SELECT status FROM collect_job WHERE id=:id")
+                .param("id", jobId).query(String.class).single();
+            if ("PENDING".equals(status) || "RUNNING".equals(status)) {
+                throw new ResponseStatusException(HttpStatus.CONFLICT, "任务正在执行，请勿重复重试");
+            }
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "该任务没有可重试的失败项");
+        }
+        refreshJobProgress(jobId);
+        executor.execute(() -> {
+            try {
+                processJob(jobId, authorization, 3);
+            } catch (Exception exception) {
+                log.error("retry collect job {} failed", jobId, exception);
+                jdbc.sql("""
+                    UPDATE collect_job SET status='FAILED',
+                      error_message=:message, finished_at=NOW()
+                    WHERE id=:id AND status IN ('PENDING','RUNNING')
+                    """).param("id", jobId)
+                    .param("message", trim("重试采集中断：" + exception.getMessage(), 500))
+                    .update();
+            }
+        });
+        return get(jobId);
+    }
+
     Map<String, Object> processJob(long jobId, String authorization) {
+        return processJob(jobId, authorization, null);
+    }
+
+    private Map<String, Object> processJob(long jobId, String authorization, Integer attemptsOverride) {
         jdbc.sql("""
             UPDATE collect_job SET status='RUNNING', started_at=COALESCE(started_at, NOW())
             WHERE id=:id AND status IN ('PENDING','RUNNING')
@@ -235,7 +296,9 @@ public class CollectJobService {
             .param("id", jobId).query().listOfRows();
         String mode = jdbc.sql("SELECT mode FROM collect_job WHERE id=:id")
             .param("id", jobId).query(String.class).single();
-        int maxAttempts = "BATCH".equals(mode) ? MAX_ATTEMPTS : 1;
+        int maxAttempts = attemptsOverride == null
+            ? ("BATCH".equals(mode) ? MAX_ATTEMPTS : 1)
+            : Math.max(1, attemptsOverride);
         Map<String, Object> lastSuccess = null;
         for (Map<String, Object> item : items) {
             if (!"PENDING".equals(String.valueOf(item.get("status")))) {

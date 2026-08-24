@@ -37,6 +37,11 @@ public class CollectJobController {
         return jobs.get(id);
     }
 
+    @PostMapping("/collect-jobs/{id}/retry")
+    Map<String, Object> retry(@PathVariable long id, HttpServletRequest http) {
+        return jobs.retryFailed(id, http.getHeader("Authorization"));
+    }
+
     @PostMapping("/collect-jobs")
     Map<String, Object> create(@Valid @RequestBody BatchRequest request, HttpServletRequest http,
                                Principal principal) {

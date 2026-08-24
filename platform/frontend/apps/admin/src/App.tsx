@@ -4329,6 +4329,7 @@ function CollectJobs() {
   const { message } = AntApp.useApp();
   const rows = usePagedLoad("/api/admin/business/products/collect-jobs", 10);
   const [detail, setDetail] = useState<Row>();
+  const [retryingId, setRetryingId] = useState<number>();
   const refreshRef = useRef<() => Promise<void> | void>(rows.refreshQuiet);
   refreshRef.current = rows.refreshQuiet;
   const runningKey = rows.data.map((row) => `${row.id}:${row.status}:${row.finishedCount}`).join("|");
@@ -4344,6 +4345,33 @@ function CollectJobs() {
     } catch (error) {
       message.error((error as Error).message);
     }
+  };
+  const retryFailed = (row: Row) => {
+    const failed = Number(row.failCount || (row.status === "FAILED" ? 1 : 0));
+    Modal.confirm({
+      title: `重试采集任务 #${row.id}`,
+      content: row.mode === "BATCH"
+        ? `将重试批量任务中的 ${failed} 个失败项，每个失败项最多尝试 3 次。成功和已跳过的项目不会重复采集。`
+        : "将重新采集该失败任务，最多尝试 3 次。",
+      okText: "开始重试",
+      cancelText: "取消",
+      onOk: async () => {
+        setRetryingId(Number(row.id));
+        try {
+          await rootMutation(`/api/admin/business/products/collect-jobs/${row.id}/retry`, { method: "POST" });
+          message.success("失败项已重新加入采集队列");
+          await rows.refreshQuiet();
+          if (detail?.id === row.id) {
+            setDetail(await rootApi<Row>(`/api/admin/business/products/collect-jobs/${row.id}`));
+          }
+        } catch (error) {
+          message.error((error as Error).message || "重试任务失败");
+          throw error;
+        } finally {
+          setRetryingId(undefined);
+        }
+      },
+    });
   };
   useEffect(() => {
     if (!detail?.id || !["PENDING", "RUNNING"].includes(String(detail.status))) return;
@@ -4408,11 +4436,16 @@ function CollectJobs() {
             { title: "创建时间", dataIndex: "createdAt", width: 170, render: dateTime },
             {
               title: "操作",
-              width: 100,
+              width: 150,
               render: (_: unknown, row: Row) => (
-                <Button type="link" onClick={() => void openDetail(row)}>
-                  {row.mode === "BATCH" ? "详情" : "查看"}
-                </Button>
+                <Space size={0}>
+                  <Button type="link" onClick={() => void openDetail(row)}>
+                    {row.mode === "BATCH" ? "详情" : "查看"}
+                  </Button>
+                  {Number(row.failCount || 0) > 0 && !["PENDING", "RUNNING"].includes(String(row.status)) && (
+                    <Button type="link" loading={retryingId === Number(row.id)} onClick={() => retryFailed(row)}>重试</Button>
+                  )}
+                </Space>
               ),
             },
           ]}
@@ -4423,6 +4456,11 @@ function CollectJobs() {
         width={880}
         open={Boolean(detail)}
         onClose={() => setDetail(undefined)}
+        extra={detail && Number(detail.failCount || 0) > 0 && !["PENDING", "RUNNING"].includes(String(detail.status)) ? (
+          <Button type="primary" loading={retryingId === Number(detail.id)} onClick={() => retryFailed(detail)}>
+            重试失败项
+          </Button>
+        ) : null}
       >
         {detail && (
           <>
