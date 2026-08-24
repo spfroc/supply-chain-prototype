@@ -66,6 +66,8 @@ public class CollectJobService {
     private final TransactionTemplate tx;
     private final ObjectMapper mapper = new ObjectMapper();
     private final String collectorUrl;
+    @Value("${app.collect-batch-item-delay-ms:30000}")
+    private long batchItemDelayMs;
 
     public CollectJobService(JdbcClient jdbc, RestClient collectorRestClient,
                              @Qualifier("collectJobExecutor") Executor executor,
@@ -242,6 +244,9 @@ public class CollectJobService {
             Map<String, Object> collected = processItem(jobId, item, authorization, maxAttempts);
             if (collected != null) {
                 lastSuccess = collected;
+            }
+            if ("BATCH".equals(mode) && batchItemDelayMs > 0) {
+                sleepQuietly(Math.min(batchItemDelayMs, 300_000));
             }
         }
         refreshJobProgress(jobId);

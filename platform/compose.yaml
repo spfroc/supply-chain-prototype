@@ -52,6 +52,7 @@ services:
       ALIYUN_OSS_MIGRATE_LOCAL_ON_START: ${ALIYUN_OSS_MIGRATE_LOCAL_ON_START:-false}
       UPLOAD_DIR: /app/uploads
       COLLECTOR_URL: http://collector:8081
+      APP_COLLECT_BATCH_ITEM_DELAY_MS: ${COLLECT_BATCH_ITEM_DELAY_MS:-30000}
     volumes:
       - upload_data:/app/uploads
     depends_on:
