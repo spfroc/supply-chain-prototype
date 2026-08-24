@@ -2100,8 +2100,8 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
             <Alert type="info" showIcon message={
               collectPlatform === "huiecai" ? "支持徽e采商品详情页。采集成功后写入商品管理，约 1 至 2 分钟。"
                 : collectPlatform === "qilu" ? "请粘贴入围商品详情链接（含 goodspriceguid），不要使用入围商品库列表页。采集成功后写入商品管理。"
-                  : collectPlatform === "taobao" ? "淘宝/天猫采集尚未开放。"
-                    : "目前京东、徽e采、齐鲁云采可采集。采集成功后会写入商品管理，约 1 至 2 分钟。若京东隐藏售价，请填写售价后再采集。"
+                  : collectPlatform === "taobao" ? "支持淘宝/天猫商品详情链接。采集账号登录凭证失效时会提示管理员更新，凭证不会保存到商品数据中。"
+                    : "目前京东、淘宝/天猫、徽e采、齐鲁云采可采集。采集成功后会写入商品管理，约 1 至 2 分钟。若页面隐藏售价，请填写售价后再采集。"
             } />
           </> : <>
             <Space wrap style={{ marginBottom: 12 }}>

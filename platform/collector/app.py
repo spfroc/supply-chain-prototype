@@ -11,6 +11,7 @@ from importer import import_scraped
 from jd import BrowserPool, scrape_jd
 from platforms import CollectError, detect_platform
 from qilu import scrape_qilu
+from taobao import scrape_taobao
 
 pool = BrowserPool()
 busy = asyncio.Lock()
@@ -47,8 +48,8 @@ async def collect(body: CollectRequest, authorization: str | None = Header(defau
         try:
             platform = detect_platform(body.url, body.platform)
             if platform == "taobao":
-                raise CollectError("unsupported_platform", "淘宝/天猫采集尚未开放，请选择京东、徽e采或齐鲁云采")
-            if platform == "huiecai":
+                product = await scrape_taobao(body.url)
+            elif platform == "huiecai":
                 product = await scrape_huiecai(pool, body.url)
             elif platform == "qilu":
                 product = await scrape_qilu(pool, body.url)
@@ -62,6 +63,7 @@ async def collect(body: CollectRequest, authorization: str | None = Header(defau
                     "jd": "京东隐藏了售价，请在采集窗口填写售价后重试",
                     "huiecai": "徽e采未解析到售价，请在采集窗口填写售价后重试",
                     "qilu": "齐鲁云采未解析到售价，请在采集窗口填写售价后重试",
+                    "taobao": "淘宝/天猫未解析到售价，请在采集窗口填写售价后重试",
                 }.get(platform, "未解析到售价，请在采集窗口填写售价后重试")
                 raise CollectError("price_hidden", hint, status=422)
             return await asyncio.to_thread(import_scraped, product, authorization)

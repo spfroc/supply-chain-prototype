@@ -5,7 +5,7 @@ import re
 from urllib.parse import parse_qs, urlparse
 
 SUPPORTED_PLATFORMS = ("jd", "taobao", "huiecai", "qilu")
-SKU_PREFIX = {"jd": "JD", "huiecai": "HWLY", "qilu": "QLYC"}
+SKU_PREFIX = {"jd": "JD", "taobao": "TB", "huiecai": "HWLY", "qilu": "QLYC"}
 PLATFORM_LABEL = {
     "jd": "京东",
     "taobao": "淘宝/天猫",
@@ -148,4 +148,4 @@ def detect_platform(url: str, platform: str | None) -> str:
         return requested
     if detected:
         return detected
-    raise CollectError("unsupported_platform", "无法从链接识别平台，请选择京东、徽e采或齐鲁云采")
+    raise CollectError("unsupported_platform", "无法从链接识别平台，请选择京东、淘宝/天猫、徽e采或齐鲁云采")

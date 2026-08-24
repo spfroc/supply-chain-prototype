@@ -139,9 +139,6 @@ public class CollectJobService {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "单次最多采集 " + MAX_BATCH_SIZE + " 条");
         }
         String requested = normalizePlatform(platform, false);
-        if ("taobao".equals(requested)) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "淘宝/天猫采集尚未开放，请选择京东、徽e采或齐鲁云采");
-        }
         List<ItemSpec> specs = new ArrayList<>();
         boolean requirePrice = "jd".equals(requested);
         for (int i = 0; i < items.size(); i++) {
@@ -327,14 +324,9 @@ public class CollectJobService {
             """).param("id", itemId).update();
         refreshJobProgress(jobId);
 
-        if ("taobao".equals(platform)) {
-            finishItem(itemId, jobId, "SKIPPED", "unsupported_platform",
-                "淘宝/天猫采集尚未开放，已跳过", 0, null);
-            return null;
-        }
         if ("unknown".equals(platform)) {
             finishItem(itemId, jobId, "FAILED", "unsupported_platform",
-                "无法从链接识别平台，请使用京东、徽e采或齐鲁云采商品链接", 0, null);
+                "无法从链接识别平台，请使用京东、淘宝/天猫、徽e采或齐鲁云采商品链接", 0, null);
             return null;
         }
 

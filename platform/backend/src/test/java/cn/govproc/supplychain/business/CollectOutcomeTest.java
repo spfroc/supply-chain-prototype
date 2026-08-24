@@ -9,7 +9,6 @@ class CollectOutcomeTest {
     void treatsDelistedAndMissingGoodsAsSkip() {
         assertThat(CollectOutcome.fromHttp(410, "京东商品已下架")).isEqualTo(CollectOutcome.SKIP);
         assertThat(CollectOutcome.fromHttp(502, "该商品已下架")).isEqualTo(CollectOutcome.SKIP);
-        assertThat(CollectOutcome.fromHttp(400, "淘宝/天猫采集尚未开放")).isEqualTo(CollectOutcome.SKIP);
         assertThat(CollectOutcome.skipReason("商品已下架")).isEqualTo("商品已下架，已跳过");
     }
 
@@ -27,6 +26,7 @@ class CollectOutcomeTest {
         assertThat(CollectOutcome.fromHttp(422, "京东隐藏了售价")).isEqualTo(CollectOutcome.FAIL_NO_RETRY);
         assertThat(CollectOutcome.fromHttp(409, "数据冲突或仍被其他业务引用")).isEqualTo(CollectOutcome.FAIL_NO_RETRY);
         assertThat(CollectOutcome.fromHttp(401, "请先登录后再采集")).isEqualTo(CollectOutcome.FAIL_NO_RETRY);
+        assertThat(CollectOutcome.fromHttp(401, "淘宝/天猫登录凭证已失效")).isEqualTo(CollectOutcome.FAIL_NO_RETRY);
     }
 
     @Test
