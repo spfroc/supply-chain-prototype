@@ -116,6 +116,10 @@ networks:
   internal:
     internal: true
   collector_egress:
+    ipam:
+      config:
+        - subnet: ${COLLECTOR_EGRESS_SUBNET:-172.21.0.0/16}
+          gateway: ${COLLECTOR_EGRESS_GATEWAY:-172.21.0.1}
   global_network:
     external: true
     name: ${GLOBAL_NETWORK_NAME:-global_network}
