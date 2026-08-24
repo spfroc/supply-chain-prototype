@@ -4,6 +4,7 @@ import cn.govproc.supplychain.common.PageResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
+import java.net.InetAddress;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -452,10 +453,7 @@ public class CollectJobService {
         String requested = normalizePlatform(requestedPlatform, true);
         String platform;
         if (requested != null) {
-            if (detected == null || "unknown".equals(detected)) {
-                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "商品链接域名不在所选平台白名单中");
-            }
-            if (!detected.equals(requested)) {
+            if (detected != null && !"unknown".equals(detected) && !detected.equals(requested)) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "选择的平台与商品链接不一致");
             }
             platform = requested;
@@ -491,11 +489,15 @@ public class CollectJobService {
         if (host.endsWith("taobao.com") || host.endsWith("tmall.com") || host.endsWith("tmall.hk")) {
             return "taobao";
         }
-        if (host.equals("miniappss.com") || host.endsWith(".miniappss.com")
-            || host.equals("huiecai.com") || host.endsWith(".huiecai.com")) {
+        if (host.endsWith("miniappss.com") || host.endsWith("huiecai.com")
+            || (path.contains("goodsinfo/") && isPublicHost(host))) {
             return "huiecai";
         }
-        if (host.equals("shandong.gov.cn") || host.endsWith(".shandong.gov.cn")) {
+        if (host.endsWith("shandong.gov.cn")
+            || (isPublicHost(host) && (path.contains("gpfa-main-web")
+                || path.contains("goodslibrary")
+                || path.contains("scshortlistedgoodslibrary")
+                || query.contains("goodspriceguid")))) {
             return "qilu";
         }
         if (url != null && url.trim().matches("\\d{6,}")) {
@@ -531,6 +533,24 @@ public class CollectJobService {
             return host == null ? "" : host.toLowerCase(Locale.ROOT);
         } catch (Exception ignored) {
             return "";
+        }
+    }
+
+    /** Path/query heuristics must not classify loopback / link-local / private hosts. */
+    static boolean isPublicHost(String host) {
+        if (host == null || host.isBlank()) {
+            return false;
+        }
+        try {
+            InetAddress address = InetAddress.getByName(host);
+            return !(address.isAnyLocalAddress()
+                || address.isLoopbackAddress()
+                || address.isLinkLocalAddress()
+                || address.isSiteLocalAddress()
+                || address.isMulticastAddress());
+        } catch (Exception ignored) {
+            // Non-resolvable hostnames are still allowed for known public domains.
+            return !host.matches("\\d{1,3}(?:\\.\\d{1,3}){3}");
         }
     }
 

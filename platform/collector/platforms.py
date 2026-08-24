@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import re
 from urllib.parse import parse_qs, urlparse
 
@@ -96,6 +97,16 @@ def _host_of(url: str) -> str:
         return ""
 
 
+
+def _is_public_host(host: str) -> bool:
+    if not host:
+        return False
+    try:
+        addr = ipaddress.ip_address(host)
+        return addr.is_global
+    except ValueError:
+        return True
+
 def detect_platform(url: str, platform: str | None) -> str:
     requested = (platform or "").strip().lower() or None
     host = _host_of(url)
@@ -113,18 +124,26 @@ def detect_platform(url: str, platform: str | None) -> str:
         "taobao.com", "tmall.com", "tmall.hk",
     )):
         detected = "taobao"
-    elif host == "miniappss.com" or host.endswith(".miniappss.com") or host == "huiecai.com" or host.endswith(".huiecai.com"):
+    elif host.endswith("miniappss.com") or host.endswith("huiecai.com") or (
+        "goodsinfo/" in path and _is_public_host(host)
+    ):
         detected = "huiecai"
-    elif host == "shandong.gov.cn" or host.endswith(".shandong.gov.cn"):
+    elif host.endswith("shandong.gov.cn") or (
+        _is_public_host(host)
+        and (
+            "gpfa-main-web" in path
+            or "goodslibrary" in path
+            or "goodspriceguid" in query
+            or "scshortlistedgoodslibrary" in path
+        )
+    ):
         detected = "qilu"
     elif re.fullmatch(r"\d{6,}", (url or "").strip()):
-        detected = "jd"
+        detected = requested
     if requested:
         if requested not in SUPPORTED_PLATFORMS:
             raise CollectError("unsupported_platform", f"不支持的平台：{requested}")
-        if not detected:
-            raise CollectError("invalid_url", "商品链接域名不在所选平台白名单中")
-        if detected != requested:
+        if detected and detected != requested:
             raise CollectError("platform_mismatch", "选择的平台与商品链接不一致")
         return requested
     if detected:
