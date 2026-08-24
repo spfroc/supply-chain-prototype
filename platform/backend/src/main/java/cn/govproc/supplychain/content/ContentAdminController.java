@@ -12,6 +12,7 @@ import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
@@ -252,12 +253,29 @@ public class ContentAdminController {
 
     @PostMapping("/brands/list") @ResponseStatus(HttpStatus.CREATED) @Transactional
     Map<String, Object> createBrand(@Valid @RequestBody BrandRequest request) {
-        jdbc.sql("""
-            INSERT INTO brand(name,logo,description,sort_order,status)
-            VALUES(:name,:logo,:description,:sortOrder,:status)
-            """).paramSource(request).update();
-        long id = jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single();
-        return Map.of("id", id);
+        String name = request.name().trim();
+        Long existing = findBrandId(name);
+        if (existing != null) {
+            restoreBrandIfDeleted(existing, request);
+            return Map.of("id", existing);
+        }
+        try {
+            jdbc.sql("""
+                INSERT INTO brand(name,logo,description,sort_order,status)
+                VALUES(:name,:logo,:description,:sortOrder,:status)
+                """).param("name", name).param("logo", request.logo())
+                .param("description", request.description())
+                .param("sortOrder", request.sortOrder()).param("status", request.status()).update();
+            long id = jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single();
+            return Map.of("id", id);
+        } catch (DataIntegrityViolationException exception) {
+            Long id = findBrandId(name);
+            if (id == null) {
+                throw exception;
+            }
+            restoreBrandIfDeleted(id, request);
+            return Map.of("id", id);
+        }
     }
 
     @PutMapping("/brands/list/{id}") @Transactional
@@ -277,6 +295,32 @@ public class ContentAdminController {
             .param("id", id).query(Integer.class).single();
         if (count > 0) throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "品牌已关联商品，请先停用");
         jdbc.sql("UPDATE brand SET deleted_at=NOW() WHERE id=:id AND deleted_at IS NULL").param("id", id).update();
+    }
+
+    private Long findBrandId(String name) {
+        var rows = jdbc.sql("""
+            SELECT id FROM brand WHERE name=:name
+            ORDER BY (deleted_at IS NULL) DESC, id
+            LIMIT 1
+            """).param("name", name).query().listOfRows();
+        if (rows.isEmpty()) {
+            return null;
+        }
+        return ((Number) rows.get(0).get("id")).longValue();
+    }
+
+    private void restoreBrandIfDeleted(long id, BrandRequest request) {
+        jdbc.sql("""
+            UPDATE brand
+            SET deleted_at=NULL,
+                status=CASE WHEN status=0 THEN :status ELSE status END,
+                logo=CASE WHEN logo IS NULL OR logo='' THEN :logo ELSE logo END,
+                description=CASE WHEN description IS NULL OR description='' THEN :description ELSE description END
+            WHERE id=:id AND deleted_at IS NOT NULL
+            """).param("id", id).param("status", request.status())
+            .param("logo", request.logo() == null ? "" : request.logo())
+            .param("description", request.description() == null ? "" : request.description())
+            .update();
     }
 
     private String normalize(String value) {

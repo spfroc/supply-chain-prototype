@@ -1,0 +1,43 @@
+CREATE TABLE collect_job (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  mode VARCHAR(20) NOT NULL,
+  platform VARCHAR(20) NOT NULL,
+  status VARCHAR(20) NOT NULL,
+  total_count INT NOT NULL DEFAULT 0,
+  success_count INT NOT NULL DEFAULT 0,
+  fail_count INT NOT NULL DEFAULT 0,
+  skip_count INT NOT NULL DEFAULT 0,
+  created_by VARCHAR(80) NULL,
+  error_message VARCHAR(500) NULL,
+  started_at DATETIME NULL,
+  finished_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_collect_job_created (created_at),
+  KEY idx_collect_job_status (status)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE collect_job_item (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  job_id BIGINT UNSIGNED NOT NULL,
+  sort_order INT NOT NULL DEFAULT 0,
+  platform VARCHAR(20) NOT NULL,
+  url VARCHAR(1000) NOT NULL,
+  member_price DECIMAL(12,2) NULL,
+  status VARCHAR(20) NOT NULL,
+  attempt_count INT NOT NULL DEFAULT 0,
+  product_id BIGINT NULL,
+  sku_code VARCHAR(80) NULL,
+  title VARCHAR(500) NULL,
+  error_code VARCHAR(50) NULL,
+  error_message VARCHAR(1000) NULL,
+  started_at DATETIME NULL,
+  finished_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  KEY idx_collect_item_job (job_id, sort_order),
+  KEY idx_collect_item_status (status),
+  CONSTRAINT fk_collect_item_job FOREIGN KEY (job_id) REFERENCES collect_job(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

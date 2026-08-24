@@ -15,6 +15,7 @@ import {
   Layout,
   Menu,
   Modal,
+  Progress,
   Radio,
   Select,
   Space,
@@ -158,6 +159,7 @@ function Table<T extends Row>({
 type Module =
   | "overview"
   | "products"
+  | "collectJobs"
   | "categories"
   | "attributes"
   | "brands"
@@ -223,6 +225,67 @@ const dateTime = (value?: string) =>
         hour12: false,
       }).format(new Date(value.replace(" ", "T")))
     : "—";
+const collectPlatformLabel = (value?: string) =>
+  ({ jd: "京东", taobao: "淘宝/天猫", huiecai: "徽e采", qilu: "齐鲁云采", mixed: "混合" } as Record<string, string>)[String(value || "")] || value || "—";
+const detectCollectPlatform = (url: string) => {
+  const text = String(url || "").toLowerCase();
+  if (text.includes("taobao") || text.includes("tmall")) return "taobao";
+  if (text.includes("miniappss") || text.includes("huiecai") || text.includes("goodsinfo/")) return "huiecai";
+  if (text.includes("shandong.gov.cn") || text.includes("gpfa-main-web") || text.includes("goodspriceguid") || text.includes("scshortlisted")) return "qilu";
+  return "jd";
+};
+const collectJobStatus = (value?: string) =>
+  ({
+    PENDING: { label: "排队中", color: "default" },
+    RUNNING: { label: "采集中", color: "processing" },
+    SUCCEEDED: { label: "已完成", color: "success" },
+    PARTIAL: { label: "部分完成", color: "warning" },
+    FAILED: { label: "失败", color: "error" },
+  } as Record<string, { label: string; color: string }>)[String(value || "")] || { label: String(value || "—"), color: "default" };
+const collectItemStatus = (value?: string) =>
+  ({
+    PENDING: { label: "等待中", color: "default" },
+    RUNNING: { label: "采集中", color: "processing" },
+    SUCCEEDED: { label: "成功", color: "success" },
+    FAILED: { label: "失败", color: "error" },
+    SKIPPED: { label: "已跳过", color: "warning" },
+  } as Record<string, { label: string; color: string }>)[String(value || "")] || { label: String(value || "—"), color: "default" };
+function parseCollectBatchText(text: string, requirePrice = true) {
+  const rows: { url: string; memberPrice?: number; error?: string }[] = [];
+  const seen = new Set<string>();
+  for (const raw of (text || "").split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (/^(url|链接|商品链接)([,，\s\t]|$).*(售价|price)/i.test(line)) continue;
+    const parts = line.split(/[,，\t]+/).map((part) => part.trim()).filter(Boolean);
+    let url = line;
+    let price: number | undefined;
+    const last = parts[parts.length - 1]?.replace(/^¥/, "") || "";
+    if (parts.length >= 2 && /^\d+(\.\d+)?$/.test(last)) {
+      price = Number(last);
+      url = parts.slice(0, -1).join(" ").trim();
+    } else {
+      const spaced = line.split(/\s+/);
+      const tail = spaced[spaced.length - 1]?.replace(/^¥/, "") || "";
+      if (spaced.length >= 2 && /^\d+(\.\d+)?$/.test(tail)) {
+        price = Number(tail);
+        url = spaced.slice(0, -1).join(" ");
+      }
+    }
+    if (!url) continue;
+    if (seen.has(url)) {
+      rows.push({ url, memberPrice: price, error: "重复链接" });
+      continue;
+    }
+    seen.add(url);
+    if (requirePrice && !(price && price > 0)) {
+      rows.push({ url, memberPrice: price, error: "请填写售价" });
+      continue;
+    }
+    rows.push({ url, memberPrice: price });
+  }
+  return rows;
+}
 const deliveryAddress = (value: any) => {
   let address = value;
   if (typeof address === "string") {
@@ -643,6 +706,7 @@ const navItems = [
     label: "商品管理",
     children: [
       { key: "products", label: "商品管理", icon: <MenuIcon name="goods" /> },
+      { key: "collectJobs", label: "采集任务", icon: <MenuIcon name="log" /> },
       { key: "categories", label: "分类管理", icon: <MenuIcon name="category" /> },
       { key: "brands", label: "品牌管理", icon: <MenuIcon name="brand" /> },
       { key: "attributes", label: "属性模板", icon: <MenuIcon name="config" /> },
@@ -707,7 +771,7 @@ const navItems = [
   },
 ];
 const modulePermission: Partial<Record<Module, string>> = {
-  overview: "dashboard:view", products: "product:manage", categories: "product:manage",
+  overview: "dashboard:view", products: "product:manage", collectJobs: "product:manage", categories: "product:manage",
   attributes: "product:manage", brands: "product:manage", platforms: "product:manage",
   platformProducts: "product:manage", platformOrders: "order:manage",
   navigations: "product:manage", banners: "product:manage", solutions: "product:manage",
@@ -848,6 +912,7 @@ function AdminApp({ logout }: { logout: () => void }) {
   const titles: Record<Module, [string, string]> = {
     overview: ["经营概览", "掌握平台账户、权限与关键业务运行状态"],
     products: ["商品管理", "维护自营商品、SKU、协议价格与可售库存"],
+    collectJobs: ["采集任务", "查看单条和批量商品采集队列、进度与失败原因"],
     categories: ["分类管理", "维护客户端使用的三级商品分类、排序与启停状态"],
     attributes: ["分类属性模板", "按商品分类配置基础属性、销售规格、选项及前台展示规则"],
     brands: ["品牌管理", "维护商品品牌、品牌说明、排序与启停状态"],
@@ -953,7 +1018,8 @@ function AdminApp({ logout }: { logout: () => void }) {
           {module === "overview" && <Overview go={setModule} />}
           {(
             ["products", "enterprises", "agreements", "orders"] as Module[]
-          ).includes(module) && <BusinessModule module={module} />}
+          ).includes(module) && <BusinessModule module={module} onOpenCollectJobs={() => setModule("collectJobs")} />}
+          {module === "collectJobs" && <CollectJobs />}
           {module === "agreementProducts" && <AssociationProducts type="AGREEMENT" />}
           {module === "agreementOrders" && <BusinessModule module="orders" endpointOverride="/agreement-orders" listTitle="协议订单列表" extraColumn="agreementName" />}
           {module === "platformOrders" && <BusinessModule module="orders" endpointOverride="/platform-orders" listTitle="平台关联商品订单列表" extraColumn="platformNames" />}
@@ -1048,8 +1114,9 @@ function EnterpriseUsers() {
   </>;
 }
 
-function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
+function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCollectJobs }: {
   module: Module; endpointOverride?: string; listTitle?: string; extraColumn?: "agreementName"|"platformNames";
+  onOpenCollectJobs?: () => void;
 }) {
   const { message, modal } = AntApp.useApp();
   const [badgeFilter,setBadgeFilter]=useState<string>();
@@ -1110,6 +1177,9 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
   const [platformForm] = Form.useForm();
   const [productAgreementForm] = Form.useForm();
   const [listBadgeForm] = Form.useForm();
+  const [collectForm] = Form.useForm();
+  const collectPlatform = Form.useWatch("platform", collectForm) || "jd";
+  const collectNeedPrice = collectPlatform === "jd";
   const selectedProductCategory = Form.useWatch("categoryId", form);
   const listBadgeType = Form.useWatch("badgeType", listBadgeForm);
   const [attributeTemplate, setAttributeTemplate] = useState<Row[]>([]);
@@ -1122,6 +1192,11 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
   const [logisticsForm] = Form.useForm();
   const [refundForm] = Form.useForm();
   const [open, setOpen] = useState(false);
+  const [collectOpen, setCollectOpen] = useState(false);
+  const [collectTab, setCollectTab] = useState("single");
+  const [batchText, setBatchText] = useState("");
+  const [batchRows, setBatchRows] = useState<{ url: string; memberPrice?: number; error?: string }[]>([]);
+  const [collecting, setCollecting] = useState(false);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [productTab,setProductTab]=useState("basic");
@@ -1157,6 +1232,71 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
     const text = await r.text();
     return text ? JSON.parse(text) : undefined;
   };
+  const collectProduct = async () => {
+    try {
+      const values = await collectForm.validateFields();
+      setCollecting(true);
+      const result = await business("/products/collect", {
+        method: "POST",
+        body: JSON.stringify({
+          platform: values.platform,
+          url: values.url,
+          ...(values.memberPrice ? { memberPrice: values.memberPrice } : {}),
+        }),
+        signal: AbortSignal.timeout(180000),
+      });
+      message.success(result?.updated
+        ? `已补全已有商品 ${result.model || result.title || ""}`
+        : `已采集 ${result.model || result.title || ""}`);
+      setCollectOpen(false);
+      void Promise.all([rows.refresh(), categories.refresh(), brands.refresh()]);
+    } catch (error) {
+      const err = error as Error;
+      message.error(err.name === "TimeoutError" ? "采集超时，请稍后重试" : (err.message || "采集失败"));
+    } finally {
+      setCollecting(false);
+    }
+  };
+  const applyBatchText = (text: string) => {
+    setBatchText(text);
+    setBatchRows(parseCollectBatchText(text, collectNeedPrice));
+  };
+  useEffect(() => {
+    if (batchText) setBatchRows(parseCollectBatchText(batchText, collectNeedPrice));
+  }, [batchText, collectNeedPrice]);
+  const submitBatchCollect = async () => {
+    try {
+      const values = await collectForm.validateFields(["platform"]);
+      const valid = batchRows.filter((row) => row.url && !row.error && (!collectNeedPrice || row.memberPrice));
+      if (!valid.length) {
+        message.warning(collectNeedPrice ? "请上传或粘贴商品链接和对应售价" : "请上传或粘贴商品链接");
+        return;
+      }
+      if (valid.length > 100) {
+        message.warning("单次最多采集 100 条");
+        return;
+      }
+      if (batchRows.some((row) => row.error)) {
+        message.warning("请先修正标红的链接或售价");
+        return;
+      }
+      setCollecting(true);
+      await business("/products/collect-jobs", {
+        method: "POST",
+        body: JSON.stringify({
+          platform: values.platform,
+          items: valid.map((row) => ({ url: row.url, memberPrice: row.memberPrice })),
+        }),
+      });
+      message.success(`已加入采集队列，共 ${valid.length} 条，可在采集任务中查看进度`);
+      setCollectOpen(false);
+      onOpenCollectJobs?.();
+    } catch (error) {
+      message.error((error as Error).message || "创建批量采集任务失败");
+    } finally {
+      setCollecting(false);
+    }
+  };
   const show = (row?: Row, nextMode: "entity" | "stock" = "entity") => {
     setEditing(row);
     setMode(nextMode);
@@ -1166,7 +1306,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
     else if (module === "products")
       form.setFieldsValue(
         row
-          ? { ...row, status: Number(row.status), badgeType: row.badgeType || "NONE", spec: "标准规格",
+          ? { ...row, status: Number(row.status), categoryId: Number(row.categoryId), brandId: Number(row.brandId), badgeType: row.badgeType || "NONE", spec: "标准规格",
               skus:(typeof row.skus==="string"?JSON.parse(row.skus||"[]"):row.skus||[]).map((sku:Row)=>({
                 ...sku,status:Number(sku.status),specification:Object.entries(typeof sku.specValues==="string"?JSON.parse(sku.specValues||"{}"):sku.specValues||{})
                   .map(([key,value])=>`${key}=${value}`).join("；")
@@ -1845,14 +1985,26 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
         title={listTitle||defaultListTitle}
         extra={
           module !== "orders" && (
-            <Button type="primary" onClick={() => show()}>
-              ＋ 新增
-              {module === "products"
-                ? "商品"
-                : module === "enterprises"
-                  ? "企业"
-                  : "协议"}
-            </Button>
+            <Space>
+              {module === "products" && (
+                <Button onClick={() => {
+                  collectForm.resetFields();
+                  collectForm.setFieldsValue({ platform: "jd", url: "" });
+                  setCollectTab("single");
+                  setBatchText("");
+                  setBatchRows([]);
+                  setCollectOpen(true);
+                }}>商品采集</Button>
+              )}
+              <Button type="primary" onClick={() => show()}>
+                ＋ 新增
+                {module === "products"
+                  ? "商品"
+                  : module === "enterprises"
+                    ? "企业"
+                    : "协议"}
+              </Button>
+            </Space>
           )
         }
       >
@@ -1907,6 +2059,109 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
           </> : undefined}
         />
       </Card>
+      <Modal
+        open={collectOpen}
+        title="商品采集"
+        width={collectTab === "batch" ? 840 : 520}
+        okText={collectTab === "batch" ? (collecting ? "提交中" : "加入队列") : (collecting ? "采集中" : "采集")}
+        confirmLoading={collecting}
+        cancelButtonProps={{ disabled: collecting }}
+        onCancel={() => { if (!collecting) setCollectOpen(false); }}
+        onOk={() => void (collectTab === "batch" ? submitBatchCollect() : collectProduct())}
+      >
+        <Tabs
+          activeKey={collectTab}
+          onChange={setCollectTab}
+          items={[
+            { key: "single", label: "单条采集" },
+            { key: "batch", label: "批量采集" },
+          ]}
+        />
+        <Form form={collectForm} layout="vertical" initialValues={{ platform: "jd" }}>
+          <Form.Item name="platform" label="平台" rules={[{ required: true, message: "请选择平台" }]}>
+            <Select options={[
+              { value: "jd", label: "京东" },
+              { value: "huiecai", label: "徽e采" },
+              { value: "qilu", label: "齐鲁云采框架协议" },
+              { value: "taobao", label: "淘宝 / 天猫" },
+            ]} />
+          </Form.Item>
+          {collectTab === "single" ? <>
+            <Form.Item name="url" label="商品链接" rules={[{ required: true, message: "请输入商品链接" }]}>
+              <Input.TextArea rows={3} placeholder={
+                collectPlatform === "huiecai" ? "http://hwly.miniappss.com/goodsInfo/84395.html"
+                  : collectPlatform === "qilu" ? "https://ggzyjyzx.shandong.gov.cn:8182/gpfa-main-web/goodslibrary/gpfa/goodsDetail?goodspriceguid=xxxx"
+                    : "https://item.jd.com/72054902653.html"
+              } />
+            </Form.Item>
+            <Form.Item name="memberPrice" label={collectNeedPrice ? "售价（可选）" : "售价（可选，覆盖页面价格）"}>
+              <InputNumber min={0.01} precision={2} style={{ width: "100%" }} placeholder={collectNeedPrice ? "京东隐藏价格时请填写" : "不填则使用页面售价"} />
+            </Form.Item>
+            <Alert type="info" showIcon message={
+              collectPlatform === "huiecai" ? "支持徽e采商品详情页。采集成功后写入商品管理，约 1 至 2 分钟。"
+                : collectPlatform === "qilu" ? "请粘贴入围商品详情链接（含 goodspriceguid），不要使用入围商品库列表页。采集成功后写入商品管理。"
+                  : collectPlatform === "taobao" ? "淘宝/天猫采集尚未开放。"
+                    : "目前京东、徽e采、齐鲁云采可采集。采集成功后会写入商品管理，约 1 至 2 分钟。若京东隐藏售价，请填写售价后再采集。"
+            } />
+          </> : <>
+            <Space wrap style={{ marginBottom: 12 }}>
+              <Upload accept=".csv,.txt" showUploadList={false} beforeUpload={(file) => {
+                const reader = new FileReader();
+                reader.onload = () => applyBatchText(String(reader.result || ""));
+                reader.readAsText(file, "utf-8");
+                return false;
+              }}>
+                <Button>上传 CSV / TXT</Button>
+              </Upload>
+              <Button onClick={() => {
+                const sample = collectPlatform === "huiecai"
+                  ? "http://hwly.miniappss.com/goodsInfo/84395.html"
+                  : collectPlatform === "qilu"
+                    ? "https://ggzyjyzx.shandong.gov.cn:8182/gpfa-main-web/goodslibrary/gpfa/goodsDetail?goodspriceguid=7336215309403226112"
+                    : "https://item.jd.com/72054902653.html";
+                const csv = collectNeedPrice
+                  ? `\ufeff链接,售价\n${sample},199.00\n`
+                  : `\ufeff链接\n${sample}\n`;
+                const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+                const anchor = document.createElement("a");
+                anchor.href = url;
+                anchor.download = `${collectPlatformLabel(collectPlatform)}批量采集模板.csv`;
+                anchor.click();
+                URL.revokeObjectURL(url);
+              }}>下载模板</Button>
+            </Space>
+            <Input.TextArea
+              rows={6}
+              value={batchText}
+              onChange={(event) => applyBatchText(event.target.value)}
+              placeholder={collectNeedPrice
+                ? "每行一条：商品链接,售价\nhttps://item.jd.com/72054902653.html,199"
+                : "每行一条商品详情链接，售价可省略"}
+            />
+            <Alert type="info" showIcon style={{ margin: "12px 0" }}
+              message={collectPlatform === "qilu"
+                ? "齐鲁云采请粘贴商品详情链接。服务端按队列依次采集；下架商品会跳过，失败自动重试 3 次。提交后可在「采集任务」查看进度。"
+                : collectNeedPrice
+                  ? "京东批量采集需填写售价。服务端会按链接生成队列并依次采集；下架商品会标明原因并跳过，失败自动重试 3 次。提交后可在「采集任务」查看进度。"
+                  : "服务端会按链接生成队列并依次采集；下架商品会标明原因并跳过，失败自动重试 3 次。提交后可在「采集任务」查看进度。"} />
+            {batchRows.length > 0 && (
+              <AntTable
+                size="small"
+                rowKey="line"
+                pagination={false}
+                scroll={{ y: 240 }}
+                dataSource={batchRows.map((row, index) => ({ ...row, line: index + 1 }))}
+                columns={[
+                  { title: "平台", width: 110, render: (_: unknown, row: { url: string }) => collectPlatformLabel(detectCollectPlatform(row.url)) },
+                  { title: "商品链接", dataIndex: "url", ellipsis: true },
+                  { title: "售价", width: 100, dataIndex: "memberPrice", render: (value: number) => value ? `¥${Number(value).toFixed(2)}` : "—" },
+                  { title: "校验", width: 110, dataIndex: "error", render: (value: string) => value ? <Tag color="red">{value}</Tag> : <Tag color="green">待采集</Tag> },
+                ]}
+              />
+            )}
+          </>}
+        </Form>
+      </Modal>
       <Modal open={Boolean(badgeProduct)} title={`角标配置 · ${badgeProduct?.title || ""}`} onCancel={() => setBadgeProduct(undefined)} onOk={() => void saveBadgeConfig()}>
         <Form form={listBadgeForm} layout="vertical">
           <Form.Item name="badgeType" label="角标类型" rules={[{required:true}]}><Select options={[
@@ -1976,9 +2231,9 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn }: {
           ) : module === "products" ? (
             <Tabs className="full" destroyOnHidden={false} activeKey={productTab} onChange={setProductTab} items={[
               { key: "basic", label: "基本信息", children: <div className="two-column-form">
-                <Form.Item name="categoryId" label="分类" className="full" rules={[{ required: true, message: "请选择三级分类" }]}><Select options={(categories.data || []).filter((x) => Number(x.level) === 3 && Number(x.status) === 1).map((x) => ({ value: x.id, label: `${x.parentName || ""} / ${x.name}` }))} /></Form.Item>
+                <Form.Item name="categoryId" label="分类" className="full" rules={[{ required: true, message: "请选择三级分类" }]}><Select showSearch optionFilterProp="label" placeholder="搜索或选择三级分类" options={(categories.data || []).filter((x) => Number(x.level) === 3 && Number(x.status) === 1).map((x) => ({ value: Number(x.id), label: `${x.parentName || ""} / ${x.name}` }))} /></Form.Item>
                 <div className="full product-brand-model-row">
-                  <Form.Item name="brandId" label="品牌" rules={[{required:true,message:"请选择品牌"}]}><Select loading={brands.loading} showSearch optionFilterProp="label" options={(brands.data||[]).filter((x)=>Number(x.status)===1).map((x)=>({ value:x.id,label:x.name }))} placeholder="请选择已启用品牌" /></Form.Item>
+                  <Form.Item name="brandId" label="品牌" rules={[{required:true,message:"请选择品牌"}]}><Select loading={brands.loading} showSearch optionFilterProp="label" options={(brands.data||[]).filter((x)=>Number(x.status)===1).map((x)=>({ value:Number(x.id),label:x.name }))} placeholder="请选择已启用品牌" /></Form.Item>
                   <Form.Item name="model" label="型号"><Input placeholder="请输入商品型号" /></Form.Item>
                   <Form.Item name="selfOperated" label="是否自营" getValueProps={(value)=>({checked:Number(value)===1})} getValueFromEvent={(checked)=>checked?1:0}><Switch checkedChildren="自营" unCheckedChildren="非自营" /></Form.Item>
                 </div>
@@ -4036,8 +4291,8 @@ function usePagedLoad(endpoint: string, initialPageSize = 10, deps: unknown[] = 
   const [status, setStatusValue] = useState<string>();
   const [loading, setLoading] = useState(true);
   const [revision, setRevision] = useState(0);
-  const load = async () => {
-    setLoading(true);
+  const load = async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
       const url = new URL(endpoint, window.location.origin);
       url.searchParams.set("page", String(page));
@@ -4048,7 +4303,9 @@ function usePagedLoad(endpoint: string, initialPageSize = 10, deps: unknown[] = 
       setData(result.records || []);
       setTotal(Number(result.total || 0));
       if (result.total > 0 && page > Math.max(1, result.totalPages)) setPageValue(Math.max(1, result.totalPages));
-    } catch (error) { message.error((error as Error).message); }
+    } catch (error) {
+      if (!quiet) message.error((error as Error).message);
+    }
     finally { setLoading(false); }
   };
   useEffect(() => {
@@ -4065,7 +4322,152 @@ function usePagedLoad(endpoint: string, initialPageSize = 10, deps: unknown[] = 
       setPageValue(nextPageSize !== pageSize ? 1 : nextPage);
     },
   };
-  return { data, total, loading, server, refresh: async () => setRevision((value) => value + 1) };
+  return { data, total, loading, server, refresh: async () => setRevision((value) => value + 1), refreshQuiet: () => load(true) };
+}
+
+function CollectJobs() {
+  const { message } = AntApp.useApp();
+  const rows = usePagedLoad("/api/admin/business/products/collect-jobs", 10);
+  const [detail, setDetail] = useState<Row>();
+  const refreshRef = useRef<() => Promise<void> | void>(rows.refreshQuiet);
+  refreshRef.current = rows.refreshQuiet;
+  const runningKey = rows.data.map((row) => `${row.id}:${row.status}:${row.finishedCount}`).join("|");
+  useEffect(() => {
+    const running = rows.data.some((row) => ["PENDING", "RUNNING"].includes(String(row.status)));
+    if (!running) return;
+    const timer = window.setInterval(() => void refreshRef.current(), 4000);
+    return () => window.clearInterval(timer);
+  }, [runningKey]);
+  const openDetail = async (row: Row) => {
+    try {
+      setDetail(await rootApi<Row>(`/api/admin/business/products/collect-jobs/${row.id}`));
+    } catch (error) {
+      message.error((error as Error).message);
+    }
+  };
+  useEffect(() => {
+    if (!detail?.id || !["PENDING", "RUNNING"].includes(String(detail.status))) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const next = await rootApi<Row>(`/api/admin/business/products/collect-jobs/${detail.id}`);
+        setDetail(next);
+        void refreshRef.current();
+      } catch {
+        // keep the last known detail while polling
+      }
+    }, 4000);
+    return () => window.clearInterval(timer);
+  }, [detail?.id, detail?.status]);
+  const jobStatus = collectJobStatus(detail?.status);
+  return (
+    <>
+      <Card className="data-card" title="采集任务">
+        <Table
+          rowKey="id"
+          loading={rows.loading}
+          dataSource={rows.data}
+          searchPlaceholder="搜索任务编号、平台、链接或创建人"
+          scroll={{ x: 1480 }}
+          server={{
+            ...rows.server,
+            statusOptions: [
+              { label: "排队中", value: "PENDING" },
+              { label: "采集中", value: "RUNNING" },
+              { label: "已完成", value: "SUCCEEDED" },
+              { label: "部分完成", value: "PARTIAL" },
+              { label: "失败", value: "FAILED" },
+            ],
+          }}
+          columns={[
+            { title: "任务", dataIndex: "id", width: 90, render: (value: number) => `#${value}` },
+            { title: "平台", dataIndex: "platform", width: 110, render: (value: string) => collectPlatformLabel(value) },
+            { title: "类型", dataIndex: "mode", width: 110, render: (value: string) => value === "BATCH" ? "批量采集" : "单条采集" },
+            {
+              title: "状态",
+              dataIndex: "status",
+              width: 120,
+              render: (value: string) => {
+                const item = collectJobStatus(value);
+                return <Tag color={item.color}>{item.label}</Tag>;
+              },
+            },
+            {
+              title: "进度",
+              width: 220,
+              render: (_: unknown, row: Row) => row.mode === "BATCH" ? (
+                <div>
+                  <Progress percent={Number(row.progress || 0)} size="small"
+                    format={() => `${row.finishedCount || 0}/${row.totalCount || 0}`} />
+                  <small>成功 {row.successCount || 0} · 失败 {row.failCount || 0} · 跳过 {row.skipCount || 0}</small>
+                </div>
+              ) : "—",
+            },
+            { title: "创建人", dataIndex: "createdBy", width: 120, render: (value: string) => value || "—" },
+            { title: "开始时间", dataIndex: "startedAt", width: 170, render: dateTime },
+            { title: "完成时间", dataIndex: "finishedAt", width: 170, render: dateTime },
+            { title: "创建时间", dataIndex: "createdAt", width: 170, render: dateTime },
+            {
+              title: "操作",
+              width: 100,
+              render: (_: unknown, row: Row) => (
+                <Button type="link" onClick={() => void openDetail(row)}>
+                  {row.mode === "BATCH" ? "详情" : "查看"}
+                </Button>
+              ),
+            },
+          ]}
+        />
+      </Card>
+      <Drawer
+        title={detail ? `采集任务 #${detail.id}` : "采集任务详情"}
+        width={880}
+        open={Boolean(detail)}
+        onClose={() => setDetail(undefined)}
+      >
+        {detail && (
+          <>
+            <Descriptions size="small" column={2} style={{ marginBottom: 16 }}>
+              <Descriptions.Item label="平台">{collectPlatformLabel(String(detail.platform))}</Descriptions.Item>
+              <Descriptions.Item label="类型">{detail.mode === "BATCH" ? "批量采集" : "单条采集"}</Descriptions.Item>
+              <Descriptions.Item label="状态"><Tag color={jobStatus.color}>{jobStatus.label}</Tag></Descriptions.Item>
+              <Descriptions.Item label="进度">{detail.finishedCount || 0}/{detail.totalCount || 0}</Descriptions.Item>
+              <Descriptions.Item label="开始时间">{dateTime(String(detail.startedAt || ""))}</Descriptions.Item>
+              <Descriptions.Item label="完成时间">{dateTime(String(detail.finishedAt || ""))}</Descriptions.Item>
+            </Descriptions>
+            {detail.mode === "BATCH" && (
+              <Progress percent={Number(detail.progress || 0)} style={{ marginBottom: 16 }}
+                format={() => `成功 ${detail.successCount || 0} / 失败 ${detail.failCount || 0} / 跳过 ${detail.skipCount || 0}`} />
+            )}
+            <AntTable
+              size="small"
+              rowKey="id"
+              pagination={false}
+              dataSource={detail.items || []}
+              columns={[
+                { title: "平台", width: 90, dataIndex: "platform", render: (value: string) => collectPlatformLabel(value) },
+                { title: "商品链接", dataIndex: "url", ellipsis: true, render: (value: string) => <Typography.Text copyable={{ text: value }}>{value}</Typography.Text> },
+                {
+                  title: "状态",
+                  width: 220,
+                  render: (_: unknown, row: Row) => {
+                    const item = collectItemStatus(String(row.status));
+                    return (
+                      <div>
+                        <Tag color={item.color}>{item.label}</Tag>
+                        {row.errorMessage && <small className="subline">{row.errorMessage}</small>}
+                      </div>
+                    );
+                  },
+                },
+                { title: "开始时间", dataIndex: "startedAt", width: 160, render: dateTime },
+                { title: "完成时间", dataIndex: "finishedAt", width: 160, render: dateTime },
+              ]}
+            />
+          </>
+        )}
+      </Drawer>
+    </>
+  );
 }
 
 function Overview({ go }: { go: (value: Module) => void }) {

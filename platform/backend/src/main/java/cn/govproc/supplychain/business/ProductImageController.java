@@ -100,19 +100,23 @@ public class ProductImageController {
         String extension = "image/png".equals(file.getContentType()) ? ".png" : ".jpg";
         String filename = UUID.randomUUID() + extension;
         if (ossClient != null) {
-            String objectKey = ossObjectPrefix + "images/" + filename;
-            ObjectMetadata metadata = new ObjectMetadata();
-            metadata.setContentType(file.getContentType());
-            metadata.setContentLength(file.getSize());
-            metadata.setCacheControl("public, max-age=31536000, immutable");
-            ossClient.putObject(ossBucket, objectKey, file.getInputStream(), metadata);
-            return Map.of(
-                "url", "/api/public/uploads/images/" + filename,
-                "width", width,
-                "height", height,
-                "size", file.getSize(),
-                "storage", "OSS"
-            );
+            try {
+                String objectKey = ossObjectPrefix + "images/" + filename;
+                ObjectMetadata metadata = new ObjectMetadata();
+                metadata.setContentType(file.getContentType());
+                metadata.setContentLength(file.getSize());
+                metadata.setCacheControl("public, max-age=31536000, immutable");
+                ossClient.putObject(ossBucket, objectKey, file.getInputStream(), metadata);
+                return Map.of(
+                    "url", "/api/public/uploads/images/" + filename,
+                    "width", width,
+                    "height", height,
+                    "size", file.getSize(),
+                    "storage", "OSS"
+                );
+            } catch (OSSException exception) {
+                log.warn("OSS upload failed, storing locally: {}", exception.getErrorMessage());
+            }
         }
         Path target = uploadDirectory.resolve(filename).normalize();
         if (!target.getParent().equals(uploadDirectory)) throw new IllegalArgumentException("非法文件名");
@@ -202,7 +206,9 @@ public class ProductImageController {
                     .contentType(contentType == null ? MediaType.APPLICATION_OCTET_STREAM : MediaType.parseMediaType(contentType))
                     .body(new InputStreamResource(object.getObjectContent()));
             } catch (OSSException exception) {
-                if (!"NoSuchKey".equals(exception.getErrorCode())) throw exception;
+                if (!"NoSuchKey".equals(exception.getErrorCode())) {
+                    log.warn("OSS download failed, trying local file: {}", exception.getErrorMessage());
+                }
             }
         }
         Path file = uploadDirectory.resolve(filename).normalize();

@@ -47,6 +47,7 @@ springdoc:
     path: /api/openapi
 app:
   upload-dir: ${UPLOAD_DIR:/app/uploads}
+  collector-url: ${COLLECTOR_URL:}
   oss:
     endpoint: ${ALIYUN_OSS_ENDPOINT:}
     bucket: ${ALIYUN_OSS_BUCKET:}

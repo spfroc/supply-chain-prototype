@@ -122,11 +122,28 @@ public class AdminBusinessController {
                 params.put("badgeType",normalizedBadgeType);
             }
         }
+        if(keyword!=null&&!keyword.isBlank()) {
+            base+="""
+              AND (
+                p.title LIKE :listKeyword OR p.spu_code LIKE :listKeyword
+                OR IFNULL(p.model,'') LIKE :listKeyword OR IFNULL(p.summary,'') LIKE :listKeyword
+                OR EXISTS (
+                  SELECT 1 FROM product_sku kx
+                  WHERE kx.spu_id=p.id AND kx.deleted_at IS NULL
+                    AND (kx.sku_code LIKE :listKeyword OR IFNULL(kx.title,'') LIKE :listKeyword)
+                )
+              )
+              """;
+            params.put("listKeyword","%"+keyword.trim()+"%");
+        }
+        if(status!=null) {
+            base+=" AND p.status=:listStatus";
+            params.put("listStatus",status);
+        }
         if(page==null) return richTextSanitizer.cleanRows(
           jdbc.sql(base+" ORDER BY id DESC").params(params).query().listOfRows(), "detailHtml", "afterSalesHtml");
         return richTextSanitizer.cleanPage(
-          PageSupport.query(jdbc,base,"q.id DESC",params,page,pageSize,keyword,status,
-            List.of("spuCode","title","summary","skuCode"),"status"),
+          PageSupport.query(jdbc,base,"q.id DESC",params,page,pageSize,"",null,List.of(),"status"),
           "detailHtml", "afterSalesHtml");
     }
 
