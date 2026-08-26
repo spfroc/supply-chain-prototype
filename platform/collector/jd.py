@@ -340,16 +340,22 @@ def _raise_if_delisted(text: str, product: dict | None = None) -> None:
 
 
 class BrowserPool:
-    def __init__(self) -> None:
+    def __init__(self, proxy_url: str | None = None) -> None:
         self._playwright: Playwright | None = None
         self._browser: Browser | None = None
         self.lock = asyncio.Lock()
+        # None: use the configured JD collector proxy; empty string: force direct access.
+        self._proxy_url = proxy_url
 
     async def start(self) -> None:
         if self._browser and self._browser.is_connected():
             return
         self._playwright = await async_playwright().start()
-        proxy_url = os.getenv("COLLECTOR_BROWSER_PROXY", "").strip()
+        proxy_url = (
+            os.getenv("COLLECTOR_BROWSER_PROXY", "").strip()
+            if self._proxy_url is None
+            else self._proxy_url.strip()
+        )
         launch_options = {}
         if proxy_url:
             launch_options["proxy"] = {"server": proxy_url}

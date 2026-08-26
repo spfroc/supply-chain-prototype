@@ -14,13 +14,16 @@ from qilu import scrape_qilu
 from taobao import scrape_taobao
 
 pool = BrowserPool()
+direct_pool = BrowserPool(proxy_url="")
 busy = asyncio.Lock()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await pool.start()
+    await direct_pool.start()
     yield
+    await direct_pool.stop()
     await pool.stop()
 
 
@@ -50,9 +53,9 @@ async def collect(body: CollectRequest, authorization: str | None = Header(defau
             if platform == "taobao":
                 product = await scrape_taobao(body.url)
             elif platform == "huiecai":
-                product = await scrape_huiecai(pool, body.url)
+                product = await scrape_huiecai(direct_pool, body.url)
             elif platform == "qilu":
-                product = await scrape_qilu(pool, body.url)
+                product = await scrape_qilu(direct_pool, body.url)
             else:
                 product = await scrape_jd(pool, body.url)
             if body.memberPrice:
