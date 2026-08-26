@@ -1785,6 +1785,18 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
             <span className="product-main-info">
               <strong>{r.title}</strong>
               <small>{r.spuCode} · {Number(r.skuCount||1)} 个 SKU</small>
+              {r.collectionPlatform && r.collectionSourceUrl && (
+                <a
+                  className="product-collection-source"
+                  href={r.collectionSourceUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(event) => event.stopPropagation()}
+                  title={`打开${collectPlatformLabel(r.collectionPlatform)}原商品`}
+                >
+                  采集自：{collectPlatformLabel(r.collectionPlatform)}
+                </a>
+              )}
             </span>
           </div>
         ),

@@ -49,6 +49,7 @@ public class AdminBusinessController {
         String base="""
           SELECT p.id,p.spu_code AS spuCode,p.title,p.model,p.summary,p.main_image AS mainImage,p.self_operated AS selfOperated,
             p.badge_type AS badgeType,p.badge_platform_id AS badgePlatformId,p.custom_badge AS customBadge,
+            p.collection_platform AS collectionPlatform,p.collection_source_url AS collectionSourceUrl,
             COALESCE((SELECT JSON_ARRAYAGG(pso.option_id) FROM product_service_option pso WHERE pso.product_id=p.id),JSON_ARRAY()) AS serviceOptionIds,
             JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')) AS gallery,
             p.detail_html AS detailHtml,p.delivery_description AS deliveryDescription,
@@ -224,9 +225,11 @@ public class AdminBusinessController {
         while(skuCode.equals(spuCode)) skuCode=uniqueProductCode();
         jdbc.sql("""
           INSERT INTO product_spu(spu_code,title,model,category_id,brand_id,self_operated,main_image,gallery_json,
-            summary,detail_html,delivery_description,after_sales_html,status,badge_type,badge_platform_id,custom_badge)
+            summary,detail_html,delivery_description,after_sales_html,status,badge_type,badge_platform_id,custom_badge,
+            collection_platform,collection_source_url)
           VALUES(:code,:title,:model,:categoryId,:brandId,:selfOperated,:mainImage,JSON_OBJECT('content',:gallery),
-            :summary,:detailHtml,:deliveryDescription,:afterSalesHtml,:status,:badgeType,:badgePlatformId,:customBadge)
+            :summary,:detailHtml,:deliveryDescription,:afterSalesHtml,:status,:badgeType,:badgePlatformId,:customBadge,
+            :collectionPlatform,:collectionSourceUrl)
           """)
           .param("code",spuCode).param("title",r.title()).param("model",value(r.model())).param("categoryId",r.categoryId()).param("brandId",r.brandId())
           .param("selfOperated",r.selfOperatedValue())
@@ -235,6 +238,8 @@ public class AdminBusinessController {
           .param("deliveryDescription",value(r.deliveryDescription())).param("afterSalesHtml",richTextSanitizer.clean(r.afterSalesHtml()))
           .param("badgeType",persistedBadgeType(r.badgeType())).param("badgePlatformId",normalizedBadgePlatformId(r))
           .param("customBadge",normalizedCustomBadge(r))
+          .param("collectionPlatform",normalizedCollectionPlatform(r.collectionPlatform()))
+          .param("collectionSourceUrl",normalizedCollectionSourceUrl(r.collectionSourceUrl()))
           .param("status",r.status()).update();
         long id=jdbc.sql("SELECT id FROM product_spu WHERE spu_code=:code").param("code",spuCode).query(Long.class).single();
         saveSkus(id,r,skuCode);
@@ -257,6 +262,8 @@ public class AdminBusinessController {
           badge_type=CASE WHEN :badgeType IS NULL THEN badge_type ELSE NULLIF(:badgeType,'NONE') END,
           badge_platform_id=CASE WHEN :badgeType IS NULL THEN badge_platform_id ELSE :badgePlatformId END,
           custom_badge=CASE WHEN :badgeType IS NULL THEN custom_badge ELSE :customBadge END,
+          collection_platform=COALESCE(:collectionPlatform,collection_platform),
+          collection_source_url=COALESCE(:collectionSourceUrl,collection_source_url),
           status=:status WHERE id=:id AND deleted_at IS NULL
           """)
           .param("id",id).param("title",r.title()).param("model",value(r.model())).param("categoryId",r.categoryId()).param("brandId",r.brandId())
@@ -268,6 +275,8 @@ public class AdminBusinessController {
           .param("afterSalesHtml",r.afterSalesHtml()==null?null:richTextSanitizer.clean(r.afterSalesHtml()))
           .param("badgeType",r.badgeType()).param("badgePlatformId",normalizedBadgePlatformId(r))
           .param("customBadge",normalizedCustomBadge(r))
+          .param("collectionPlatform",normalizedCollectionPlatform(r.collectionPlatform()))
+          .param("collectionSourceUrl",normalizedCollectionSourceUrl(r.collectionSourceUrl()))
           .param("status",r.status()).update(),"商品不存在");
         if((r.skus()!=null&&!r.skus().isEmpty())||r.marketPrice()!=null||r.memberPrice()!=null) saveSkus(id,r,null);
         if(r.attributeValues()!=null) saveAttributeValues(id,r.attributeValues());
@@ -918,6 +927,20 @@ public class AdminBusinessController {
     private static String normalizedCustomBadge(ProductRequest r){
         return "CUSTOM".equals(normalizedBadgeType(r.badgeType()))?value(r.customBadge()).trim():null;
     }
+    private static String normalizedCollectionPlatform(String platform){
+        String normalized=value(platform).trim().toLowerCase();
+        if(normalized.isBlank()) return null;
+        if(!Set.of("jd","taobao","huiecai","qilu").contains(normalized))
+            throw new IllegalArgumentException("商品采集来源平台不正确");
+        return normalized;
+    }
+    private static String normalizedCollectionSourceUrl(String sourceUrl){
+        String normalized=value(sourceUrl).trim();
+        if(normalized.isBlank()) return null;
+        if(normalized.length()>1000||!(normalized.startsWith("http://")||normalized.startsWith("https://")))
+            throw new IllegalArgumentException("商品采集来源链接不正确");
+        return normalized;
+    }
     private void validateCategoryParent(Long id,Long parentId,int level) {
         if(level<1||level>3) throw new IllegalArgumentException("分类级别必须为1至3级");
         if(level==1&&parentId!=null) throw new IllegalArgumentException("一级分类不能设置上级分类");
@@ -1002,7 +1025,8 @@ public class AdminBusinessController {
         String mainImage,String gallery,String summary,String detailHtml,
         String deliveryDescription,String afterSalesHtml,String spec,
       @DecimalMin("0") BigDecimal marketPrice,@DecimalMin("0") BigDecimal memberPrice,@Min(0) Integer stock,int status,
-      Map<String,Object> attributeValues,List<SkuRequest> skus,String badgeType,Long badgePlatformId,String customBadge,List<Long> serviceOptionIds){
+      Map<String,Object> attributeValues,List<SkuRequest> skus,String badgeType,Long badgePlatformId,String customBadge,List<Long> serviceOptionIds,
+      String collectionPlatform,String collectionSourceUrl){
         public ProductRequest {
             long galleryCount=gallery==null?0:gallery.lines().filter(line->!line.isBlank()).count();
             if(galleryCount>6) throw new IllegalArgumentException("商品配图最多上传6张");

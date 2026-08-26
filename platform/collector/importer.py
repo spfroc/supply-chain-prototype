@@ -609,6 +609,8 @@ def put_existing(admin: Admin, existing: dict, overlays: dict) -> None:
         "attributeValues": overlays["attributeValues"],
         "serviceOptionIds": overlays["serviceOptionIds"],
         "badgeType": existing.get("badgeType") or "NONE",
+        "collectionPlatform": overlays.get("collectionPlatform"),
+        "collectionSourceUrl": overlays.get("collectionSourceUrl"),
     }
     skus = cleaned_skus(existing)
     if skus and overlays.get("mainImage") is not None:
@@ -669,6 +671,8 @@ def import_scraped(product: dict, authorization: str) -> dict:
         html = detail_html(params, title, detail_urls)
         overlays = {
             "model": model,
+            "collectionPlatform": platform,
+            "collectionSourceUrl": product.get("sourceUrl") or product.get("url"),
             "attributeValues": attribute_values,
             "serviceOptionIds": service_ids,
             "deliveryDescription": delivery,
@@ -732,6 +736,8 @@ def import_scraped(product: dict, authorization: str) -> dict:
         "memberPrice": member,
         "stock": stock,
         "status": 1,
+        "collectionPlatform": platform,
+        "collectionSourceUrl": product.get("sourceUrl") or product.get("url"),
         "attributeValues": attribute_values,
         "serviceOptionIds": service_ids,
         "skus": [{
