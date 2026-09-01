@@ -1094,7 +1094,7 @@ function EnterpriseUsers() {
       <Table rowKey="id" loading={users.loading} dataSource={users.data} server={{...users.server,statusOptions:[{label:"待审核",value:"2"},{label:"已启用",value:"1"},{label:"已停用 / 未通过",value:"0"}]}} searchPlaceholder="搜索企业、账号、姓名或手机" columns={[
         {title:"用户",render:(_:unknown,row:Row)=><div className="user-cell"><i>{String(row.realName||"用").slice(0,1)}</i><span><strong>{row.realName}</strong><small>@{row.username}</small></span></div>},
         {title:"所属企业",dataIndex:"enterpriseName"},{title:"手机号码",dataIndex:"phone"},
-        {title:"企业角色",dataIndex:"roleCode",render:(value)=>value==="ENTERPRISE_ADMIN"?<Tag color="blue">企业管理员</Tag>:<Tag>采购员</Tag>},
+        {title:"部门 / 企业角色",dataIndex:"roleCode",render:(value,record)=><Space direction="vertical" size={2}><span>{record.departmentName||"未分配部门"}</span><Tag color={value==="ENTERPRISE_ADMIN"?"blue":undefined}>{record.roleNames||(value==="ENTERPRISE_ADMIN"?"企业管理员":"采购员")}</Tag></Space>},
         {title:"状态",dataIndex:"status",render:(value)=>Number(value)===2?<Tag color="orange">待审核</Tag>:Number(value)===1?<Tag color="green">已启用</Tag>:<Tag>已停用 / 未通过</Tag>},
         {title:"创建时间",dataIndex:"createdAt",render:dateTime},
         {title:"操作",render:(_:unknown,row:Row)=><Button type="link" onClick={()=>show(row)}>编辑</Button>},

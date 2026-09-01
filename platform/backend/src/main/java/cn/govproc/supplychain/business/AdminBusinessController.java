@@ -467,10 +467,16 @@ public class AdminBusinessController {
                              @RequestParam(defaultValue="10") int pageSize,@RequestParam(defaultValue="") String keyword,
                              @RequestParam(required=false) Integer status) {
         String base="""
-          SELECT id,username,real_name AS realName,phone,role_code AS roleCode,status,
-            DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
-          FROM enterprise_user
-          WHERE enterprise_id=:enterpriseId AND deleted_at IS NULL
+          SELECT u.id,u.username,u.real_name AS realName,u.phone,u.role_code AS roleCode,u.status,
+            u.department_id AS departmentId,d.name AS departmentName,
+            GROUP_CONCAT(DISTINCT r.name ORDER BY r.id) AS roleNames,
+            DATE_FORMAT(u.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
+          FROM enterprise_user u
+          LEFT JOIN enterprise_department d ON d.id=u.department_id AND d.deleted_at IS NULL
+          LEFT JOIN enterprise_user_role ur ON ur.user_id=u.id
+          LEFT JOIN enterprise_role r ON r.id=ur.role_id AND r.deleted_at IS NULL
+          WHERE u.enterprise_id=:enterpriseId AND u.deleted_at IS NULL
+          GROUP BY u.id,d.name
           """;
         var params=Map.of("enterpriseId",enterpriseId);
         if(page==null) return jdbc.sql(base+" ORDER BY id").params(params).query().listOfRows();
@@ -483,17 +489,22 @@ public class AdminBusinessController {
                            @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
         String base="""
           SELECT u.id,u.enterprise_id AS enterpriseId,e.name AS enterpriseName,u.username,
-            u.real_name AS realName,u.phone,u.role_code AS roleCode,u.status,
+            u.real_name AS realName,u.phone,u.role_code AS roleCode,u.status,d.name AS departmentName,
+            GROUP_CONCAT(DISTINCT r.name ORDER BY r.id) AS roleNames,
             DATE_FORMAT(u.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
           FROM enterprise_user u JOIN enterprise e ON e.id=u.enterprise_id
+          LEFT JOIN enterprise_department d ON d.id=u.department_id AND d.deleted_at IS NULL
+          LEFT JOIN enterprise_user_role ur ON ur.user_id=u.id
+          LEFT JOIN enterprise_role r ON r.id=ur.role_id AND r.deleted_at IS NULL
           WHERE u.deleted_at IS NULL AND e.deleted_at IS NULL
+          GROUP BY u.id,e.name,d.name
           """;
         if(page==null) return jdbc.sql(base+" ORDER BY CASE WHEN u.status=2 THEN 0 ELSE 1 END,u.created_at DESC,u.id DESC").query().listOfRows();
         return PageSupport.query(jdbc,base,"CASE WHEN q.status=2 THEN 0 ELSE 1 END,q.createdAt DESC,q.id DESC",Map.of(),page,pageSize,keyword,status,
           List.of("enterpriseName","username","realName","phone","roleCode"),"status");
     }
 
-    @PostMapping("/enterprises/{enterpriseId}/members") @ResponseStatus(HttpStatus.CREATED)
+    @PostMapping("/enterprises/{enterpriseId}/members") @ResponseStatus(HttpStatus.CREATED) @Transactional
     void createEnterpriseMember(@PathVariable long enterpriseId,@Valid @RequestBody EnterpriseMemberRequest r) {
         validatePassword(r.password(),true);
         require(jdbc.sql("SELECT COUNT(*) FROM enterprise WHERE id=:id AND deleted_at IS NULL")
@@ -503,6 +514,9 @@ public class AdminBusinessController {
           VALUES(:enterpriseId,:username,:password,:realName,:phone,:roleCode,:status)
           """).params(Map.of("enterpriseId",enterpriseId,"username",r.username(),"realName",r.realName(),
           "password",encoder.encode(r.password()),"phone",r.phone(),"roleCode",r.roleCode(),"status",r.status())).update();
+        long memberId=jdbc.sql("SELECT id FROM enterprise_user WHERE enterprise_id=:enterpriseId AND username=:username")
+          .params(Map.of("enterpriseId",enterpriseId,"username",r.username())).query(Long.class).single();
+        syncEnterpriseRole(enterpriseId,memberId,r.roleCode());
     }
 
     @PutMapping("/enterprises/{enterpriseId}/members/{memberId}") @Transactional
@@ -523,6 +537,7 @@ public class AdminBusinessController {
               """).params(Map.of("enterpriseId",enterpriseId,"memberId",memberId,
               "password",encoder.encode(r.password()))).update();
         }
+        syncEnterpriseRole(enterpriseId,memberId,r.roleCode());
     }
 
     @DeleteMapping("/enterprises/{enterpriseId}/members/{memberId}") @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -1020,6 +1035,17 @@ public class AdminBusinessController {
             throw new IllegalArgumentException("初始密码不能为空");
         if(password!=null&&!password.isBlank()&&(password.length()<8||password.length()>72))
             throw new IllegalArgumentException("密码长度必须为8至72位");
+    }
+    private void syncEnterpriseRole(long enterpriseId,long memberId,String roleCode) {
+        List<Long> roleIds=jdbc.sql("""
+          SELECT id FROM enterprise_role
+          WHERE enterprise_id=:enterpriseId AND role_code=:roleCode AND status=1 AND deleted_at IS NULL
+          """).params(Map.of("enterpriseId",enterpriseId,"roleCode",roleCode)).query(Long.class).list();
+        if(roleIds.isEmpty())return;
+        jdbc.sql("DELETE ur FROM enterprise_user_role ur JOIN enterprise_role r ON r.id=ur.role_id WHERE ur.user_id=:memberId AND r.built_in=1")
+          .param("memberId",memberId).update();
+        jdbc.sql("INSERT IGNORE INTO enterprise_user_role(user_id,role_id) VALUES(:memberId,:roleId)")
+          .params(Map.of("memberId",memberId,"roleId",roleIds.getFirst())).update();
     }
     public record ProductRequest(@NotBlank String title,String model,@NotNull Long categoryId,@NotNull Long brandId,Integer selfOperated,
         String mainImage,String gallery,String summary,String detailHtml,

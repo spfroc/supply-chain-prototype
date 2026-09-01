@@ -1752,12 +1752,13 @@ function H5Manage({
       <header>
         <button onClick={back}>‹</button>
         <h1>{title}</h1>
-        {view !== "invoices" ? (
+        {view === "addresses" ? (
           <button onClick={() => show()}>添加</button>
         ) : (
           <span />
         )}
       </header>
+      {view === "members" && <div className="h5-manage-tip">H5 端仅查看成员与授权结果；部门、角色和复杂权限请在 Web 端“组织与权限”中配置。</div>}
       {rows.map((r) => (
         <article className="h5-manage-row" key={r.id}>
           <div>
@@ -1773,10 +1774,10 @@ function H5Manage({
                 ? `${r.contactPhone} · ${r.province}${r.city}${r.district}${r.detail}`
                 : view === "invoices"
                   ? `${r.orderNo} · ${money(r.amount)} · ${["待处理", "处理中", "已开具", "失败"][r.status]}`
-                  : `${r.phone} · ${r.roleCode === "ENTERPRISE_ADMIN" ? "企业管理员" : "采购员"} · ${Number(r.status) === 1 ? "启用" : "停用"}`}
+                  : `${r.phone} · ${r.departmentName || "未分配部门"} · ${r.roleNames || (r.roleCode === "ENTERPRISE_ADMIN" ? "企业管理员" : "采购员")} · ${Number(r.status) === 1 ? "启用" : "停用"}`}
             </span>
           </div>
-          {view !== "invoices" && (
+          {view === "addresses" && (
             <p>
               <button onClick={() => show(r)}>编辑</button>
               <button onClick={() => void remove(r)}>删除</button>

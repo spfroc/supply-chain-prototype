@@ -4,6 +4,7 @@ import "./style.css";
 import "./manage.css";
 import "./auth.css";
 import "./categories.css";
+import { OrganizationPage } from "./Organization";
 
 type View =
   | "home"
@@ -22,8 +23,9 @@ type View =
   | "profile"
   | "addresses"
   | "invoices"
-  | "members";
-type Row = Record<string, any>;
+  | "members"
+  | "organization";
+export type Row = Record<string, any>;
 const structuredSpecs = (value: unknown): Row[] => {
   try {
     const parsed = typeof value === "string" ? JSON.parse(value || "[]") : value;
@@ -128,6 +130,7 @@ const routeViews: View[] = [
   "addresses",
   "invoices",
   "members",
+  "organization",
 ];
 const protectedViews = new Set<View>([
   "agreement-products",
@@ -138,6 +141,7 @@ const protectedViews = new Set<View>([
   "addresses",
   "invoices",
   "members",
+  "organization",
 ]);
 const parseRoute = (url = new URL(location.href)) => {
   const path = url.pathname.replace(/\/$/, "") || "/web";
@@ -151,6 +155,7 @@ const parseRoute = (url = new URL(location.href)) => {
     "/web/checkout": "checkout", "/web/orders": "orders", "/web/account": "profile",
     "/web/account/addresses": "addresses", "/web/account/invoices": "invoices",
     "/web/account/members": "members",
+    "/web/account/organization": "organization",
   };
   const legacy = url.searchParams.get("view") as View | null;
   return {
@@ -176,10 +181,10 @@ const pathFor = (view: View, platformId?: number, solutionId?: number, productId
     platforms: "/web/platforms", content: "/web/content", cart: "/web/cart",
     checkout: "/web/checkout", orders: "/web/orders", profile: "/web/account",
     addresses: "/web/account/addresses", invoices: "/web/account/invoices",
-    members: "/web/account/members" } as Partial<Record<View, string>>)[view] || "/web/";
+    members: "/web/account/members", organization: "/web/account/organization" } as Partial<Record<View, string>>)[view] || "/web/";
 };
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const requestUrl = new URL(path, window.location.origin).toString();
   const response = await fetch(requestUrl, {
     ...init,
@@ -665,6 +670,7 @@ function App() {
           go={setView}
         />
       )}
+      {displayView === "organization" && <OrganizationPage go={(target)=>setView(target as View)} />}
       <footer className="footer">
         <section className="footer-services">
           {(portal.serviceFeatures || []).map((row: Row, index: number) => <article key={row.id || row.title}>
@@ -2318,6 +2324,7 @@ function Orders({ go }: { go: (v: View) => void }) {
           ["addresses", "地址管理"],
           ["invoices", "发票管理"],
           ["members", "企业成员"],
+          ["organization", "组织与权限"],
         ].map((item) => (
             <button
               className={item[0] === "orders" ? "active" : ""}
@@ -2474,6 +2481,7 @@ function Profile({
           ["addresses", "地址管理"],
           ["invoices", "发票管理"],
           ["members", "企业成员"],
+          ["organization", "组织与权限"],
         ].map((x, i) => (
           <button
             className={i === 0 ? "active" : ""}

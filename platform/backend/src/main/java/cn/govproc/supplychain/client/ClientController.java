@@ -1,6 +1,7 @@
 package cn.govproc.supplychain.client;
 
 import cn.govproc.supplychain.auth.ClientAuthService;
+import cn.govproc.supplychain.auth.EnterpriseAuthorizationService;
 import cn.govproc.supplychain.order.OrderInventoryService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
@@ -32,15 +33,18 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/client")
 public class ClientController {
     private final ClientAuthService auth;
+    private final EnterpriseAuthorizationService authorization;
 
     private final JdbcClient jdbc;
     private final OrderInventoryService inventory;
     private final PasswordEncoder passwordEncoder;
 
-    public ClientController(JdbcClient jdbc, ClientAuthService auth, OrderInventoryService inventory,
+    public ClientController(JdbcClient jdbc, ClientAuthService auth, EnterpriseAuthorizationService authorization,
+                            OrderInventoryService inventory,
                             PasswordEncoder passwordEncoder) {
         this.jdbc = jdbc;
         this.auth = auth;
+        this.authorization = authorization;
         this.inventory = inventory;
         this.passwordEncoder = passwordEncoder;
     }
@@ -134,14 +138,23 @@ public class ClientController {
     @GetMapping("/members")
     List<Map<String,Object>> members() {
         return jdbc.sql("""
-            SELECT id,username,real_name AS realName,phone,role_code AS roleCode,status,
-              DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
-            FROM enterprise_user WHERE enterprise_id=:enterpriseId AND deleted_at IS NULL ORDER BY id
+            SELECT u.id,u.username,u.real_name AS realName,u.phone,u.role_code AS roleCode,u.status,
+              u.department_id AS departmentId,d.name AS departmentName,
+              GROUP_CONCAT(DISTINCT r.name ORDER BY r.id) AS roleNames,
+              GROUP_CONCAT(DISTINCT r.id ORDER BY r.id) AS roleIds,
+              DATE_FORMAT(u.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
+            FROM enterprise_user u
+            LEFT JOIN enterprise_department d ON d.id=u.department_id AND d.deleted_at IS NULL
+            LEFT JOIN enterprise_user_role ur ON ur.user_id=u.id
+            LEFT JOIN enterprise_role r ON r.id=ur.role_id AND r.deleted_at IS NULL
+            WHERE u.enterprise_id=:enterpriseId AND u.deleted_at IS NULL
+            GROUP BY u.id,d.name ORDER BY u.id
             """).param("enterpriseId", enterpriseId()).query().listOfRows();
     }
 
     @PostMapping("/members")
     @ResponseStatus(HttpStatus.CREATED)
+    @Transactional
     void createMember(@Valid @RequestBody MemberRequest request) {
         requireEnterpriseAdmin();
         jdbc.sql("""
@@ -151,9 +164,13 @@ public class ClientController {
                 "password", passwordEncoder.encode("demo-password"),
                 "realName", request.realName(), "phone", request.phone(), "roleCode", request.roleCode(),
                 "status", request.status())).update();
+        long memberId=jdbc.sql("SELECT id FROM enterprise_user WHERE enterprise_id=:enterpriseId AND username=:username")
+            .params(Map.of("enterpriseId",enterpriseId(),"username",request.username())).query(Long.class).single();
+        syncLegacyRole(memberId,request.roleCode());
     }
 
     @PutMapping("/members/{id}")
+    @Transactional
     void updateMember(@PathVariable long id,@Valid @RequestBody MemberRequest request) {
         requireEnterpriseAdmin();
         int changed=jdbc.sql("""
@@ -162,6 +179,7 @@ public class ClientController {
             """).params(Map.of("id",id,"enterpriseId",enterpriseId(),"username",request.username(),
                 "realName",request.realName(),"phone",request.phone(),"roleCode",request.roleCode(),"status",request.status())).update();
         if(changed==0)throw new IllegalArgumentException("企业成员不存在");
+        syncLegacyRole(id,request.roleCode());
     }
 
     @DeleteMapping("/members/{id}")
@@ -455,9 +473,19 @@ public class ClientController {
 
     private long userId() { return auth.current().userId(); }
     private long enterpriseId() { return auth.current().enterpriseId(); }
+    private void syncLegacyRole(long memberId,String roleCode) {
+        List<Long> roleIds=jdbc.sql("""
+            SELECT id FROM enterprise_role
+            WHERE enterprise_id=:enterpriseId AND role_code=:roleCode AND status=1 AND deleted_at IS NULL
+            """).params(Map.of("enterpriseId",enterpriseId(),"roleCode",roleCode)).query(Long.class).list();
+        if(roleIds.isEmpty())return;
+        jdbc.sql("DELETE ur FROM enterprise_user_role ur JOIN enterprise_role r ON r.id=ur.role_id WHERE ur.user_id=:memberId AND r.built_in=1")
+            .param("memberId",memberId).update();
+        jdbc.sql("INSERT IGNORE INTO enterprise_user_role(user_id,role_id) VALUES(:memberId,:roleId)")
+            .params(Map.of("memberId",memberId,"roleId",roleIds.getFirst())).update();
+    }
     private void requireEnterpriseAdmin() {
-        if(!"ENTERPRISE_ADMIN".equals(auth.current().roleCode()))
-            throw new org.springframework.web.server.ResponseStatusException(HttpStatus.FORBIDDEN,"仅企业管理员可管理成员");
+        authorization.require("organization:manage");
     }
 
     public record CartRequest(@NotNull Long skuId, Long solutionId, @Min(1) @Max(9999) int quantity) {}
