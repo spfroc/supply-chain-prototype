@@ -1003,6 +1003,7 @@ function ProductDetail({
     else localStorage.removeItem(favoriteKey);
     Toast.show(next ? "已收藏" : "已取消收藏");
   };
+  const subscribeArrival=async()=>{if(!loggedIn){Toast.show("请先登录后设置到货提醒");return;}try{await api(`/api/client/service/stock-subscriptions/${current.skuId}`,{method:"POST"});Toast.show("到货提醒设置成功");}catch(e){Toast.show((e as Error).message);}};
   const share = () => shareContent(product.title,`${product.title} ${money(customerPrice(current,loggedIn))}`);
   const configuredSpecifications = structuredSpecs(product.structuredAttributes).map((item) => [
     item.name,
@@ -1082,7 +1083,7 @@ function ProductDetail({
       </article>
       {variants.length>1&&<article className="info-row m-sku-selector"><strong>规格</strong><div>
         {variants.map((item)=><button key={item.skuId} className={Number(item.skuId)===Number(current.skuId)?"active":""}
-          disabled={Number(item.availableStock)<=0} onClick={()=>setSelectedSku(Number(item.skuId))}>{variantLabel(item)}</button>)}
+          onClick={()=>setSelectedSku(Number(item.skuId))}>{variantLabel(item)}{Number(item.availableStock)<=0?"（缺货）":""}</button>)}
       </div></article>}
       <article className="info-row">
         <strong>配送</strong>
@@ -1126,8 +1127,7 @@ function ProductDetail({
       </article>
       <footer className="buybar">
         <button onClick={toggleFavorite}>{favorite ? "已收藏" : "收藏"}</button>
-        <button disabled={Number(current.availableStock)<=0} onClick={() => void add(current)}>加入购物车</button>
-        <button disabled={Number(current.availableStock)<=0} onClick={() => void buyNow(current)}>立即采购</button>
+        {Number(current.availableStock)<=0?<button className="arrival-reminder" onClick={()=>void subscribeArrival()}>到货提醒</button>:<><button onClick={() => void add(current)}>加入购物车</button><button onClick={() => void buyNow(current)}>立即采购</button></>}
       </footer>
     </div>
   );

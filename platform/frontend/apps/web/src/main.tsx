@@ -1724,6 +1724,7 @@ function Detail({
   const skuSpecifications=Object.entries(typeof current.specValues==="string"?JSON.parse(current.specValues||"{}"):current.specValues||{});
   const specifications = [...skuSpecifications,...(configuredSpecifications.length ? configuredSpecifications : legacySpecifications)];
   const salePrice=customerPrice(current,loggedIn);
+  const subscribeArrival=async()=>{if(!loggedIn){notify("请先登录后设置到货提醒");return;}try{await api(`/api/client/service/stock-subscriptions/${current.skuId}`,{method:"POST"});notify("到货提醒设置成功");}catch(e){notify((e as Error).message);}};
   return (
     <main className="page">
       <div className="breadcrumb">
@@ -1768,7 +1769,7 @@ function Detail({
           </div>
           {variants.length>1&&<div className="sku-selector"><strong>选择规格</strong><div>
             {variants.map((item)=><button key={item.skuId} className={Number(item.skuId)===Number(current.skuId)?"active":""}
-              disabled={Number(item.availableStock)<=0} onClick={()=>{setSelectedSku(Number(item.skuId));setQty(1);}}>{variantLabel(item)}</button>)}
+              onClick={()=>{setSelectedSku(Number(item.skuId));setQty(1);}}>{variantLabel(item)}{Number(item.availableStock)<=0?"（缺货）":""}</button>)}
           </div></div>}
           <dl>
             <dt>商品编码</dt>
@@ -1798,8 +1799,7 @@ function Detail({
           </dl>
           {current.productUrl&&<div className="detail-platform-link"><span>平台商品链接</span><a href={current.productUrl} target="_blank" rel="noreferrer">前往{current.platformTitle||"平台"}查看</a></div>}
           <div className="buy">
-            <button disabled={Number(current.availableStock)<=0} onClick={() => void add(current, qty)}>加入购物车</button>
-            <button disabled={Number(current.availableStock)<=0} onClick={() => void buyNow(current, qty)}>立即采购</button>
+            {Number(current.availableStock)<=0?<button className="arrival-reminder" onClick={()=>void subscribeArrival()}>到货提醒</button>:<><button onClick={() => void add(current, qty)}>加入购物车</button><button onClick={() => void buyNow(current, qty)}>立即采购</button></>}
           </div>
         </div>
       </section>
