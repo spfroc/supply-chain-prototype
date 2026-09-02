@@ -37,7 +37,7 @@ public class SecurityConfig {
                   "/api/admin/business/enterprise-users/**").hasAuthority("enterprise:manage")
                 .requestMatchers("/api/admin/business/agreements/**","/api/admin/agreements/**").hasAuthority("agreement:manage")
                 .requestMatchers("/api/admin/business/orders/**","/api/admin/business/agreement-orders/**",
-                  "/api/admin/business/platform-orders/**").hasAuthority("order:manage")
+                  "/api/admin/business/platform-orders/**","/api/admin/business/finance/**").hasAuthority("order:manage")
                 .requestMatchers("/api/admin/**").denyAll()
                 .anyRequest().authenticated())
             .httpBasic(Customizer.withDefaults())
