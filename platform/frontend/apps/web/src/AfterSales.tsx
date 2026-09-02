@@ -1,0 +1,25 @@
+import React, { useEffect, useState } from "react";
+import { api, type Row } from "./main";
+
+type Props={go:(target:string)=>void};
+const types:Record<string,string>={RETURN:"退货",EXCHANGE:"换货",REPAIR:"维修",REFUND:"退款"};
+const statuses=["待平台处理","处理中","待寄回","待平台收货","已完成","已驳回","已取消"];
+
+export function AfterSalesPage({go}:Props){
+  const [rows,setRows]=useState<Row[]>([]); const [eligible,setEligible]=useState<Row[]>([]);
+  const [form,setForm]=useState<Row>(); const [detail,setDetail]=useState<Row>(); const [error,setError]=useState("");
+  const load=async()=>{try{setRows(await api<Row[]>("/api/client/service/after-sales"));setError("");}catch(e){setError((e as Error).message);}};
+  useEffect(()=>{void load();},[]);
+  const start=async()=>{try{const items=await api<Row[]>("/api/client/service/after-sales/eligible-items");setEligible(items);setForm({orderItemId:items[0]?.orderItemId,serviceType:"RETURN",reason:"商品质量问题",description:"",requestedQuantity:1,requestedAmount:null,contactName:"",contactPhone:""});}catch(e){setError((e as Error).message);}};
+  const submit=async()=>{try{await api("/api/client/service/after-sales",{method:"POST",body:JSON.stringify(form)});setForm(undefined);await load();}catch(e){setError((e as Error).message);}};
+  const open=async(id:number)=>{try{setDetail(await api<Row>(`/api/client/service/after-sales/${id}`));}catch(e){setError((e as Error).message);}};
+  const cancel=async(id:number)=>{try{await api(`/api/client/service/after-sales/${id}/cancel`,{method:"POST"});setDetail(undefined);await load();}catch(e){setError((e as Error).message);}};
+  return <main className="page account-page after-sales-page"><aside className="account-sidebar"><h3>个人中心</h3>
+    {[["profile","账户概览"],["orders","我的订单"],["addresses","地址管理"],["after-sales","售后服务"],["finance","财务中心"],["invoices","开票记录"],["members","企业成员"],["organization","组织与权限"]].map(x=><button className={x[0]==="after-sales"?"active":""} key={x[0]} onClick={()=>go(x[0])}>{x[1]}<span>›</span></button>)}
+  </aside><section className="account-content"><header className="service-page-header"><div><h2>售后服务</h2><p>在线提交退换、维修或退款申请，并跟踪处理进度。</p></div><button className="save-button" onClick={()=>void start()}>发起售后</button></header>
+    {error&&<p className="form-error">{error}</p>}<div className="service-list">{rows.length?rows.map(row=><article key={row.id} onClick={()=>void open(row.id)}><img src={row.image||"/api/public/placeholder.png"}/><div><b>{row.title}</b><small>{row.serviceNo} · 订单 {row.orderNo}</small><span>{types[row.serviceType]||row.serviceType} · {row.reason}</span></div><strong className={`service-status status-${row.status}`}>{statuses[Number(row.status)]||"未知"}</strong><time>{row.updatedAt}</time></article>):<div className="account-empty">暂无售后申请</div>}</div>
+  </section>
+  {form&&<div className="dialog-mask"><div className="client-dialog form-dialog after-sale-dialog"><button className="dialog-close" onClick={()=>setForm(undefined)}>×</button><h2>发起售后申请</h2>{eligible.length?<><label>订单商品<select value={form.orderItemId||""} onChange={e=>setForm({...form,orderItemId:Number(e.target.value)})}>{eligible.map(x=><option value={x.orderItemId} key={x.orderItemId}>{x.orderNo} · {x.title}（{x.quantity}件）</option>)}</select></label><div className="form-two"><label>服务类型<select value={form.serviceType} onChange={e=>setForm({...form,serviceType:e.target.value})}>{Object.entries(types).map(([k,v])=><option value={k} key={k}>{v}</option>)}</select></label><label>申请数量<input type="number" min="1" value={form.requestedQuantity} onChange={e=>setForm({...form,requestedQuantity:Number(e.target.value)})}/></label></div><label>申请原因<input value={form.reason} onChange={e=>setForm({...form,reason:e.target.value})}/></label><label>问题说明<textarea rows={4} value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><div className="form-two"><label>联系人<input value={form.contactName} onChange={e=>setForm({...form,contactName:e.target.value})}/></label><label>联系电话<input value={form.contactPhone} onChange={e=>setForm({...form,contactPhone:e.target.value})}/></label></div><button className="save-button" onClick={()=>void submit()}>提交申请</button></>:<div className="account-empty">暂无已签收且可申请售后的商品</div>}</div></div>}
+  {detail&&<div className="dialog-mask"><div className="client-dialog service-detail-dialog"><button className="dialog-close" onClick={()=>setDetail(undefined)}>×</button><h2>售后进度</h2><div className="service-detail-head"><b>{detail.request.title}</b><span>{detail.request.serviceNo}</span><em>{statuses[Number(detail.request.status)]}</em></div><dl><dt>申请原因</dt><dd>{detail.request.reason}</dd><dt>问题说明</dt><dd>{detail.request.description||"—"}</dd><dt>处理结果</dt><dd>{detail.request.handling_result||"等待平台处理"}</dd></dl><div className="service-timeline">{detail.timeline.map((x:Row,i:number)=><article key={i}><i/><div><b>{x.content}</b><small>{x.createdAt}</small></div></article>)}</div>{Number(detail.request.status)===0&&<button className="secondary-button danger" onClick={()=>void cancel(detail.request.id)}>取消申请</button>}</div></div>}
+  </main>;
+}

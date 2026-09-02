@@ -36,7 +36,7 @@ public class SecurityConfig {
                 .requestMatchers("/api/admin/business/enterprises/**",
                   "/api/admin/business/enterprise-users/**").hasAuthority("enterprise:manage")
                 .requestMatchers("/api/admin/business/agreements/**","/api/admin/agreements/**").hasAuthority("agreement:manage")
-                .requestMatchers("/api/admin/business/orders/**","/api/admin/business/agreement-orders/**",
+                .requestMatchers("/api/admin/business/orders/**","/api/admin/business/after-sales/**","/api/admin/business/agreement-orders/**",
                   "/api/admin/business/platform-orders/**","/api/admin/business/finance/**").hasAuthority("order:manage")
                 .requestMatchers("/api/admin/**").denyAll()
                 .anyRequest().authenticated())

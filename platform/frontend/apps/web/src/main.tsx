@@ -4,8 +4,10 @@ import "./style.css";
 import "./manage.css";
 import "./auth.css";
 import "./categories.css";
+import "./service.css";
 import { OrganizationPage } from "./Organization";
 import { FinancePage } from "./Finance";
+import { AfterSalesPage } from "./AfterSales";
 
 type View =
   | "home"
@@ -26,6 +28,7 @@ type View =
   | "invoices"
   | "members"
   | "finance"
+  | "after-sales"
   | "organization";
 export type Row = Record<string, any>;
 const structuredSpecs = (value: unknown): Row[] => {
@@ -133,6 +136,7 @@ const routeViews: View[] = [
   "invoices",
   "members",
   "finance",
+  "after-sales",
   "organization",
 ];
 const protectedViews = new Set<View>([
@@ -145,6 +149,7 @@ const protectedViews = new Set<View>([
   "invoices",
   "members",
   "finance",
+  "after-sales",
   "organization",
 ]);
 const parseRoute = (url = new URL(location.href)) => {
@@ -160,6 +165,7 @@ const parseRoute = (url = new URL(location.href)) => {
     "/web/account/addresses": "addresses", "/web/account/invoices": "invoices",
     "/web/account/members": "members",
     "/web/account/finance": "finance",
+    "/web/account/after-sales": "after-sales",
     "/web/account/organization": "organization",
   };
   const legacy = url.searchParams.get("view") as View | null;
@@ -186,7 +192,7 @@ const pathFor = (view: View, platformId?: number, solutionId?: number, productId
     platforms: "/web/platforms", content: "/web/content", cart: "/web/cart",
     checkout: "/web/checkout", orders: "/web/orders", profile: "/web/account",
     addresses: "/web/account/addresses", invoices: "/web/account/invoices",
-    members: "/web/account/members", finance: "/web/account/finance", organization: "/web/account/organization" } as Partial<Record<View, string>>)[view] || "/web/";
+    members: "/web/account/members", finance: "/web/account/finance", "after-sales": "/web/account/after-sales", organization: "/web/account/organization" } as Partial<Record<View, string>>)[view] || "/web/";
 };
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -677,6 +683,7 @@ function App() {
       )}
       {displayView === "organization" && <OrganizationPage go={(target)=>setView(target as View)} />}
       {displayView === "finance" && <FinancePage go={(target)=>setView(target as View)} />}
+      {displayView === "after-sales" && <AfterSalesPage go={(target)=>setView(target as View)} />}
       <footer className="footer">
         <section className="footer-services">
           {(portal.serviceFeatures || []).map((row: Row, index: number) => <article key={row.id || row.title}>
@@ -2317,6 +2324,12 @@ function Orders({ go }: { go: (v: View) => void }) {
     tab < 0 ? rows : rows.filter((r) => Number(r.orderStatus) === tab);
   const show = async (row: Row) =>
     setDetail(await api<Row>(`/api/client/orders/${row.id}`));
+  const confirmReceipt = async (delivery: Row) => {
+    if (!detail || !window.confirm(`确认配送单 ${delivery.subOrderNo} 已收货？`)) return;
+    await api(`/api/client/service/orders/${detail.order.id}/deliveries/${encodeURIComponent(delivery.subOrderNo)}/confirm-receipt`, { method: "POST" });
+    setDetail(await api<Row>(`/api/client/orders/${detail.order.id}`));
+    setRows(await api<Row[]>("/api/client/orders"));
+  };
   return (
     <main className="page account-page">
       <aside>
@@ -2328,6 +2341,7 @@ function Orders({ go }: { go: (v: View) => void }) {
           ["profile", "账户概览"],
           ["orders", "我的订单"],
           ["addresses", "地址管理"],
+          ["after-sales", "售后服务"],
           ["invoices", "发票管理"],
           ["finance", "财务中心"],
           ["members", "企业成员"],
@@ -2458,6 +2472,9 @@ function Orders({ go }: { go: (v: View) => void }) {
                   <em>{money(x.totalPrice)}</em>
                 </article>
               ))}
+              <h3>配送进度</h3>
+              <div className="delivery-confirm-list">{detail.deliveries.map((x:Row)=><article key={x.subOrderNo}><span><b>{x.subOrderNo}</b><small>{x.logisticsCompany&&x.logisticsNo?`${x.logisticsCompany} ${x.logisticsNo}`:"等待物流信息"}</small><em>{x.logisticsStatus||(["待发货","已发货","运输中","已签收"][Number(x.status)]||"待发货")}</em></span>{[1,2].includes(Number(x.status))&&<button onClick={()=>void confirmReceipt(x)}>确认收货</button>}</article>)}</div>
+              <button className="secondary-button" onClick={()=>{setDetail(undefined);go("after-sales");}}>申请售后</button>
             </div>
           </div>
         )}
@@ -2486,6 +2503,7 @@ function Profile({
           ["profile", "账户概览"],
           ["orders", "我的订单"],
           ["addresses", "地址管理"],
+          ["after-sales", "售后服务"],
           ["invoices", "发票管理"],
           ["finance", "财务中心"],
           ["members", "企业成员"],

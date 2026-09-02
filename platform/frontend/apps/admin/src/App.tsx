@@ -184,6 +184,7 @@ type Module =
   | "agreementOrders"
   | "orders"
   | "finance"
+  | "afterSales"
   | "users"
   | "roles"
   | "permissions"
@@ -716,6 +717,7 @@ const navItems = [
   {
     key: "orderCenter", label: "订单管理", children: [
       { key: "orders", label: "订单管理", icon: <MenuIcon name="order" /> },
+      { key: "afterSales", label: "售后服务", icon: <MenuIcon name="agreement" /> },
       { key: "finance", label: "财务与对账", icon: <MenuIcon name="agreement" /> },
     ],
   },
@@ -781,7 +783,7 @@ const modulePermission: Partial<Record<Module, string>> = {
   contents: "product:manage", contactSettings: "product:manage", serviceFeatures: "product:manage", footerSettings: "product:manage", seoSettings:"product:manage", enterprises: "enterprise:manage", enterpriseUsers: "enterprise:manage",
   agreements: "agreement:manage", agreementProducts: "agreement:manage", agreementOrders: "order:manage",
   solutionProducts: "product:manage",
-  orders: "order:manage", finance: "order:manage", users: "system:user", roles: "system:role",
+  orders: "order:manage", afterSales: "order:manage", finance: "order:manage", users: "system:user", roles: "system:role",
   permissions: "system:role", logs: "system:log", configs: "system:config",
 };
 
@@ -941,6 +943,7 @@ function AdminApp({ logout }: { logout: () => void }) {
     agreementProducts: ["协议商品管理", "按采购协议维护商品范围与企业专属价格"],
     agreementOrders: ["协议订单管理", "查看协议产生的采购订单与履约进度"],
     orders: ["订单管理", "查询采购订单、付款状态与履约进度"],
+    afterSales: ["售后服务", "受理企业客户退换、维修和退款申请，跟踪处理进度"],
     finance: ["财务与对账", "处理企业对账单、到款确认和电子发票申请"],
     users: ["用户管理", "维护后台登录用户、角色归属与启停状态"],
     roles: ["角色管理", "按岗位配置角色与操作权限"],
@@ -1028,6 +1031,7 @@ function AdminApp({ logout }: { logout: () => void }) {
           {module === "platformOrders" && <BusinessModule module="orders" endpointOverride="/platform-orders" listTitle="平台关联商品订单列表" extraColumn="platformNames" />}
           {module === "enterpriseUsers" && <EnterpriseUsers />}
           {module === "finance" && <FinanceManagement />}
+          {module === "afterSales" && <AfterSalesManagement />}
           {module === "categories" && <Categories />}
           {module === "attributes" && <AttributeTemplates />}
           {module === "homeFloors" && <HomeFloors />}
@@ -1116,6 +1120,26 @@ function EnterpriseUsers() {
       </Form>
     </Modal>
   </>;
+}
+
+function AfterSalesManagement(){
+  const {message}=AntApp.useApp(); const rows=useLoad<Row[]>(()=>rootApi("/api/admin/business/after-sales"));
+  const [detail,setDetail]=useState<Row>(); const [processing,setProcessing]=useState<Row>(); const [form]=Form.useForm();
+  const open=async(row:Row)=>setDetail(await rootApi(`/api/admin/business/after-sales/${row.id}`));
+  const process=async()=>{try{const values=await form.validateFields();await rootMutation(`/api/admin/business/after-sales/${processing?.id}/status`,{method:"PUT",body:JSON.stringify(values)});setProcessing(undefined);message.success("售后状态已更新");await rows.refresh();}catch(error){if(error instanceof Error)message.error(error.message);}};
+  const typeText=(v:string)=>({RETURN:"退货",EXCHANGE:"换货",REPAIR:"维修",REFUND:"退款"}[v]||v); const statusText=(v:number)=>["待处理","处理中","待寄回","待收货","已完成","已驳回","已取消"][v]||"未知";
+  return <><Card className="admin-card"><Table<Row> rowKey="id" loading={rows.loading} dataSource={rows.data||[]} searchPlaceholder="搜索售后单、订单、企业、申请人或商品" columns={[
+    {title:"售后单",dataIndex:"serviceNo",render:(v:unknown,record:Row)=><button className="table-link" onClick={()=>void open(record)}>{String(v)}</button>},
+    {title:"企业 / 申请人",render:(_:unknown,r:Row)=><span>{r.enterpriseName}<small>{r.applicantName} · {r.contactPhone}</small></span>},
+    {title:"商品",render:(_:unknown,r:Row)=><div className="admin-product-cell"><img src={r.image}/><span><b>{r.title}</b><small>{r.skuCode} · 订单 {r.orderNo}</small></span></div>},
+    {title:"诉求",render:(_:unknown,r:Row)=><span>{typeText(r.serviceType)} × {r.requestedQuantity}<small>{r.reason}</small></span>},
+    {title:"状态",dataIndex:"status",render:(v:unknown)=><Tag color={Number(v)===4?"green":Number(v)>=5?"default":"blue"}>{statusText(Number(v))}</Tag>},
+    {title:"申请时间",dataIndex:"createdAt"},{title:"操作",render:(_:unknown,r:Row)=><Space><Button type="link" onClick={()=>void open(r)}>详情</Button>{Number(r.status)<4&&<Button type="link" onClick={()=>{setProcessing(r);form.setFieldsValue({status:Number(r.status)===0?1:Number(r.status),handlingResult:r.handlingResult||""});}}>处理</Button>}</Space>}
+  ]}/></Card>
+  <Drawer width={680} title="售后申请详情" open={!!detail} onClose={()=>setDetail(undefined)}>{detail&&<><Descriptions bordered column={2} items={[
+    {key:"no",label:"售后单号",children:detail.request.service_no},{key:"status",label:"状态",children:statusText(Number(detail.request.status))},{key:"enterprise",label:"申请企业",children:detail.request.enterpriseName},{key:"user",label:"申请人",children:detail.request.applicantName},{key:"order",label:"订单号",children:detail.request.orderNo},{key:"type",label:"服务类型",children:typeText(detail.request.service_type)},{key:"product",label:"商品",span:2,children:`${detail.request.title}（${detail.request.skuCode}）`},{key:"reason",label:"原因",span:2,children:detail.request.reason},{key:"description",label:"问题说明",span:2,children:detail.request.description||"—"},{key:"result",label:"处理结果",span:2,children:detail.request.handling_result||"等待处理"}
+  ]}/><Typography.Title level={5}>处理记录</Typography.Title>{detail.timeline.map((x:Row,i:number)=><p key={i}><Tag>{x.operatorType}</Tag>{x.content}　<Typography.Text type="secondary">{x.createdAt}</Typography.Text></p>)}</>}</Drawer>
+  <Modal title="处理售后申请" open={!!processing} onCancel={()=>setProcessing(undefined)} onOk={()=>void process()}><Form form={form} layout="vertical"><Form.Item name="status" label="处理状态" rules={[{required:true}]}><Select options={[{value:1,label:"处理中"},{value:2,label:"待客户寄回"},{value:3,label:"待平台收货"},{value:4,label:"已完成"},{value:5,label:"已驳回"}]}/></Form.Item><Form.Item name="handlingResult" label="处理说明" rules={[{required:true,message:"请填写处理说明"}]}><Input.TextArea rows={5} placeholder="填写处理意见、寄回要求或最终处理结果"/></Form.Item></Form></Modal></>;
 }
 
 function FinanceManagement() {

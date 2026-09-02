@@ -6,6 +6,7 @@ import "./product-image.css";
 import "./manage.css";
 import "./auth.css";
 import "./platform-tags.css";
+import "./service.css";
 type Tab = "home" | "category" | "cart" | "checkout" | "orders" | "mine";
 const tabFromLocation=():Tab=>{
   const value=new URLSearchParams(location.search).get("tab") as Tab|null;
@@ -1468,6 +1469,7 @@ function Orders() {
     tab < 0 ? rows : rows.filter((r) => Number(r.orderStatus) === tab);
   const show = async (r: Row) =>
     setDetail(await api<Row>(`/api/client/orders/${r.id}`));
+  const confirmReceipt=async(delivery:Row)=>{if(!detail||!window.confirm("确认已经收到该配送单商品？"))return;await api(`/api/client/service/orders/${detail.order.id}/deliveries/${encodeURIComponent(delivery.subOrderNo)}/confirm-receipt`,{method:"POST"});setDetail(await api<Row>(`/api/client/orders/${detail.order.id}`));setRows(await api<Row[]>("/api/client/orders"));};
   if (detail)
     return (
       <div className="subpage h5-manage">
@@ -1516,6 +1518,7 @@ function Orders() {
             <b>{money(x.totalPrice)}</b>
           </article>
         ))}
+        <h3>配送进度</h3>{detail.deliveries.map((x:Row)=><article className="h5-delivery-row" key={x.subOrderNo}><span><strong>{x.subOrderNo}</strong><small>{x.logisticsNo?`${x.logisticsCompany} ${x.logisticsNo}`:"等待物流信息"}</small></span><em>{x.logisticsStatus||["待发货","已发货","运输中","已签收"][Number(x.status)]}</em>{[1,2].includes(Number(x.status))&&<button onClick={()=>void confirmReceipt(x)}>确认收货</button>}</article>)}
       </div>
     );
   return (
@@ -1579,8 +1582,9 @@ function Mine({
   orders: () => void;
   logout: () => Promise<void>;
 }) {
-  const [view, setView] = useState<"addresses" | "invoices" | "members" | "finance">();
+  const [view, setView] = useState<"addresses" | "invoices" | "members" | "finance" | "afterSales">();
   if (view === "finance") return <H5Finance back={() => setView(undefined)} />;
+  if (view === "afterSales") return <H5AfterSales back={() => setView(undefined)} />;
   if (view) return <H5Manage view={view} back={() => setView(undefined)} />;
   return (
     <div className="mine">
@@ -1640,6 +1644,7 @@ function Mine({
       <section className="mine-menu">
         {[
           ["址", "地址管理", "维护多地址配送信息", "addresses"],
+          ["售", "售后服务", "提交申请并查看处理进度", "afterSales"],
           ["财", "财务中心", "查看应付、对账与开票申请", "finance"],
           ["票", "发票管理", "查看第三方开票记录", "invoices"],
           ["员", "企业成员", "查看成员和账号状态", "members"],
@@ -1647,7 +1652,7 @@ function Mine({
           <button
             key={x[1]}
             onClick={() =>
-              setView(x[3] as "addresses" | "invoices" | "members" | "finance")
+              setView(x[3] as "addresses" | "invoices" | "members" | "finance" | "afterSales")
             }
           >
             <i>{x[0]}</i>
@@ -1670,6 +1675,16 @@ function Mine({
     </div>
   );
 }
+function H5AfterSales({back}:{back:()=>void}){
+  const [rows,setRows]=useState<Row[]>([]);const [eligible,setEligible]=useState<Row[]>([]);const [form,setForm]=useState<Row>();const [error,setError]=useState("");
+  const load=async()=>{try{setRows(await api<Row[]>("/api/client/service/after-sales"));}catch(e){setError((e as Error).message);}};useEffect(()=>{void load();},[]);
+  const start=async()=>{try{const items=await api<Row[]>("/api/client/service/after-sales/eligible-items");setEligible(items);setForm({orderItemId:items[0]?.orderItemId,serviceType:"RETURN",reason:"商品质量问题",description:"",requestedQuantity:1,contactName:"",contactPhone:""});}catch(e){setError((e as Error).message);}};
+  const submit=async()=>{try{await api("/api/client/service/after-sales",{method:"POST",body:JSON.stringify(form)});setForm(undefined);await load();}catch(e){setError((e as Error).message);}};
+  const status=["待处理","处理中","待寄回","待收货","已完成","已驳回","已取消"];
+  return <div className="subpage h5-after-sales"><header><button onClick={back}>‹</button><h1>售后服务</h1><button onClick={()=>void start()}>申请</button></header>{error&&<p className="h5-error">{error}</p>}{rows.length?rows.map(r=><article className="h5-service-card" key={r.id}><img src={r.image}/><div><strong>{r.title}</strong><small>{r.serviceNo} · {r.orderNo}</small><span>{r.reason}</span></div><em>{status[Number(r.status)]}</em></article>):<p className="h5-empty">暂无售后申请</p>}
+  {form&&<div className="h5-sheet"><header><h2>发起售后申请</h2><button onClick={()=>setForm(undefined)}>×</button></header>{eligible.length?<><label>订单商品<select value={form.orderItemId} onChange={e=>setForm({...form,orderItemId:Number(e.target.value)})}>{eligible.map(x=><option value={x.orderItemId} key={x.orderItemId}>{x.title}（{x.quantity}件）</option>)}</select></label><label>服务类型<select value={form.serviceType} onChange={e=>setForm({...form,serviceType:e.target.value})}><option value="RETURN">退货</option><option value="EXCHANGE">换货</option><option value="REPAIR">维修</option><option value="REFUND">退款</option></select></label><label>申请数量<input type="number" min="1" value={form.requestedQuantity} onChange={e=>setForm({...form,requestedQuantity:Number(e.target.value)})}/></label><label>申请原因<input value={form.reason} onChange={e=>setForm({...form,reason:e.target.value})}/></label><label>问题说明<textarea value={form.description} onChange={e=>setForm({...form,description:e.target.value})}/></label><label>联系人<input value={form.contactName} onChange={e=>setForm({...form,contactName:e.target.value})}/></label><label>联系电话<input value={form.contactPhone} onChange={e=>setForm({...form,contactPhone:e.target.value})}/></label><button className="h5-primary" onClick={()=>void submit()}>提交申请</button></>:<p className="h5-empty">暂无可申请售后的已签收商品</p>}</div>}</div>;
+}
+
 function H5Finance({ back }: { back: () => void }) {
   const [summary, setSummary] = useState<Row>({});
   const [payables, setPayables] = useState<Row[]>([]);

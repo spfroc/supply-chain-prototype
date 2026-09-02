@@ -298,7 +298,7 @@ public class ClientController {
             """).params(Map.of("id",id,"userId",userId())).query().listOfRows();
         if(orders.isEmpty())throw new IllegalArgumentException("订单不存在");
         var items=jdbc.sql("""
-            SELECT p.title,p.main_image AS mainImage,s.sku_code AS skuCode,os.sub_order_no AS subOrderNo,
+            SELECT oi.id AS orderItemId,p.title,p.main_image AS mainImage,s.sku_code AS skuCode,os.sub_order_no AS subOrderNo,
               os.address_snapshot AS addressSnapshot,
               oi.quantity,oi.unit_price AS unitPrice,oi.total_price AS totalPrice,
               oi.fulfillment_status AS fulfillmentStatus,oi.logistics_company AS logisticsCompany,
@@ -309,8 +309,15 @@ public class ClientController {
             WHERE oi.order_main_id=:id
             """).param("id",id).query().listOfRows();
         var deliveries=jdbc.sql("""
-            SELECT sub_order_no AS subOrderNo,address_snapshot AS addressSnapshot,logistics_company AS logisticsCompany,
-              logistics_no AS logisticsNo,logistics_status AS logisticsStatus,status FROM order_sub WHERE order_main_id=:id
+            SELECT os.sub_order_no AS subOrderNo,os.address_snapshot AS addressSnapshot,
+              COALESCE(NULLIF(os.logistics_company,''),MAX(oi.logistics_company)) AS logisticsCompany,
+              COALESCE(NULLIF(os.logistics_no,''),MAX(oi.logistics_no)) AS logisticsNo,
+              COALESCE(NULLIF(os.logistics_status,''),MAX(oi.logistics_status)) AS logisticsStatus,
+              CASE WHEN SUM(oi.fulfillment_status IN (1,2))>0 THEN 2
+                WHEN SUM(oi.fulfillment_status=3)>0 AND SUM(oi.fulfillment_status NOT IN (3,4))=0 THEN 3
+                ELSE os.status END AS status
+            FROM order_sub os JOIN order_item oi ON oi.order_sub_id=os.id
+            WHERE os.order_main_id=:id GROUP BY os.id
             """).param("id",id).query().listOfRows();
         return Map.of("order",orders.getFirst(),"items",items,"deliveries",deliveries);
     }
