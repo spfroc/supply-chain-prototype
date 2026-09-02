@@ -1,0 +1,20 @@
+CREATE TABLE notification_message (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  enterprise_id BIGINT UNSIGNED NOT NULL,
+  user_id BIGINT UNSIGNED NOT NULL,
+  message_type VARCHAR(30) NOT NULL COMMENT 'ORDER/AFTER_SALE/STOCK/AGREEMENT/SYSTEM',
+  title VARCHAR(160) NOT NULL,
+  content VARCHAR(1000) NOT NULL,
+  link_url VARCHAR(500) NULL,
+  business_type VARCHAR(40) NULL,
+  business_id BIGINT UNSIGNED NULL,
+  dedupe_key VARCHAR(160) NULL,
+  read_at DATETIME NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_notification_dedupe (user_id,dedupe_key),
+  KEY idx_notification_user_read (user_id,read_at,created_at),
+  KEY idx_notification_enterprise (enterprise_id,created_at),
+  CONSTRAINT fk_notification_enterprise FOREIGN KEY (enterprise_id) REFERENCES enterprise(id),
+  CONSTRAINT fk_notification_user FOREIGN KEY (user_id) REFERENCES enterprise_user(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

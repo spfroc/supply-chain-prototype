@@ -4,6 +4,7 @@ import cn.govproc.supplychain.common.PageSupport;
 import cn.govproc.supplychain.common.RichTextSanitizer;
 import cn.govproc.supplychain.order.OrderInventoryService;
 import cn.govproc.supplychain.order.OrderStatePolicy;
+import cn.govproc.supplychain.notification.NotificationService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Min;
@@ -31,12 +32,14 @@ public class AdminBusinessController {
     private final PasswordEncoder encoder;
     private final OrderInventoryService inventory;
     private final RichTextSanitizer richTextSanitizer;
+    private final NotificationService notifications;
     public AdminBusinessController(JdbcClient jdbc,PasswordEncoder encoder,OrderInventoryService inventory,
-                                   RichTextSanitizer richTextSanitizer) {
+                                   RichTextSanitizer richTextSanitizer,NotificationService notifications) {
         this.jdbc = jdbc;
         this.encoder = encoder;
         this.inventory = inventory;
         this.richTextSanitizer = richTextSanitizer;
+        this.notifications = notifications;
     }
 
     @GetMapping("/products")
@@ -347,6 +350,7 @@ public class AdminBusinessController {
         if(r.stock()<reserved) throw new IllegalArgumentException("库存不能小于已占用库存 "+reserved);
         jdbc.sql("UPDATE product_sku SET stock=:stock WHERE spu_id=:id AND deleted_at IS NULL")
           .params(Map.of("id",id,"stock",r.stock())).update();
+        notifications.notifyAvailableStockForSpu(id);
     }
 
     @DeleteMapping("/products/{id}") @Transactional @ResponseStatus(HttpStatus.NO_CONTENT)
@@ -791,6 +795,8 @@ public class AdminBusinessController {
           .params(Map.of("status",orderStatus,"id",orderId)).update();
         addOrderEvent(orderId,"ITEM_LOGISTICS",currentOrderStatus,orderStatus,
           "商品物流状态更新为"+fulfillmentName(r.fulfillmentStatus()));
+        if(r.fulfillmentStatus()>0&&r.fulfillmentStatus()<4){var target=jdbc.sql("SELECT enterprise_id AS enterpriseId,user_id AS userId,order_no AS orderNo FROM order_main WHERE id=:id").param("id",orderId).query().singleRow();
+          notifications.send(((Number)target.get("enterpriseId")).longValue(),((Number)target.get("userId")).longValue(),"ORDER","订单物流状态已更新",target.get("orderNo")+" 的商品已更新为"+fulfillmentName(r.fulfillmentStatus()),"/web/orders","ORDER",orderId,"order-logistics-"+itemId+"-"+r.fulfillmentStatus());}
     }
 
     @PutMapping("/orders/{id}/status")
@@ -1013,6 +1019,7 @@ public class AdminBusinessController {
         for(long id:jdbc.sql("SELECT id FROM product_sku WHERE spu_id=:id AND deleted_at IS NULL")
           .param("id",productId).query(Long.class).list()) if(!retained.contains(id))
             jdbc.sql("UPDATE product_sku SET status=0 WHERE id=:id").param("id",id).update();
+        notifications.notifyAvailableStockForSpu(productId);
     }
     private static String toJson(Object value) {
         try{return new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(value);}

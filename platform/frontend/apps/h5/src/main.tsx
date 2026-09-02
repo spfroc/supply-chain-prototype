@@ -7,6 +7,7 @@ import "./manage.css";
 import "./auth.css";
 import "./platform-tags.css";
 import "./service.css";
+import "./notification.css";
 type Tab = "home" | "category" | "cart" | "checkout" | "orders" | "mine";
 const tabFromLocation=():Tab=>{
   const value=new URLSearchParams(location.search).get("tab") as Tab|null;
@@ -1582,9 +1583,10 @@ function Mine({
   orders: () => void;
   logout: () => Promise<void>;
 }) {
-  const [view, setView] = useState<"addresses" | "invoices" | "members" | "finance" | "afterSales">();
+  const [view, setView] = useState<"addresses" | "invoices" | "members" | "finance" | "afterSales" | "notifications">();
   if (view === "finance") return <H5Finance back={() => setView(undefined)} />;
   if (view === "afterSales") return <H5AfterSales back={() => setView(undefined)} />;
+  if (view === "notifications") return <H5Notifications back={() => setView(undefined)} />;
   if (view) return <H5Manage view={view} back={() => setView(undefined)} />;
   return (
     <div className="mine">
@@ -1645,6 +1647,7 @@ function Mine({
         {[
           ["址", "地址管理", "维护多地址配送信息", "addresses"],
           ["售", "售后服务", "提交申请并查看处理进度", "afterSales"],
+          ["讯", "消息中心", "订单、售后、库存和协议提醒", "notifications"],
           ["财", "财务中心", "查看应付、对账与开票申请", "finance"],
           ["票", "发票管理", "查看第三方开票记录", "invoices"],
           ["员", "企业成员", "查看成员和账号状态", "members"],
@@ -1652,7 +1655,7 @@ function Mine({
           <button
             key={x[1]}
             onClick={() =>
-              setView(x[3] as "addresses" | "invoices" | "members" | "finance" | "afterSales")
+              setView(x[3] as "addresses" | "invoices" | "members" | "finance" | "afterSales" | "notifications")
             }
           >
             <i>{x[0]}</i>
@@ -1675,6 +1678,8 @@ function Mine({
     </div>
   );
 }
+function H5Notifications({back}:{back:()=>void}){const[rows,setRows]=useState<Row[]>([]);const load=async()=>setRows(await api<Row[]>("/api/client/notifications"));useEffect(()=>{void load();},[]);const read=async(row:Row)=>{if(!Number(row.isRead)){await api(`/api/client/notifications/${row.id}/read`,{method:"PUT"});await load();}};return <div className="subpage h5-notifications"><header><button onClick={back}>‹</button><h1>消息中心</h1><button onClick={async()=>{await api("/api/client/notifications/read-all",{method:"PUT"});await load();}}>全部已读</button></header>{rows.length?rows.map(row=><article className={Number(row.isRead)?"read":""} key={row.id} onClick={()=>void read(row)}><i>{({ORDER:"订",AFTER_SALE:"售",STOCK:"货",AGREEMENT:"协",SYSTEM:"讯"} as Row)[row.messageType]||"讯"}</i><div><strong>{row.title}</strong><p>{row.content}</p><small>{row.createdAt}</small></div>{!Number(row.isRead)&&<em>未读</em>}</article>):<p className="h5-empty">暂无消息</p>}</div>}
+
 function H5AfterSales({back}:{back:()=>void}){
   const [rows,setRows]=useState<Row[]>([]);const [eligible,setEligible]=useState<Row[]>([]);const [form,setForm]=useState<Row>();const [error,setError]=useState("");
   const load=async()=>{try{setRows(await api<Row[]>("/api/client/service/after-sales"));}catch(e){setError((e as Error).message);}};useEffect(()=>{void load();},[]);

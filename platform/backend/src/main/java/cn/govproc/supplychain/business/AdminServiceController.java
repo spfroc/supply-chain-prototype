@@ -1,5 +1,6 @@
 package cn.govproc.supplychain.business;
 
+import cn.govproc.supplychain.notification.NotificationService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -13,7 +14,8 @@ import org.springframework.web.bind.annotation.*;
 @RequestMapping("/api/admin/business/after-sales")
 public class AdminServiceController {
     private final JdbcClient jdbc;
-    public AdminServiceController(JdbcClient jdbc){this.jdbc=jdbc;}
+    private final NotificationService notifications;
+    public AdminServiceController(JdbcClient jdbc,NotificationService notifications){this.jdbc=jdbc;this.notifications=notifications;}
 
     @GetMapping
     List<Map<String,Object>> list(@RequestParam(required=false) Integer status,@RequestParam(required=false) String keyword){
@@ -51,11 +53,15 @@ public class AdminServiceController {
     void update(@PathVariable long id,@Valid @RequestBody StatusRequest request){
         if(request.status()<1||request.status()>5)throw new IllegalArgumentException("售后状态不正确");
         if((request.status()==4||request.status()==5)&&request.handlingResult().isBlank())throw new IllegalArgumentException("完成或驳回时必须填写处理结果");
+        var targets=jdbc.sql("SELECT enterprise_id AS enterpriseId,applicant_user_id AS userId,service_no AS serviceNo FROM after_sale_request WHERE id=:id").param("id",id).query().listOfRows();
+        if(targets.isEmpty())throw new IllegalArgumentException("售后申请不存在");
         int changed=jdbc.sql("UPDATE after_sale_request SET status=:status,handling_result=:result,processed_at=CASE WHEN :status IN (4,5) THEN NOW() ELSE processed_at END WHERE id=:id AND status<>6")
           .param("status",request.status()).param("result",request.handlingResult().trim()).param("id",id).update();
         if(changed==0)throw new IllegalArgumentException("售后申请不存在或已取消");
         jdbc.sql("INSERT INTO after_sale_timeline(request_id,operator_type,action,content) VALUES(:id,'ADMIN','STATUS_CHANGED',:content)")
           .param("id",id).param("content",request.handlingResult().trim()).update();
+        var target=targets.getFirst();notifications.send(((Number)target.get("enterpriseId")).longValue(),((Number)target.get("userId")).longValue(),"AFTER_SALE","售后进度已更新",
+          target.get("serviceNo")+"："+request.handlingResult().trim(),"/web/account/after-sales","AFTER_SALE",id,"after-sale-"+id+"-status-"+request.status());
     }
 
     record StatusRequest(@NotNull Integer status,@NotBlank String handlingResult){}

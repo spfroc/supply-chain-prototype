@@ -5,9 +5,11 @@ import "./manage.css";
 import "./auth.css";
 import "./categories.css";
 import "./service.css";
+import "./notification.css";
 import { OrganizationPage } from "./Organization";
 import { FinancePage } from "./Finance";
 import { AfterSalesPage } from "./AfterSales";
+import { NotificationsPage } from "./Notifications";
 
 type View =
   | "home"
@@ -29,6 +31,7 @@ type View =
   | "members"
   | "finance"
   | "after-sales"
+  | "notifications"
   | "organization";
 export type Row = Record<string, any>;
 const structuredSpecs = (value: unknown): Row[] => {
@@ -137,6 +140,7 @@ const routeViews: View[] = [
   "members",
   "finance",
   "after-sales",
+  "notifications",
   "organization",
 ];
 const protectedViews = new Set<View>([
@@ -150,6 +154,7 @@ const protectedViews = new Set<View>([
   "members",
   "finance",
   "after-sales",
+  "notifications",
   "organization",
 ]);
 const parseRoute = (url = new URL(location.href)) => {
@@ -166,6 +171,7 @@ const parseRoute = (url = new URL(location.href)) => {
     "/web/account/members": "members",
     "/web/account/finance": "finance",
     "/web/account/after-sales": "after-sales",
+    "/web/account/notifications": "notifications",
     "/web/account/organization": "organization",
   };
   const legacy = url.searchParams.get("view") as View | null;
@@ -192,7 +198,7 @@ const pathFor = (view: View, platformId?: number, solutionId?: number, productId
     platforms: "/web/platforms", content: "/web/content", cart: "/web/cart",
     checkout: "/web/checkout", orders: "/web/orders", profile: "/web/account",
     addresses: "/web/account/addresses", invoices: "/web/account/invoices",
-    members: "/web/account/members", finance: "/web/account/finance", "after-sales": "/web/account/after-sales", organization: "/web/account/organization" } as Partial<Record<View, string>>)[view] || "/web/";
+    members: "/web/account/members", finance: "/web/account/finance", "after-sales": "/web/account/after-sales", notifications: "/web/account/notifications", organization: "/web/account/organization" } as Partial<Record<View, string>>)[view] || "/web/";
 };
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -684,6 +690,7 @@ function App() {
       {displayView === "organization" && <OrganizationPage go={(target)=>setView(target as View)} />}
       {displayView === "finance" && <FinancePage go={(target)=>setView(target as View)} />}
       {displayView === "after-sales" && <AfterSalesPage go={(target)=>setView(target as View)} />}
+      {displayView === "notifications" && <NotificationsPage go={(target)=>setView(target as View)} />}
       <footer className="footer">
         <section className="footer-services">
           {(portal.serviceFeatures || []).map((row: Row, index: number) => <article key={row.id || row.title}>
@@ -2342,6 +2349,7 @@ function Orders({ go }: { go: (v: View) => void }) {
           ["orders", "我的订单"],
           ["addresses", "地址管理"],
           ["after-sales", "售后服务"],
+          ["notifications", "消息中心"],
           ["invoices", "发票管理"],
           ["finance", "财务中心"],
           ["members", "企业成员"],
@@ -2504,6 +2512,7 @@ function Profile({
           ["orders", "我的订单"],
           ["addresses", "地址管理"],
           ["after-sales", "售后服务"],
+          ["notifications", "消息中心"],
           ["invoices", "发票管理"],
           ["finance", "财务中心"],
           ["members", "企业成员"],
