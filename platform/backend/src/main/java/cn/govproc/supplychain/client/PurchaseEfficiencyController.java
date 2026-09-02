@@ -9,6 +9,13 @@ import jakarta.validation.constraints.NotNull;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import org.springframework.web.multipart.MultipartFile;
+import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.annotation.Transactional;
@@ -56,6 +63,55 @@ public class PurchaseEfficiencyController {
       WHERE oi.order_main_id=:orderId AND oi.fulfillment_status<>4 AND s.status=1 AND p.status=1
         AND s.deleted_at IS NULL AND p.deleted_at IS NULL AND s.stock-s.reserved_stock>0 GROUP BY oi.sku_id
       """).param("orderId",orderId).query().listOfRows();if(rows.isEmpty())throw new IllegalArgumentException("原订单商品均已下架或暂无库存");return addRowsToCart(rows);}
+
+    @GetMapping("/imports/template")
+    void downloadTemplate(HttpServletResponse response) throws IOException {
+      authorization.require("purchase:view");
+      response.setContentType("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      response.setHeader("Content-Disposition","attachment; filename*=UTF-8''"+URLEncoder.encode("批量采购导入模板.xlsx",StandardCharsets.UTF_8));
+      try(var workbook=new XSSFWorkbook()){
+        var sheet=workbook.createSheet("采购商品");var header=sheet.createRow(0);
+        header.createCell(0).setCellValue("SKU编码");header.createCell(1).setCellValue("采购数量");
+        var example=sheet.createRow(1);example.createCell(0).setCellValue("请填写系统SKU编码");example.createCell(1).setCellValue(1);
+        sheet.setColumnWidth(0,7200);sheet.setColumnWidth(1,3600);workbook.write(response.getOutputStream());
+      }
+    }
+
+    @PostMapping(value="/imports",consumes="multipart/form-data") @Transactional
+    Map<String,Object> importWorkbook(@RequestParam("file") MultipartFile file) throws IOException {
+      authorization.require("purchase:manage");
+      if(file.isEmpty())throw new IllegalArgumentException("请选择 Excel 文件");
+      String name=file.getOriginalFilename()==null?"import.xlsx":file.getOriginalFilename();
+      if(!name.toLowerCase().endsWith(".xlsx"))throw new IllegalArgumentException("仅支持 .xlsx 文件");
+      jdbc.sql("INSERT INTO purchase_import_task(enterprise_id,user_id,file_name) VALUES(:enterpriseId,:userId,:fileName)")
+        .param("enterpriseId",enterpriseId()).param("userId",userId()).param("fileName",name).update();
+      long taskId=jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single();int total=0,valid=0;
+      try(var workbook=WorkbookFactory.create(file.getInputStream())){
+        var sheet=workbook.getSheetAt(0);var formatter=new DataFormatter();
+        for(int index=1;index<=sheet.getLastRowNum();index++){
+          var row=sheet.getRow(index);if(row==null)continue;String code=formatter.formatCellValue(row.getCell(0)).trim();String quantityText=formatter.formatCellValue(row.getCell(1)).trim();
+          if(code.isBlank()&&quantityText.isBlank())continue;total++;Integer quantity=null;String error=null;Long skuId=null;
+          try{quantity=Integer.valueOf(quantityText);}catch(Exception ignored){error="采购数量必须是整数";}
+          if(code.isBlank())error="SKU编码不能为空";else if(error==null&&(quantity==null||quantity<1||quantity>9999))error="采购数量应为1至9999";
+          if(error==null){var sku=jdbc.sql("SELECT s.id FROM product_sku s JOIN product_spu p ON p.id=s.spu_id WHERE s.sku_code=:code AND s.status=1 AND p.status=1 AND s.deleted_at IS NULL AND p.deleted_at IS NULL LIMIT 1").param("code",code).query(Long.class).optional();if(sku.isEmpty())error="SKU不存在或已下架";else{skuId=sku.get();int stock=jdbc.sql("SELECT stock-reserved_stock FROM product_sku WHERE id=:id").param("id",skuId).query(Integer.class).single();if(stock<quantity)error="库存不足，可售库存 "+Math.max(stock,0);}}
+          String status=error==null?"VALID":"INVALID";if(error==null)valid++;
+          jdbc.sql("INSERT INTO purchase_import_item(task_id,source_row,sku_code,quantity,sku_id,status,error_message) VALUES(:taskId,:rowNumber,:skuCode,:quantity,:skuId,:status,:error)")
+            .param("taskId",taskId).param("rowNumber",index+1).param("skuCode",code).param("quantity",quantity).param("skuId",skuId).param("status",status).param("error",error).update();
+        }
+      }
+      jdbc.sql("UPDATE purchase_import_task SET total_rows=:total,valid_rows=:valid,invalid_rows=:invalid WHERE id=:id").param("total",total).param("valid",valid).param("invalid",total-valid).param("id",taskId).update();
+      return importTask(taskId);
+    }
+
+    @GetMapping("/imports") List<Map<String,Object>> importTasks(){authorization.require("purchase:view");return jdbc.sql("SELECT id,file_name AS fileName,status,total_rows AS totalRows,valid_rows AS validRows,invalid_rows AS invalidRows,DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS createdAt FROM purchase_import_task WHERE user_id=:userId ORDER BY id DESC LIMIT 30").param("userId",userId()).query().listOfRows();}
+    @GetMapping("/imports/{taskId}") Map<String,Object> importTask(@PathVariable long taskId){authorization.require("purchase:view");var task=jdbc.sql("SELECT id,file_name AS fileName,status,total_rows AS totalRows,valid_rows AS validRows,invalid_rows AS invalidRows,DATE_FORMAT(created_at,'%Y-%m-%d %H:%i:%s') AS createdAt FROM purchase_import_task WHERE id=:id AND user_id=:userId").params(Map.of("id",taskId,"userId",userId())).query().singleRow();var items=jdbc.sql("""
+      SELECT i.id,i.source_row AS rowNumber,i.sku_code AS skuCode,i.quantity,i.sku_id AS skuId,i.status,i.error_message AS errorMessage,
+        p.title,COALESCE(NULLIF(s.sku_image,''),p.main_image) AS image,s.spec_json AS specJson,s.stock-s.reserved_stock AS availableStock,
+        s.market_price AS marketPrice,s.member_price AS memberPrice,
+        COALESCE((SELECT MIN(ai.agreement_price) FROM agreement_item ai JOIN agreement a ON a.id=ai.agreement_id WHERE ai.sku_id=s.id AND ai.status=1 AND ai.deleted_at IS NULL AND a.enterprise_id=:enterpriseId AND a.status=1 AND a.deleted_at IS NULL AND CURRENT_DATE BETWEEN a.effective_date AND a.expiry_date),s.member_price) AS salePrice
+      FROM purchase_import_item i LEFT JOIN product_sku s ON s.id=i.sku_id LEFT JOIN product_spu p ON p.id=s.spu_id WHERE i.task_id=:taskId ORDER BY i.source_row
+      """).params(Map.of("enterpriseId",enterpriseId(),"taskId",taskId)).query().listOfRows();return Map.of("task",task,"items",items);}
+    @PostMapping("/imports/{taskId}/add-to-cart") @Transactional Map<String,Object> addImportToCart(@PathVariable long taskId){authorization.require("purchase:manage");int owned=jdbc.sql("SELECT COUNT(*) FROM purchase_import_task WHERE id=:id AND user_id=:userId").params(Map.of("id",taskId,"userId",userId())).query(Integer.class).single();if(owned==0)throw new IllegalArgumentException("导入任务不存在");var rows=jdbc.sql("SELECT sku_id AS skuId,quantity FROM purchase_import_item WHERE task_id=:taskId AND status='VALID'").param("taskId",taskId).query().listOfRows();if(rows.isEmpty())throw new IllegalArgumentException("没有可加入购物车的有效商品");var result=addRowsToCart(rows);jdbc.sql("UPDATE purchase_import_task SET status='ADDED' WHERE id=:id").param("id",taskId).update();return result;}
 
     private Map<String,Object> addRowsToCart(List<Map<String,Object>> rows){int added=0;List<Long> skipped=new ArrayList<>();for(var row:rows){long skuId=((Number)row.get("skuId")).longValue();int quantity=((Number)row.get("quantity")).intValue();if(quantity<1){skipped.add(skuId);continue;}var existing=jdbc.sql("SELECT id FROM cart_item WHERE user_id=:userId AND sku_id=:skuId AND solution_id IS NULL ORDER BY id LIMIT 1").params(Map.of("userId",userId(),"skuId",skuId)).query(Long.class).optional();if(existing.isPresent())jdbc.sql("UPDATE cart_item c JOIN product_sku s ON s.id=c.sku_id SET c.quantity=LEAST(c.quantity+:quantity,s.stock-s.reserved_stock),c.selected=1 WHERE c.id=:id").param("quantity",quantity).param("id",existing.get()).update();else jdbc.sql("INSERT INTO cart_item(user_id,sku_id,quantity,selected) VALUES(:userId,:skuId,:quantity,1)").param("userId",userId()).param("skuId",skuId).param("quantity",quantity).update();added++;}return Map.of("addedKinds",added,"skippedSkuIds",skipped);}
     private void requireSku(long skuId){int count=jdbc.sql("SELECT COUNT(*) FROM product_sku s JOIN product_spu p ON p.id=s.spu_id WHERE s.id=:id AND s.status=1 AND p.status=1 AND s.deleted_at IS NULL AND p.deleted_at IS NULL").param("id",skuId).query(Integer.class).single();if(count==0)throw new IllegalArgumentException("商品不存在或已下架");}
