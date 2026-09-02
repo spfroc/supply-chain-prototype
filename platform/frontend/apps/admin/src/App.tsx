@@ -183,6 +183,7 @@ type Module =
   | "agreementProducts"
   | "agreementOrders"
   | "orders"
+  | "finance"
   | "users"
   | "roles"
   | "permissions"
@@ -715,6 +716,7 @@ const navItems = [
   {
     key: "orderCenter", label: "订单管理", children: [
       { key: "orders", label: "订单管理", icon: <MenuIcon name="order" /> },
+      { key: "finance", label: "财务与对账", icon: <MenuIcon name="agreement" /> },
     ],
   },
   {
@@ -779,7 +781,7 @@ const modulePermission: Partial<Record<Module, string>> = {
   contents: "product:manage", contactSettings: "product:manage", serviceFeatures: "product:manage", footerSettings: "product:manage", seoSettings:"product:manage", enterprises: "enterprise:manage", enterpriseUsers: "enterprise:manage",
   agreements: "agreement:manage", agreementProducts: "agreement:manage", agreementOrders: "order:manage",
   solutionProducts: "product:manage",
-  orders: "order:manage", users: "system:user", roles: "system:role",
+  orders: "order:manage", finance: "order:manage", users: "system:user", roles: "system:role",
   permissions: "system:role", logs: "system:log", configs: "system:config",
 };
 
@@ -939,6 +941,7 @@ function AdminApp({ logout }: { logout: () => void }) {
     agreementProducts: ["协议商品管理", "按采购协议维护商品范围与企业专属价格"],
     agreementOrders: ["协议订单管理", "查看协议产生的采购订单与履约进度"],
     orders: ["订单管理", "查询采购订单、付款状态与履约进度"],
+    finance: ["财务与对账", "处理企业对账单、到款确认和电子发票申请"],
     users: ["用户管理", "维护后台登录用户、角色归属与启停状态"],
     roles: ["角色管理", "按岗位配置角色与操作权限"],
     permissions: ["权限管理", "查看系统权限点及所属业务模块"],
@@ -1024,6 +1027,7 @@ function AdminApp({ logout }: { logout: () => void }) {
           {module === "agreementOrders" && <BusinessModule module="orders" endpointOverride="/agreement-orders" listTitle="协议订单列表" extraColumn="agreementName" />}
           {module === "platformOrders" && <BusinessModule module="orders" endpointOverride="/platform-orders" listTitle="平台关联商品订单列表" extraColumn="platformNames" />}
           {module === "enterpriseUsers" && <EnterpriseUsers />}
+          {module === "finance" && <FinanceManagement />}
           {module === "categories" && <Categories />}
           {module === "attributes" && <AttributeTemplates />}
           {module === "homeFloors" && <HomeFloors />}
@@ -1112,6 +1116,36 @@ function EnterpriseUsers() {
       </Form>
     </Modal>
   </>;
+}
+
+function FinanceManagement() {
+  const {message,modal}=AntApp.useApp();
+  const statements=useLoad<Row[]>(()=>rootApi("/api/admin/business/finance/statements"));
+  const invoices=useLoad<Row[]>(()=>rootApi("/api/admin/business/finance/invoice-applications"));
+  const [invoiceForm]=Form.useForm();
+  const [processing,setProcessing]=useState<Row>();
+  const settle=(row:Row)=>modal.confirm({title:`确认 ${row.statementNo} 已全额到款？`,content:"确认后关联订单将同步标记为已付款。",onOk:async()=>{await rootMutation(`/api/admin/business/finance/statements/${row.id}/status`,{method:"PUT",body:JSON.stringify({status:3,remark:"平台财务确认到款"})});message.success("对账单已结清");await statements.refresh();}});
+  const showInvoice=(row:Row)=>{setProcessing(row);invoiceForm.resetFields();invoiceForm.setFieldsValue({status:row.status===0?1:row.status,invoiceNo:row.invoiceNo,invoiceFileUrl:row.invoiceFileUrl,failureReason:row.failureReason});};
+  const saveInvoice=async()=>{try{const values=await invoiceForm.validateFields();await rootMutation(`/api/admin/business/finance/invoice-applications/${processing?.id}`,{method:"PUT",body:JSON.stringify(values)});setProcessing(undefined);message.success("开票申请已更新");await invoices.refresh();}catch(error){if(error instanceof Error)message.error(error.message);}};
+  return <Card className="data-card"><Tabs items={[
+    {key:"statements",label:"企业对账单",children:<Table rowKey="id" loading={statements.loading} dataSource={statements.data||[]} columns={[
+      {title:"对账单",render:(_:unknown,row:Row)=><Space direction="vertical" size={1}><strong>{row.statementNo}</strong><small>{row.createdAt}</small></Space>},
+      {title:"企业",dataIndex:"enterpriseName"},{title:"对账期间",render:(_:unknown,row:Row)=>`${row.periodStart} 至 ${row.periodEnd}`},{title:"订单数",dataIndex:"orderCount"},
+      {title:"应付 / 已付",render:(_:unknown,row:Row)=><Space direction="vertical" size={1}><strong>¥{Number(row.payableAmount).toFixed(2)}</strong><small>已付 ¥{Number(row.paidAmount).toFixed(2)}</small></Space>},
+      {title:"状态",dataIndex:"status",render:(v)=><Tag color={Number(v)===3?"green":Number(v)===4?"default":"orange"}>{["草稿","待确认","已确认","已结清","已作废"][Number(v)]}</Tag>},
+      {title:"付款截止",dataIndex:"dueDate"},{title:"操作",render:(_:unknown,row:Row)=><Space>{[1,2].includes(Number(row.status))&&<Button type="link" onClick={()=>settle(row)}>确认到款</Button>}</Space>},
+    ]}/>},
+    {key:"invoices",label:"开票申请",children:<Table rowKey="id" loading={invoices.loading} dataSource={invoices.data||[]} columns={[
+      {title:"申请单",render:(_:unknown,row:Row)=><Space direction="vertical" size={1}><strong>{row.applicationNo}</strong><small>{row.createdAt}</small></Space>},
+      {title:"企业 / 申请人",render:(_:unknown,row:Row)=><Space direction="vertical" size={1}><span>{row.enterpriseName}</span><small>{row.applicantName}</small></Space>},
+      {title:"发票信息",render:(_:unknown,row:Row)=><Space direction="vertical" size={1}><span>{row.invoiceTitle}</span><small>{row.invoiceType} · {row.orderCount} 笔</small></Space>},
+      {title:"金额",render:(_:unknown,row:Row)=><strong>¥{Number(row.amount).toFixed(2)}</strong>},
+      {title:"状态",dataIndex:"status",render:(v)=><Tag color={Number(v)===2?"green":Number(v)===3?"red":"orange"}>{["待处理","开票中","已开具","已驳回"][Number(v)]}</Tag>},
+      {title:"操作",render:(_:unknown,row:Row)=><Button type="link" disabled={[2,3].includes(Number(row.status))} onClick={()=>showInvoice(row)}>处理</Button>},
+    ]}/>},
+  ]}/>
+  <Modal open={!!processing} title={`处理开票申请 ${processing?.applicationNo||""}`} onCancel={()=>setProcessing(undefined)} onOk={()=>void saveInvoice()}><Form form={invoiceForm} layout="vertical"><Form.Item name="status" label="处理状态" rules={[{required:true}]}><Select options={[{value:1,label:"开票中"},{value:2,label:"已开具"},{value:3,label:"驳回申请"}]}/></Form.Item><Form.Item noStyle shouldUpdate>{({getFieldValue})=>Number(getFieldValue("status"))===2?<><Form.Item name="invoiceNo" label="发票号码" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="invoiceFileUrl" label="电子发票文件地址" rules={[{required:true}]}><Input placeholder="https://..."/></Form.Item></>:Number(getFieldValue("status"))===3?<Form.Item name="failureReason" label="驳回原因" rules={[{required:true}]}><Input.TextArea/></Form.Item>:null}</Form.Item></Form></Modal>
+  </Card>;
 }
 
 function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCollectJobs }: {

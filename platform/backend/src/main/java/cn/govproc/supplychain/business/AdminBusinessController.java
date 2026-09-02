@@ -1047,6 +1047,57 @@ public class AdminBusinessController {
         jdbc.sql("INSERT IGNORE INTO enterprise_user_role(user_id,role_id) VALUES(:memberId,:roleId)")
           .params(Map.of("memberId",memberId,"roleId",roleIds.getFirst())).update();
     }
+    @GetMapping("/finance/statements")
+    List<Map<String,Object>> financeStatements() {
+        return jdbc.sql("""
+          SELECT s.id,s.statement_no AS statementNo,e.name AS enterpriseName,
+            DATE_FORMAT(s.period_start,'%Y-%m-%d') AS periodStart,DATE_FORMAT(s.period_end,'%Y-%m-%d') AS periodEnd,
+            s.order_count AS orderCount,s.payable_amount AS payableAmount,s.paid_amount AS paidAmount,s.status,
+            DATE_FORMAT(s.due_date,'%Y-%m-%d') AS dueDate,DATE_FORMAT(s.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
+          FROM reconciliation_statement s JOIN enterprise e ON e.id=s.enterprise_id ORDER BY s.id DESC
+          """).query().listOfRows();
+    }
+    @PutMapping("/finance/statements/{id}/status")
+    void updateFinanceStatement(@PathVariable long id,@Valid @RequestBody FinanceStatementStatusRequest request) {
+        if(request.status()!=3&&request.status()!=4)throw new IllegalArgumentException("管理后台仅可将对账单标记为已结清或已作废");
+        int changed=jdbc.sql("""
+          UPDATE reconciliation_statement SET status=:status,paid_amount=CASE WHEN :status=3 THEN payable_amount ELSE paid_amount END,
+            paid_at=CASE WHEN :status=3 THEN NOW() ELSE paid_at END,remark=:remark
+          WHERE id=:id AND status IN (1,2)
+          """).param("status",request.status()).param("remark",request.remark()).param("id",id).update();
+        if(changed==0)throw new IllegalArgumentException("对账单不存在或状态不允许变更");
+        if(request.status()==3)jdbc.sql("""
+          UPDATE order_main o JOIN reconciliation_statement_order so ON so.order_main_id=o.id
+          SET o.payment_status=2,o.order_status=CASE WHEN o.order_status=0 THEN 1 ELSE o.order_status END
+          WHERE so.statement_id=:id AND o.order_status<>4
+          """).param("id",id).update();
+    }
+    @GetMapping("/finance/invoice-applications")
+    List<Map<String,Object>> financeInvoiceApplications() {
+        return jdbc.sql("""
+          SELECT a.id,a.application_no AS applicationNo,e.name AS enterpriseName,u.real_name AS applicantName,
+            a.invoice_title AS invoiceTitle,a.tax_no AS taxNo,a.invoice_type AS invoiceType,
+            a.recipient_email AS recipientEmail,a.amount,a.status,a.invoice_no AS invoiceNo,
+            a.invoice_file_url AS invoiceFileUrl,a.failure_reason AS failureReason,COUNT(ao.order_main_id) AS orderCount,
+            DATE_FORMAT(a.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
+          FROM invoice_application a JOIN enterprise e ON e.id=a.enterprise_id JOIN enterprise_user u ON u.id=a.applicant_user_id
+          LEFT JOIN invoice_application_order ao ON ao.application_id=a.id GROUP BY a.id ORDER BY a.id DESC
+          """).query().listOfRows();
+    }
+    @PutMapping("/finance/invoice-applications/{id}")
+    void processInvoiceApplication(@PathVariable long id,@Valid @RequestBody InvoiceProcessRequest request) {
+        if(request.status()<1||request.status()>3)throw new IllegalArgumentException("开票处理状态不正确");
+        if(request.status()==2&&(request.invoiceNo()==null||request.invoiceNo().isBlank()||request.invoiceFileUrl()==null||request.invoiceFileUrl().isBlank()))
+            throw new IllegalArgumentException("已开具时必须填写发票号码和电子发票文件地址");
+        if(request.status()==3&&(request.failureReason()==null||request.failureReason().isBlank()))
+            throw new IllegalArgumentException("驳回时必须填写原因");
+        int changed=jdbc.sql("""
+          UPDATE invoice_application SET status=:status,invoice_no=:invoiceNo,invoice_file_url=:invoiceFileUrl,
+            failure_reason=:failureReason,processed_at=NOW() WHERE id=:id AND status IN (0,1)
+          """).param("status",request.status()).param("invoiceNo",request.invoiceNo())
+          .param("invoiceFileUrl",request.invoiceFileUrl()).param("failureReason",request.failureReason()).param("id",id).update();
+        if(changed==0)throw new IllegalArgumentException("开票申请不存在或已处理");
+    }
     public record ProductRequest(@NotBlank String title,String model,@NotNull Long categoryId,@NotNull Long brandId,Integer selfOperated,
         String mainImage,String gallery,String summary,String detailHtml,
         String deliveryDescription,String afterSalesHtml,String spec,
@@ -1077,4 +1128,6 @@ public class AdminBusinessController {
         String logisticsNo,String logisticsStatus){}
     public record RefundRequest(@NotNull @DecimalMin("0.01") BigDecimal refundAmount,
         @NotBlank String refundReason){}
+    public record FinanceStatementStatusRequest(int status,String remark){}
+    public record InvoiceProcessRequest(int status,String invoiceNo,String invoiceFileUrl,String failureReason){}
 }

@@ -5,6 +5,7 @@ import "./manage.css";
 import "./auth.css";
 import "./categories.css";
 import { OrganizationPage } from "./Organization";
+import { FinancePage } from "./Finance";
 
 type View =
   | "home"
@@ -24,6 +25,7 @@ type View =
   | "addresses"
   | "invoices"
   | "members"
+  | "finance"
   | "organization";
 export type Row = Record<string, any>;
 const structuredSpecs = (value: unknown): Row[] => {
@@ -130,6 +132,7 @@ const routeViews: View[] = [
   "addresses",
   "invoices",
   "members",
+  "finance",
   "organization",
 ];
 const protectedViews = new Set<View>([
@@ -141,6 +144,7 @@ const protectedViews = new Set<View>([
   "addresses",
   "invoices",
   "members",
+  "finance",
   "organization",
 ]);
 const parseRoute = (url = new URL(location.href)) => {
@@ -155,6 +159,7 @@ const parseRoute = (url = new URL(location.href)) => {
     "/web/checkout": "checkout", "/web/orders": "orders", "/web/account": "profile",
     "/web/account/addresses": "addresses", "/web/account/invoices": "invoices",
     "/web/account/members": "members",
+    "/web/account/finance": "finance",
     "/web/account/organization": "organization",
   };
   const legacy = url.searchParams.get("view") as View | null;
@@ -181,7 +186,7 @@ const pathFor = (view: View, platformId?: number, solutionId?: number, productId
     platforms: "/web/platforms", content: "/web/content", cart: "/web/cart",
     checkout: "/web/checkout", orders: "/web/orders", profile: "/web/account",
     addresses: "/web/account/addresses", invoices: "/web/account/invoices",
-    members: "/web/account/members", organization: "/web/account/organization" } as Partial<Record<View, string>>)[view] || "/web/";
+    members: "/web/account/members", finance: "/web/account/finance", organization: "/web/account/organization" } as Partial<Record<View, string>>)[view] || "/web/";
 };
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -671,6 +676,7 @@ function App() {
         />
       )}
       {displayView === "organization" && <OrganizationPage go={(target)=>setView(target as View)} />}
+      {displayView === "finance" && <FinancePage go={(target)=>setView(target as View)} />}
       <footer className="footer">
         <section className="footer-services">
           {(portal.serviceFeatures || []).map((row: Row, index: number) => <article key={row.id || row.title}>
@@ -2323,6 +2329,7 @@ function Orders({ go }: { go: (v: View) => void }) {
           ["orders", "我的订单"],
           ["addresses", "地址管理"],
           ["invoices", "发票管理"],
+          ["finance", "财务中心"],
           ["members", "企业成员"],
           ["organization", "组织与权限"],
         ].map((item) => (
@@ -2480,6 +2487,7 @@ function Profile({
           ["orders", "我的订单"],
           ["addresses", "地址管理"],
           ["invoices", "发票管理"],
+          ["finance", "财务中心"],
           ["members", "企业成员"],
           ["organization", "组织与权限"],
         ].map((x, i) => (
@@ -2713,6 +2721,7 @@ function AccountData({
           ["orders", "我的订单"],
           ["addresses", "地址管理"],
           ["invoices", "发票管理"],
+          ["finance", "财务中心"],
           ["members", "企业成员"],
         ].map((x) => (
           <button

@@ -74,7 +74,7 @@ export function OrganizationPage({ go }: Props) {
   return <main className="page account-page organization-page">
     <aside>
       <div className="account-brand"><i>鲁</i><strong>企业采购中心</strong></div>
-      {[['profile','账户概览'],['orders','我的订单'],['addresses','地址管理'],['invoices','发票管理'],['members','企业成员'],['organization','组织与权限']].map(x=><button className={x[0]==='organization'?'active':''} key={x[0]} onClick={()=>go(x[0])}>{x[1]}<span>›</span></button>)}
+      {[['profile','账户概览'],['orders','我的订单'],['addresses','地址管理'],['finance','财务中心'],['invoices','开票记录'],['members','企业成员'],['organization','组织与权限']].map(x=><button className={x[0]==='organization'?'active':''} key={x[0]} onClick={()=>go(x[0])}>{x[1]}<span>›</span></button>)}
     </aside>
     <section>
       <div className="account-heading"><div><h1>组织与权限</h1><p>维护部门、自定义角色、数据范围和成员授权</p></div></div>

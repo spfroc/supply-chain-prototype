@@ -1579,7 +1579,8 @@ function Mine({
   orders: () => void;
   logout: () => Promise<void>;
 }) {
-  const [view, setView] = useState<"addresses" | "invoices" | "members">();
+  const [view, setView] = useState<"addresses" | "invoices" | "members" | "finance">();
+  if (view === "finance") return <H5Finance back={() => setView(undefined)} />;
   if (view) return <H5Manage view={view} back={() => setView(undefined)} />;
   return (
     <div className="mine">
@@ -1639,13 +1640,14 @@ function Mine({
       <section className="mine-menu">
         {[
           ["址", "地址管理", "维护多地址配送信息", "addresses"],
+          ["财", "财务中心", "查看应付、对账与开票申请", "finance"],
           ["票", "发票管理", "查看第三方开票记录", "invoices"],
           ["员", "企业成员", "查看成员和账号状态", "members"],
         ].map((x) => (
           <button
             key={x[1]}
             onClick={() =>
-              setView(x[3] as "addresses" | "invoices" | "members")
+              setView(x[3] as "addresses" | "invoices" | "members" | "finance")
             }
           >
             <i>{x[0]}</i>
@@ -1667,6 +1669,24 @@ function Mine({
       </section>
     </div>
   );
+}
+function H5Finance({ back }: { back: () => void }) {
+  const [summary, setSummary] = useState<Row>({});
+  const [payables, setPayables] = useState<Row[]>([]);
+  const [statements, setStatements] = useState<Row[]>([]);
+  const [applications, setApplications] = useState<Row[]>([]);
+  const [tab, setTab] = useState<"payables" | "statements" | "invoices">("payables");
+  useEffect(() => { void Promise.all([
+    api<Row>("/api/client/finance/summary"), api<Row[]>("/api/client/finance/payables"),
+    api<Row[]>("/api/client/finance/statements"), api<Row[]>("/api/client/finance/invoice-applications"),
+  ]).then(([s,p,st,i])=>{setSummary(s);setPayables(p);setStatements(st);setApplications(i);}).catch(e=>Toast.show((e as Error).message)); }, []);
+  return <div className="subpage h5-finance"><header><button onClick={back}>‹</button><h1>财务中心</h1><span /></header>
+    <section className="h5-finance-summary"><article><span>未结应付</span><strong>{money(summary.outstandingAmount)}</strong><small>{summary.payableCount||0} 笔</small></article><article><span>已逾期</span><strong>{money(summary.overdueAmount)}</strong><small>{summary.overdueCount||0} 笔</small></article></section>
+    <nav>{[["payables","应付"],["statements","对账单"],["invoices","开票申请"]].map(x=><button className={tab===x[0]?"active":""} key={x[0]} onClick={()=>setTab(x[0] as typeof tab)}>{x[1]}</button>)}</nav>
+    <main>{tab==="payables"&&payables.map(row=><article key={row.id}><div><strong>{row.orderNo}</strong><span>{row.buyerName} · {row.createdAt}</span></div><b>{money(row.outstandingAmount)}</b><small>{Number(row.paymentStatus)===2?"已付款":Number(row.overdue)?"已逾期":"待付款"}</small></article>)}
+      {tab==="statements"&&statements.map(row=><article key={row.id}><div><strong>{row.statementNo}</strong><span>{row.periodStart} 至 {row.periodEnd} · {row.orderCount} 笔</span></div><b>{money(row.payableAmount)}</b><small>{["草稿","待确认","已确认","已结清","已作废"][row.status]}</small></article>)}
+      {tab==="invoices"&&applications.map(row=><article key={row.id}><div><strong>{row.applicationNo}</strong><span>{row.invoiceType} · {row.orderCount} 笔</span></div><b>{money(row.amount)}</b><small>{["待处理","开票中","已开具","已驳回"][row.status]}</small>{row.invoiceFileUrl&&<a href={row.invoiceFileUrl} target="_blank" rel="noreferrer">下载</a>}</article>)}</main>
+  </div>;
 }
 function H5Manage({
   view,
