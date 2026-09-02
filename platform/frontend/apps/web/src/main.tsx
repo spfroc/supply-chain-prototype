@@ -6,10 +6,12 @@ import "./auth.css";
 import "./categories.css";
 import "./service.css";
 import "./notification.css";
+import "./frequent.css";
 import { OrganizationPage } from "./Organization";
 import { FinancePage } from "./Finance";
 import { AfterSalesPage } from "./AfterSales";
 import { NotificationsPage } from "./Notifications";
+import { FrequentPurchasePage } from "./FrequentPurchase";
 
 type View =
   | "home"
@@ -32,6 +34,7 @@ type View =
   | "finance"
   | "after-sales"
   | "notifications"
+  | "frequent"
   | "organization";
 export type Row = Record<string, any>;
 const structuredSpecs = (value: unknown): Row[] => {
@@ -141,6 +144,7 @@ const routeViews: View[] = [
   "finance",
   "after-sales",
   "notifications",
+  "frequent",
   "organization",
 ];
 const protectedViews = new Set<View>([
@@ -155,6 +159,7 @@ const protectedViews = new Set<View>([
   "finance",
   "after-sales",
   "notifications",
+  "frequent",
   "organization",
 ]);
 const parseRoute = (url = new URL(location.href)) => {
@@ -172,6 +177,7 @@ const parseRoute = (url = new URL(location.href)) => {
     "/web/account/finance": "finance",
     "/web/account/after-sales": "after-sales",
     "/web/account/notifications": "notifications",
+    "/web/account/frequent": "frequent",
     "/web/account/organization": "organization",
   };
   const legacy = url.searchParams.get("view") as View | null;
@@ -198,7 +204,7 @@ const pathFor = (view: View, platformId?: number, solutionId?: number, productId
     platforms: "/web/platforms", content: "/web/content", cart: "/web/cart",
     checkout: "/web/checkout", orders: "/web/orders", profile: "/web/account",
     addresses: "/web/account/addresses", invoices: "/web/account/invoices",
-    members: "/web/account/members", finance: "/web/account/finance", "after-sales": "/web/account/after-sales", notifications: "/web/account/notifications", organization: "/web/account/organization" } as Partial<Record<View, string>>)[view] || "/web/";
+    members: "/web/account/members", finance: "/web/account/finance", "after-sales": "/web/account/after-sales", notifications: "/web/account/notifications", frequent: "/web/account/frequent", organization: "/web/account/organization" } as Partial<Record<View, string>>)[view] || "/web/";
 };
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -691,6 +697,7 @@ function App() {
       {displayView === "finance" && <FinancePage go={(target)=>setView(target as View)} />}
       {displayView === "after-sales" && <AfterSalesPage go={(target)=>setView(target as View)} />}
       {displayView === "notifications" && <NotificationsPage go={(target)=>setView(target as View)} />}
+      {displayView === "frequent" && <FrequentPurchasePage go={(target)=>setView(target as View)} cart={loadCart} />}
       <footer className="footer">
         <section className="footer-services">
           {(portal.serviceFeatures || []).map((row: Row, index: number) => <article key={row.id || row.title}>
@@ -1732,6 +1739,7 @@ function Detail({
   const specifications = [...skuSpecifications,...(configuredSpecifications.length ? configuredSpecifications : legacySpecifications)];
   const salePrice=customerPrice(current,loggedIn);
   const subscribeArrival=async()=>{if(!loggedIn){notify("请先登录后设置到货提醒");return;}try{await api(`/api/client/service/stock-subscriptions/${current.skuId}`,{method:"POST"});notify("到货提醒设置成功");}catch(e){notify((e as Error).message);}};
+  const addFrequent=async()=>{if(!loggedIn){notify("请先登录后加入常购清单");return;}try{await api("/api/client/purchase-tools/frequent-items",{method:"POST",body:JSON.stringify({skuId:current.skuId,quantity:1,remark:""})});notify("已加入常购清单");}catch(e){notify((e as Error).message);}};
   return (
     <main className="page">
       <div className="breadcrumb">
@@ -1806,6 +1814,7 @@ function Detail({
           </dl>
           {current.productUrl&&<div className="detail-platform-link"><span>平台商品链接</span><a href={current.productUrl} target="_blank" rel="noreferrer">前往{current.platformTitle||"平台"}查看</a></div>}
           <div className="buy">
+            <button onClick={()=>void addFrequent()}>加入常购</button>
             {Number(current.availableStock)<=0?<button className="arrival-reminder" onClick={()=>void subscribeArrival()}>到货提醒</button>:<><button onClick={() => void add(current, qty)}>加入购物车</button><button onClick={() => void buyNow(current, qty)}>立即采购</button></>}
           </div>
         </div>
@@ -2337,6 +2346,7 @@ function Orders({ go }: { go: (v: View) => void }) {
     setDetail(await api<Row>(`/api/client/orders/${detail.order.id}`));
     setRows(await api<Row[]>("/api/client/orders"));
   };
+  const repurchase=async(row:Row)=>{try{await api(`/api/client/purchase-tools/orders/${row.id}/repurchase`,{method:"POST"});go("cart");}catch(e){window.alert((e as Error).message);}};
   return (
     <main className="page account-page">
       <aside>
@@ -2415,6 +2425,7 @@ function Orders({ go }: { go: (v: View) => void }) {
                 <strong>{orderStatus[row.orderStatus]}</strong>
               </p>
               <button onClick={() => void show(row)}>查看详情</button>
+              <button onClick={() => void repurchase(row)}>再次购买</button>
             </div>
           </article>
         ))}
@@ -2510,6 +2521,7 @@ function Profile({
         {[
           ["profile", "账户概览"],
           ["orders", "我的订单"],
+          ["frequent", "常购清单"],
           ["addresses", "地址管理"],
           ["after-sales", "售后服务"],
           ["notifications", "消息中心"],
@@ -2746,6 +2758,7 @@ function AccountData({
         {[
           ["profile", "账户概览"],
           ["orders", "我的订单"],
+          ["frequent", "常购清单"],
           ["addresses", "地址管理"],
           ["invoices", "发票管理"],
           ["finance", "财务中心"],

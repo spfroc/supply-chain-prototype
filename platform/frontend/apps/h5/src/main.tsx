@@ -8,6 +8,7 @@ import "./auth.css";
 import "./platform-tags.css";
 import "./service.css";
 import "./notification.css";
+import "./frequent.css";
 type Tab = "home" | "category" | "cart" | "checkout" | "orders" | "mine";
 const tabFromLocation=():Tab=>{
   const value=new URLSearchParams(location.search).get("tab") as Tab|null;
@@ -389,7 +390,7 @@ function App() {
             orders={() => setTab("orders")}
           />
         )}
-        {tab === "orders" && <Orders />}
+        {tab === "orders" && <Orders cart={async()=>{await loadCart();setTab("cart");}} />}
         {tab === "mine" && (
           <Mine
             profile={profile}
@@ -993,17 +994,9 @@ function ProductDetail({
   const current:Row=variant?{...product,...variant,mainImage:variant.skuImage||product.mainImage}:product;
   const variantLabel=(item:Row)=>Object.entries(typeof item.specValues==="string"?JSON.parse(item.specValues||"{}"):item.specValues||{})
     .map(([key,value])=>`${key}：${value}`).join(" / ")||item.skuCode;
-  const favoriteKey = `favorite-${current.skuId}`;
-  const [favorite, setFavorite] = useState(
-    () => localStorage.getItem(favoriteKey) === "1",
-  );
-  const toggleFavorite = () => {
-    const next = !favorite;
-    setFavorite(next);
-    if (next) localStorage.setItem(favoriteKey, "1");
-    else localStorage.removeItem(favoriteKey);
-    Toast.show(next ? "已收藏" : "已取消收藏");
-  };
+  const [favorite, setFavorite] = useState(false);
+  useEffect(()=>{if(loggedIn)void api<Row>(`/api/client/purchase-tools/frequent-items/${current.skuId}`).then(x=>setFavorite(Boolean(x.favorite))).catch(()=>setFavorite(false));},[current.skuId,loggedIn]);
+  const toggleFavorite = async () => {if(!loggedIn){Toast.show("请先登录");return;}try{if(favorite)await api(`/api/client/purchase-tools/frequent-items/${current.skuId}`,{method:"DELETE"});else await api("/api/client/purchase-tools/frequent-items",{method:"POST",body:JSON.stringify({skuId:current.skuId,quantity:1,remark:""})});setFavorite(!favorite);Toast.show(favorite?"已移出常购清单":"已加入常购清单");}catch(e){Toast.show((e as Error).message);}};
   const subscribeArrival=async()=>{if(!loggedIn){Toast.show("请先登录后设置到货提醒");return;}try{await api(`/api/client/service/stock-subscriptions/${current.skuId}`,{method:"POST"});Toast.show("到货提醒设置成功");}catch(e){Toast.show((e as Error).message);}};
   const share = () => shareContent(product.title,`${product.title} ${money(customerPrice(current,loggedIn))}`);
   const configuredSpecifications = structuredSpecs(product.structuredAttributes).map((item) => [
@@ -1127,7 +1120,7 @@ function ProductDetail({
         )}
       </article>
       <footer className="buybar">
-        <button onClick={toggleFavorite}>{favorite ? "已收藏" : "收藏"}</button>
+        <button onClick={()=>void toggleFavorite()}>{favorite ? "已常购" : "加入常购"}</button>
         {Number(current.availableStock)<=0?<button className="arrival-reminder" onClick={()=>void subscribeArrival()}>到货提醒</button>:<><button onClick={() => void add(current)}>加入购物车</button><button onClick={() => void buyNow(current)}>立即采购</button></>}
       </footer>
     </div>
@@ -1459,7 +1452,7 @@ function Checkout({
   );
 }
 
-function Orders() {
+function Orders({cart}:{cart:()=>Promise<void>}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [tab, setTab] = useState(-1);
   const [detail, setDetail] = useState<Row>();
@@ -1470,6 +1463,7 @@ function Orders() {
     tab < 0 ? rows : rows.filter((r) => Number(r.orderStatus) === tab);
   const show = async (r: Row) =>
     setDetail(await api<Row>(`/api/client/orders/${r.id}`));
+  const repurchase=async(r:Row)=>{try{await api(`/api/client/purchase-tools/orders/${r.id}/repurchase`,{method:"POST"});await cart();}catch(e){Toast.show((e as Error).message);}};
   const confirmReceipt=async(delivery:Row)=>{if(!detail||!window.confirm("确认已经收到该配送单商品？"))return;await api(`/api/client/service/orders/${detail.order.id}/deliveries/${encodeURIComponent(delivery.subOrderNo)}/confirm-receipt`,{method:"POST"});setDetail(await api<Row>(`/api/client/orders/${detail.order.id}`));setRows(await api<Row[]>("/api/client/orders"));};
   if (detail)
     return (
@@ -1568,6 +1562,7 @@ function Orders() {
               {r.orderStatus === 0 ? "请在48小时内完成转账" : "订单正在处理中"}
             </span>
             <button onClick={() => void show(r)}>查看详情</button>
+            <button onClick={() => void repurchase(r)}>再次购买</button>
           </footer>
         </article>
       ))}
@@ -1583,10 +1578,11 @@ function Mine({
   orders: () => void;
   logout: () => Promise<void>;
 }) {
-  const [view, setView] = useState<"addresses" | "invoices" | "members" | "finance" | "afterSales" | "notifications">();
+  const [view, setView] = useState<"addresses" | "invoices" | "members" | "finance" | "afterSales" | "notifications" | "frequent">();
   if (view === "finance") return <H5Finance back={() => setView(undefined)} />;
   if (view === "afterSales") return <H5AfterSales back={() => setView(undefined)} />;
   if (view === "notifications") return <H5Notifications back={() => setView(undefined)} />;
+  if (view === "frequent") return <H5Frequent back={() => setView(undefined)} />;
   if (view) return <H5Manage view={view} back={() => setView(undefined)} />;
   return (
     <div className="mine">
@@ -1647,6 +1643,7 @@ function Mine({
         {[
           ["址", "地址管理", "维护多地址配送信息", "addresses"],
           ["售", "售后服务", "提交申请并查看处理进度", "afterSales"],
+          ["常", "常购清单", "保存常用商品并快速加入购物车", "frequent"],
           ["讯", "消息中心", "订单、售后、库存和协议提醒", "notifications"],
           ["财", "财务中心", "查看应付、对账与开票申请", "finance"],
           ["票", "发票管理", "查看第三方开票记录", "invoices"],
@@ -1655,7 +1652,7 @@ function Mine({
           <button
             key={x[1]}
             onClick={() =>
-              setView(x[3] as "addresses" | "invoices" | "members" | "finance" | "afterSales" | "notifications")
+              setView(x[3] as "addresses" | "invoices" | "members" | "finance" | "afterSales" | "notifications" | "frequent")
             }
           >
             <i>{x[0]}</i>
@@ -1678,6 +1675,8 @@ function Mine({
     </div>
   );
 }
+function H5Frequent({back}:{back:()=>void}){const[rows,setRows]=useState<Row[]>([]);const load=async()=>setRows(await api<Row[]>("/api/client/purchase-tools/frequent-items"));useEffect(()=>{void load();},[]);const remove=async(id:number)=>{await api(`/api/client/purchase-tools/frequent-items/${id}`,{method:"DELETE"});await load();};const addAll=async()=>{await api("/api/client/purchase-tools/frequent-items/add-to-cart",{method:"POST",body:JSON.stringify({skuIds:[]})});Toast.show("已加入购物车");};return <div className="subpage h5-frequent"><header><button onClick={back}>‹</button><h1>常购清单</h1><button onClick={()=>void addAll()}>全部加购</button></header>{rows.length?rows.map(r=><article key={r.skuId}><img src={r.image}/><div><strong>{r.title}</strong><small>{r.skuCode}</small><span>默认 {r.defaultQuantity} 件 · 库存 {r.availableStock}</span></div><button onClick={()=>void remove(r.skuId)}>移除</button></article>):<p className="h5-empty">暂无常购商品</p>}</div>}
+
 function H5Notifications({back}:{back:()=>void}){const[rows,setRows]=useState<Row[]>([]);const load=async()=>setRows(await api<Row[]>("/api/client/notifications"));useEffect(()=>{void load();},[]);const read=async(row:Row)=>{if(!Number(row.isRead)){await api(`/api/client/notifications/${row.id}/read`,{method:"PUT"});await load();}};return <div className="subpage h5-notifications"><header><button onClick={back}>‹</button><h1>消息中心</h1><button onClick={async()=>{await api("/api/client/notifications/read-all",{method:"PUT"});await load();}}>全部已读</button></header>{rows.length?rows.map(row=><article className={Number(row.isRead)?"read":""} key={row.id} onClick={()=>void read(row)}><i>{({ORDER:"订",AFTER_SALE:"售",STOCK:"货",AGREEMENT:"协",SYSTEM:"讯"} as Row)[row.messageType]||"讯"}</i><div><strong>{row.title}</strong><p>{row.content}</p><small>{row.createdAt}</small></div>{!Number(row.isRead)&&<em>未读</em>}</article>):<p className="h5-empty">暂无消息</p>}</div>}
 
 function H5AfterSales({back}:{back:()=>void}){
