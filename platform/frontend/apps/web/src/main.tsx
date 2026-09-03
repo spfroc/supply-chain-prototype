@@ -2123,7 +2123,7 @@ function Checkout({
         const key = String(row.skuId);
         if (!next[key]?.length)
           next[key] = [
-            { addressId: addresses[0].id, quantity: Number(row.quantity) },
+            { addressId: addresses.find(address=>Number(address.id)===Number(row.preferredAddressId))?.id||addresses[0].id, quantity: Number(row.quantity) },
           ];
       });
       return next;

@@ -9,6 +9,7 @@ import "./platform-tags.css";
 import "./service.css";
 import "./notification.css";
 import "./frequent.css";
+import "./purchase-import.css";
 type Tab = "home" | "category" | "cart" | "checkout" | "orders" | "mine";
 const tabFromLocation=():Tab=>{
   const value=new URLSearchParams(location.search).get("tab") as Tab|null;
@@ -1260,7 +1261,7 @@ function Checkout({
         const key = String(row.skuId);
         if (!next[key]?.length)
           next[key] = [
-            { addressId: addresses[0].id, quantity: Number(row.quantity) },
+            { addressId: addresses.find(address=>Number(address.id)===Number(row.preferredAddressId))?.id||addresses[0].id, quantity: Number(row.quantity) },
           ];
       });
       return next;
@@ -1578,11 +1579,12 @@ function Mine({
   orders: () => void;
   logout: () => Promise<void>;
 }) {
-  const [view, setView] = useState<"addresses" | "invoices" | "members" | "finance" | "afterSales" | "notifications" | "frequent">();
+  const [view, setView] = useState<"addresses" | "invoices" | "members" | "finance" | "afterSales" | "notifications" | "frequent" | "purchaseImport">();
   if (view === "finance") return <H5Finance back={() => setView(undefined)} />;
   if (view === "afterSales") return <H5AfterSales back={() => setView(undefined)} />;
   if (view === "notifications") return <H5Notifications back={() => setView(undefined)} />;
   if (view === "frequent") return <H5Frequent back={() => setView(undefined)} />;
+  if (view === "purchaseImport") return <H5PurchaseImport back={() => setView(undefined)} />;
   if (view) return <H5Manage view={view} back={() => setView(undefined)} />;
   return (
     <div className="mine">
@@ -1644,6 +1646,7 @@ function Mine({
           ["址", "地址管理", "维护多地址配送信息", "addresses"],
           ["售", "售后服务", "提交申请并查看处理进度", "afterSales"],
           ["常", "常购清单", "保存常用商品并快速加入购物车", "frequent"],
+          ["批", "批量采购", "查看导入任务并处理有效商品", "purchaseImport"],
           ["讯", "消息中心", "订单、售后、库存和协议提醒", "notifications"],
           ["财", "财务中心", "查看应付、对账与开票申请", "finance"],
           ["票", "发票管理", "查看第三方开票记录", "invoices"],
@@ -1652,7 +1655,7 @@ function Mine({
           <button
             key={x[1]}
             onClick={() =>
-              setView(x[3] as "addresses" | "invoices" | "members" | "finance" | "afterSales" | "notifications" | "frequent")
+              setView(x[3] as "addresses" | "invoices" | "members" | "finance" | "afterSales" | "notifications" | "frequent" | "purchaseImport")
             }
           >
             <i>{x[0]}</i>
@@ -1676,6 +1679,8 @@ function Mine({
   );
 }
 function H5Frequent({back}:{back:()=>void}){const[rows,setRows]=useState<Row[]>([]);const load=async()=>setRows(await api<Row[]>("/api/client/purchase-tools/frequent-items"));useEffect(()=>{void load();},[]);const remove=async(id:number)=>{await api(`/api/client/purchase-tools/frequent-items/${id}`,{method:"DELETE"});await load();};const addAll=async()=>{await api("/api/client/purchase-tools/frequent-items/add-to-cart",{method:"POST",body:JSON.stringify({skuIds:[]})});Toast.show("已加入购物车");};return <div className="subpage h5-frequent"><header><button onClick={back}>‹</button><h1>常购清单</h1><button onClick={()=>void addAll()}>全部加购</button></header>{rows.length?rows.map(r=><article key={r.skuId}><img src={r.image}/><div><strong>{r.title}</strong><small>{r.skuCode}</small><span>默认 {r.defaultQuantity} 件 · 库存 {r.availableStock}</span></div><button onClick={()=>void remove(r.skuId)}>移除</button></article>):<p className="h5-empty">暂无常购商品</p>}</div>}
+
+function H5PurchaseImport({back}:{back:()=>void}){const[tasks,setTasks]=useState<Row[]>([]),[detail,setDetail]=useState<Row>(),[busy,setBusy]=useState(false);useEffect(()=>{void api<Row[]>("/api/client/purchase-tools/imports").then(setTasks);},[]);const open=async(id:number)=>setDetail(await api<Row>(`/api/client/purchase-tools/imports/${id}`));const quantity=async(row:Row,value:number)=>{if(!detail||value<1)return;setBusy(true);try{setDetail(await api<Row>(`/api/client/purchase-tools/imports/${detail.task.id}/items/${row.id}`,{method:"PUT",body:JSON.stringify({quantity:value})}));}finally{setBusy(false);}};const add=async()=>{if(!detail)return;setBusy(true);try{await api(`/api/client/purchase-tools/imports/${detail.task.id}/add-to-cart`,{method:"POST"});Toast.show("有效商品已加入购物车");}finally{setBusy(false);}};if(detail)return <div className="subpage h5-import"><header><button onClick={()=>setDetail(undefined)}>‹</button><h1>导入任务</h1><button disabled={busy||!Number(detail.task.validRows)} onClick={()=>void add()}>加入购物车</button></header><section className="h5-import-summary"><b>{detail.task.fileName}</b><span>共 {detail.task.totalRows} 行 · 有效 {detail.task.validRows} · 异常 {detail.task.invalidRows}</span></section>{detail.items.map((row:Row)=><article key={row.id}>{row.image?<img src={row.image}/>:<i>商</i>}<div><strong>{row.title||"未识别商品"}</strong><small>SKU：{row.skuCode||"—"}</small>{row.addressLabel&&<small>配送：{row.addressLabel}</small>}<em className={row.status==="VALID"?"ok":"bad"}>{row.status==="VALID"?"校验通过":row.errorMessage}</em></div>{row.skuId&&<label><input type="number" min="1" max="9999" defaultValue={row.quantity} disabled={busy} onBlur={e=>void quantity(row,Number(e.target.value))}/><small>件</small></label>}</article>)}</div>;return <div className="subpage h5-import"><header><button onClick={back}>‹</button><h1>批量采购</h1><span /></header><p className="h5-import-tip">Excel 文件请在 Web 端上传，移动端可查看结果、修改数量并加入购物车。</p>{tasks.length?tasks.map(row=><button className="h5-import-task" key={row.id} onClick={()=>void open(row.id)}><span><b>{row.fileName}</b><small>{row.createdAt}</small></span><em>有效 {row.validRows}<br/>异常 {row.invalidRows}</em><i>›</i></button>):<p className="h5-empty">暂无导入任务</p>}</div>}
 
 function H5Notifications({back}:{back:()=>void}){const[rows,setRows]=useState<Row[]>([]);const load=async()=>setRows(await api<Row[]>("/api/client/notifications"));useEffect(()=>{void load();},[]);const read=async(row:Row)=>{if(!Number(row.isRead)){await api(`/api/client/notifications/${row.id}/read`,{method:"PUT"});await load();}};return <div className="subpage h5-notifications"><header><button onClick={back}>‹</button><h1>消息中心</h1><button onClick={async()=>{await api("/api/client/notifications/read-all",{method:"PUT"});await load();}}>全部已读</button></header>{rows.length?rows.map(row=><article className={Number(row.isRead)?"read":""} key={row.id} onClick={()=>void read(row)}><i>{({ORDER:"订",AFTER_SALE:"售",STOCK:"货",AGREEMENT:"协",SYSTEM:"讯"} as Row)[row.messageType]||"讯"}</i><div><strong>{row.title}</strong><p>{row.content}</p><small>{row.createdAt}</small></div>{!Number(row.isRead)&&<em>未读</em>}</article>):<p className="h5-empty">暂无消息</p>}</div>}
 

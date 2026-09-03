@@ -206,7 +206,7 @@ public class ClientController {
     @GetMapping("/cart")
     List<Map<String, Object>> cart() {
         return jdbc.sql("""
-            SELECT c.id, c.sku_id AS skuId, c.solution_id AS solutionId,c.quantity, c.selected, p.title, p.main_image AS mainImage,
+            SELECT c.id, c.sku_id AS skuId, c.solution_id AS solutionId,c.preferred_address_id AS preferredAddressId,c.quantity, c.selected, p.title, p.main_image AS mainImage,
               s.sku_code AS skuCode, s.spec_json AS specJson, s.stock-s.reserved_stock AS availableStock,
               s.market_price AS marketPrice, s.member_price AS memberPrice,
               COALESCE(ai.agreement_price,s.market_price) AS salePrice,
