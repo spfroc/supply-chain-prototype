@@ -149,6 +149,7 @@ function App() {
   const [profile, setProfile] = useState<Row>({});
   const [detail, setDetail] = useState<Row>();
   const [categoryKeyword,setCategoryKeyword]=useState(()=>new URLSearchParams(location.search).get("q")||"");
+  const [categoryId,setCategoryId]=useState<number|undefined>(()=>Number(new URLSearchParams(location.search).get("categoryId"))||undefined);
   const [solutionId, setSolutionId] = useState<number | undefined>(() => Number(new URLSearchParams(location.search).get("solutionId")) || undefined);
   const [solutionsOpen, setSolutionsOpen] = useState(false);
   const [current, setCurrent] = useState<Row>();
@@ -211,6 +212,7 @@ function App() {
       setTab(tabFromLocation());
       setSolutionId(Number(params.get("solutionId"))||undefined);
       setCategoryKeyword(params.get("q")||"");
+      setCategoryId(Number(params.get("categoryId"))||undefined);
       const productId=Number(params.get("productId"));
       setDetail(productId?products.find(row=>Number(row.id)===productId):undefined);
     };
@@ -226,9 +228,16 @@ function App() {
     const url=new URL(location.href);
     if(target==="home") url.searchParams.delete("tab"); else url.searchParams.set("tab",target);
     if(q) url.searchParams.set("q",q); else url.searchParams.delete("q");
-    url.searchParams.delete("productId"); url.searchParams.delete("solutionId");
+    url.searchParams.delete("productId"); url.searchParams.delete("solutionId"); url.searchParams.delete("categoryId");
     history.pushState({tab:target},"",url);
     setCategoryKeyword(q); setDetail(undefined); setSolutionId(undefined); setTab(target);
+  };
+  const navigateCategory=(q="",nextCategoryId?:number)=>{
+    const url=new URL(location.href);url.searchParams.set("tab","category");
+    if(q)url.searchParams.set("q",q);else url.searchParams.delete("q");
+    if(nextCategoryId)url.searchParams.set("categoryId",String(nextCategoryId));else url.searchParams.delete("categoryId");
+    url.searchParams.delete("productId");url.searchParams.delete("solutionId");
+    history.pushState({tab:"category"},"",url);setCategoryKeyword(q);setCategoryId(nextCategoryId);setDetail(undefined);setSolutionId(undefined);setTab("category");
   };
   const openProduct=(product:Row)=>{
     const url=new URL(location.href);
@@ -360,7 +369,7 @@ function App() {
             categories={categories}
             open={openProduct}
             add={add}
-            category={(keyword="") => navigateTab("category",keyword)}
+            category={navigateCategory}
             openSolution={(id) => {
               setSolutionId(id);
               history.pushState({}, "", `${location.pathname}?solutionId=${id}`);
@@ -376,8 +385,10 @@ function App() {
             categories={categories}
             solutions={portal.solution || []}
             keyword={categoryKeyword}
+            initialCategory={categoryId}
             open={openProduct}
             openSolution={(id)=>{setSolutionId(id);history.pushState({},"",`${location.pathname}?solutionId=${id}`);}}
+            routeChanged={(id)=>{setCategoryId(id);const url=new URL(location.href);if(id)url.searchParams.set("categoryId",String(id));else url.searchParams.delete("categoryId");history.replaceState({tab:"category"},"",url);}}
             hasAgreement={hasAgreement}
             loggedIn={Boolean(current)}
           />
@@ -690,13 +701,14 @@ function Home({
   categories: Row[];
   open: (r: Row) => void;
   add: (r: Row) => void;
-  category: (keyword?: string) => void;
+  category: (keyword?: string, categoryId?:number) => void;
   openSolution: (id: number) => void;
   allSolutions: () => void;
   hasAgreement: boolean;
   loggedIn: boolean;
 }) {
   const [keyword,setKeyword]=useState("");
+  const shortcutCategory=(name:string)=>categories.find((row)=>String(row.name||"").includes(name));
   return (
     <div className="home">
       <label className="m-search">
@@ -728,7 +740,7 @@ function Home({
           ["案", "场景方案"],
           ["全", "全部分类"],
         ].map((x, i) => (
-          <button key={x[1]} onClick={()=>x[1]==="场景方案"?allSolutions():category()}>
+          <button key={x[1]} onClick={()=>x[1]==="场景方案"?allSolutions():x[1]==="全部分类"?category():category("",Number(shortcutCategory(x[1])?.id)||undefined)}>
             <i className={`t${i}`}>{x[0]}</i>
             <span>{x[1]}</span>
           </button>
@@ -859,8 +871,10 @@ function Category({
   categories,
   solutions,
   keyword,
+  initialCategory,
   open,
   openSolution,
+  routeChanged,
   hasAgreement,
   loggedIn,
 }: {
@@ -868,13 +882,16 @@ function Category({
   categories: Row[];
   solutions: Row[];
   keyword: string;
+  initialCategory?:number;
   open: (r: Row) => void;
   openSolution: (id: number) => void;
+  routeChanged:(id?:number)=>void;
   hasAgreement: boolean;
   loggedIn: boolean;
 }) {
   const roots = categories.filter((x) => Number(x.level) === 1);
-  const [active, setActive] = useState<number>();
+  const [active, setActive] = useState<number|undefined>(initialCategory);
+  useEffect(()=>setActive(initialCategory),[initialCategory]);
   const [brand,setBrand]=useState("");
   const [attributeFilters,setAttributeFilters]=useState<Record<string,string>>({});
   const children = active
@@ -915,14 +932,14 @@ function Category({
         <aside>
           <button
             className={!active ? "active" : ""}
-            onClick={() => {setActive(undefined);setBrand("");setAttributeFilters({});}}
+            onClick={() => {setActive(undefined);routeChanged(undefined);setBrand("");setAttributeFilters({});}}
           >
             全部商品
           </button>
           {roots.map((x) => (
             <button
               className={active === Number(x.id) ? "active" : ""}
-              onClick={() => {setActive(Number(x.id));setBrand("");setAttributeFilters({});}}
+              onClick={() => {setActive(Number(x.id));routeChanged(Number(x.id));setBrand("");setAttributeFilters({});}}
               key={x.id}
             >
               {x.name}
@@ -953,7 +970,7 @@ function Category({
           <h2>下级分类</h2>
           <div className="category-grid">
             {children.map((x) => (
-              <button key={x.id} onClick={()=>{setActive(Number(x.id));setBrand("");setAttributeFilters({});}}>
+              <button key={x.id} onClick={()=>{setActive(Number(x.id));routeChanged(Number(x.id));setBrand("");setAttributeFilters({});}}>
                 <span>{x.name}</span>
               </button>
             ))}
