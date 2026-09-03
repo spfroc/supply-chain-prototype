@@ -17,6 +17,7 @@ import {
   Modal as AntModal,
   Progress,
   Radio,
+  Result,
   Select,
   Space,
   Statistic,
@@ -67,6 +68,8 @@ type ManagedTableProps<T extends Row> = TableProps<T> & {
     setStatus: (value?: string) => void;
     setPage: (page: number, pageSize: number) => void;
     statusOptions?: { label: string; value: string }[];
+    error?: string;
+    retry?: () => void;
   };
 };
 
@@ -158,6 +161,12 @@ function Table<T extends Row>({
       {...props}
       rowKey={rowKey}
       dataSource={filteredRows}
+      locale={{
+        ...props.locale,
+        emptyText: server?.error
+          ? <Result status="error" title="列表加载失败" subTitle={server.error} extra={<Button type="primary" onClick={server.retry}>重新加载</Button>} />
+          : props.locale?.emptyText,
+      }}
       rowSelection={{
         ...rowSelection,
         preserveSelectedRowKeys: true,
@@ -4368,12 +4377,16 @@ function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = [], enabled = tr
   const { message } = AntApp.useApp();
   const [data, setData] = useState<T>();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const refresh = async () => {
     setLoading(true);
+    setError("");
     try {
       setData(await loader());
     } catch (error) {
-      message.error((error as Error).message);
+      const detail=(error as Error).message||"数据加载失败";
+      setError(detail);
+      message.error(detail);
     } finally {
       setLoading(false);
     }
@@ -4382,7 +4395,7 @@ function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = [], enabled = tr
     if(!enabled){setLoading(false);return;}
     void refresh();
   }, [enabled,...deps]);
-  return { data, loading, refresh };
+  return { data, loading, error, refresh };
 }
 
 type PageResult<T> = { records: T[]; total: number; page: number; pageSize: number; totalPages: number };
@@ -4395,9 +4408,11 @@ function usePagedLoad(endpoint: string, initialPageSize = 10, deps: unknown[] = 
   const [keyword, setKeywordValue] = useState("");
   const [status, setStatusValue] = useState<string>();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
   const load = async (quiet = false) => {
     if (!quiet) setLoading(true);
+    if (!quiet) setError("");
     try {
       const url = new URL(endpoint, window.location.origin);
       url.searchParams.set("page", String(page));
@@ -4409,7 +4424,11 @@ function usePagedLoad(endpoint: string, initialPageSize = 10, deps: unknown[] = 
       setTotal(Number(result.total || 0));
       if (result.total > 0 && page > Math.max(1, result.totalPages)) setPageValue(Math.max(1, result.totalPages));
     } catch (error) {
-      if (!quiet) message.error((error as Error).message);
+      if (!quiet) {
+        const detail=(error as Error).message||"列表加载失败";
+        setError(detail);
+        message.error(detail);
+      }
     }
     finally { setLoading(false); }
   };
@@ -4420,6 +4439,8 @@ function usePagedLoad(endpoint: string, initialPageSize = 10, deps: unknown[] = 
   }, [endpoint, page, pageSize, keyword, status, revision, enabled, ...deps]);
   const server = {
     total, page, pageSize, keyword, status,
+    error,
+    retry: () => setRevision((value) => value + 1),
     setKeyword: (value: string) => { setKeywordValue(value); setPageValue(1); },
     setStatus: (value?: string) => { setStatusValue(value); setPageValue(1); },
     setPage: (nextPage: number, nextPageSize: number) => {
