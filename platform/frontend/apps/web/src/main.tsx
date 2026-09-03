@@ -14,6 +14,7 @@ import { AfterSalesPage } from "./AfterSales";
 import { NotificationsPage } from "./Notifications";
 import { FrequentPurchasePage } from "./FrequentPurchase";
 import { PurchaseWorkbench } from "./PurchaseWorkbench";
+import { LoadState } from "./LoadState";
 
 type View =
   | "home"
@@ -2372,18 +2373,16 @@ function Orders({ go }: { go: (v: View) => void }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [tab, setTab] = useState(-1);
   const [detail, setDetail] = useState<Row>();
-  useEffect(() => {
-    void api<Row[]>("/api/client/orders").then(setRows);
-  }, []);
+  const [loading,setLoading]=useState(true);const[error,setError]=useState("");
+  const load=async()=>{setLoading(true);try{setRows(await api<Row[]>("/api/client/orders"));setError("");}catch(e){setError((e as Error).message);}finally{setLoading(false);}};
+  useEffect(() => { void load(); }, []);
   const filtered =
     tab < 0 ? rows : rows.filter((r) => Number(r.orderStatus) === tab);
-  const show = async (row: Row) =>
-    setDetail(await api<Row>(`/api/client/orders/${row.id}`));
+  const show = async (row: Row) =>{try{setDetail(await api<Row>(`/api/client/orders/${row.id}`));}catch(e){window.alert((e as Error).message);}};
   const confirmReceipt = async (delivery: Row) => {
     if (!detail || !window.confirm(`确认配送单 ${delivery.subOrderNo} 已收货？`)) return;
-    await api(`/api/client/service/orders/${detail.order.id}/deliveries/${encodeURIComponent(delivery.subOrderNo)}/confirm-receipt`, { method: "POST" });
-    setDetail(await api<Row>(`/api/client/orders/${detail.order.id}`));
-    setRows(await api<Row[]>("/api/client/orders"));
+    try{await api(`/api/client/service/orders/${detail.order.id}/deliveries/${encodeURIComponent(delivery.subOrderNo)}/confirm-receipt`, { method: "POST" });
+    setDetail(await api<Row>(`/api/client/orders/${detail.order.id}`));await load();}catch(e){window.alert((e as Error).message);}
   };
   const repurchase=async(row:Row)=>{try{await api(`/api/client/purchase-tools/orders/${row.id}/repurchase`,{method:"POST"});go("cart");}catch(e){window.alert((e as Error).message);}};
   return (
@@ -2436,7 +2435,7 @@ function Orders({ go }: { go: (v: View) => void }) {
             </button>
           ))}
         </div>
-        {filtered.map((row) => (
+        <LoadState loading={loading} error={error} empty={!filtered.length} emptyText={tab<0?"暂无订单":"该状态暂无订单"} retry={()=>void load()}>{filtered.map((row) => (
           <article className="order-card" key={row.id}>
             <header>
               <strong>{dateTime(row.createdAt)}</strong>
@@ -2467,13 +2466,7 @@ function Orders({ go }: { go: (v: View) => void }) {
               <button onClick={() => void repurchase(row)}>再次购买</button>
             </div>
           </article>
-        ))}
-        {!filtered.length && (
-          <div className="empty small">
-            <i>▱</i>
-            <h2>暂无相关订单</h2>
-          </div>
-        )}
+        ))}</LoadState>
         {detail && (
           <div className="dialog-mask">
             <div className="client-dialog">
@@ -2706,6 +2699,8 @@ function AccountData({
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<Row>({});
   const [error, setError] = useState("");
+  const [loading,setLoading]=useState(true);
+  const [loadError,setLoadError]=useState("");
   const path =
     view === "addresses"
       ? "addresses"
@@ -2718,7 +2713,7 @@ function AccountData({
       : view === "invoices"
         ? "发票管理"
         : "企业成员";
-  const load = () => api<Row[]>(`/api/client/${path}`).then(setRows);
+  const load = async()=>{setLoading(true);try{setRows(await api<Row[]>(`/api/client/${path}`));setLoadError("");}catch(e){setLoadError((e as Error).message);}finally{setLoading(false);}};
   useEffect(() => {
     void load();
   }, [view]);
@@ -2831,7 +2826,7 @@ function AccountData({
             </button>
           )}
         </div>
-        <div className="manage-list">
+        <LoadState loading={loading} error={loadError} empty={!rows.length} emptyText={`暂无${title.replace("管理","")}记录`} retry={()=>void load()}><div className="manage-list">
           {rows.map((row) => (
             <article key={row.id}>
               <div>
@@ -2861,7 +2856,7 @@ function AccountData({
               )}
             </article>
           ))}
-        </div>
+        </div></LoadState>
         {open && (
           <div className="dialog-mask">
             <div className="client-dialog form-dialog">
