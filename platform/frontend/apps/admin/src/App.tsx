@@ -14,7 +14,7 @@ import {
   InputNumber,
   Layout,
   Menu,
-  Modal,
+  Modal as AntModal,
   Progress,
   Radio,
   Select,
@@ -29,10 +29,29 @@ import {
   Upload,
 } from "antd";
 import type { ColumnsType, TableProps } from "antd/es/table";
+import type { ModalProps } from "antd";
 import type { UploadFile } from "antd/es/upload/interface";
 import zhCN from "antd/locale/zh_CN";
 
 type Row = Record<string, any>;
+
+type GuardedModalProps = ModalProps & { guardUnsaved?: boolean };
+function GuardedModal({guardUnsaved=true,onCancel,afterOpenChange,modalRender,...props}:GuardedModalProps){
+  const {modal}=AntApp.useApp();
+  const dirty=useRef(false);
+  const opened=useRef(false);
+  useEffect(()=>{
+    if(props.open&&!opened.current)dirty.current=false;
+    opened.current=Boolean(props.open);
+  },[props.open]);
+  const close:ModalProps["onCancel"]=(event)=>{
+    if(!guardUnsaved||!dirty.current){onCancel?.(event);return;}
+    modal.confirm({title:"放弃未保存的修改？",content:"关闭后，本次填写或修改的内容不会保留。",okText:"放弃修改",cancelText:"继续编辑",okButtonProps:{danger:true},onOk:()=>{dirty.current=false;onCancel?.(event);}});
+  };
+  return <AntModal {...props} onCancel={close} afterOpenChange={(visible)=>{if(!visible)dirty.current=false;afterOpenChange?.(visible);}}
+    modalRender={(node)=><div onChangeCapture={()=>{dirty.current=true;}} onInputCapture={()=>{dirty.current=true;}}>{modalRender?modalRender(node):node}</div>}/>;
+}
+const Modal=Object.assign(GuardedModal,{confirm:AntModal.confirm});
 
 type ManagedTableProps<T extends Row> = TableProps<T> & {
   searchPlaceholder?: string;
@@ -302,6 +321,21 @@ const deliveryAddress = (value: any) => {
         .filter(Boolean)
         .join(" · ")
     : "配送地址待确认";
+};
+
+const pendingMutations=new Map<string,Promise<Response>>();
+const fetch=(input:RequestInfo|URL,init?:RequestInit):Promise<Response>=>{
+  const method=String(init?.method||(input instanceof Request?input.method:"GET")).toUpperCase();
+  if(["GET","HEAD","OPTIONS"].includes(method)||init?.body instanceof FormData)
+    return window.fetch(input,init);
+  const url=typeof input==="string"?input:input instanceof URL?input.toString():input.url;
+  const body=typeof init?.body==="string"?init.body:"";
+  const key=`${method}:${url}:${body}`;
+  if(pendingMutations.has(key))return Promise.reject(new Error("操作正在处理，请勿重复提交"));
+  const request=window.fetch(input,init);
+  pendingMutations.set(key,request);
+  request.finally(()=>{if(pendingMutations.get(key)===request)pendingMutations.delete(key);}).catch(()=>{});
+  return request;
 };
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
@@ -2272,6 +2306,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
       </Modal>
       <Modal
         open={open}
+        guardUnsaved={false}
         title={
           mode === "stock"
             ? "调整库存"
