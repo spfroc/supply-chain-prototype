@@ -893,6 +893,7 @@ function Category({
   const [active, setActive] = useState<number|undefined>(initialCategory);
   useEffect(()=>setActive(initialCategory),[initialCategory]);
   const [brand,setBrand]=useState("");
+  const [sort,setSort]=useState<"default"|"priceAsc"|"priceDesc">("default");
   const [attributeFilters,setAttributeFilters]=useState<Record<string,string>>({});
   const children = active
     ? categories.filter((x) => Number(x.parentId) === active)
@@ -917,7 +918,7 @@ function Category({
       Object.entries(attributeFilters).every(([code,value])=>!value||structuredSpecs(p.structuredAttributes)
         .some((item)=>String(item.code)===code&&String(item.value)===value)) &&
       `${p.title||""} ${p.summary||""} ${p.brandName||""} ${p.model||""} ${p.spuCode||""} ${p.skuCode||""}`.toLowerCase().includes(keyword.toLowerCase()),
-  );
+  ).sort((a,b)=>sort==="priceAsc"?Number(customerPrice(a,loggedIn))-Number(customerPrice(b,loggedIn)):sort==="priceDesc"?Number(customerPrice(b,loggedIn))-Number(customerPrice(a,loggedIn)):0);
   const normalizedKeyword=keyword.trim().toLowerCase();
   const matchedSolutions=normalizedKeyword&&!active
     ? solutions.filter((row)=>`${row.title||""} ${row.subtitle||""} ${row.description||""}`.toLowerCase().includes(normalizedKeyword))
@@ -957,6 +958,7 @@ function Category({
           </div>
           <div className="m-attribute-filters">
             <label>品牌<select value={brand} onChange={(e)=>setBrand(e.target.value)}><option value="">全部品牌</option>{brands.map((value)=><option key={value}>{value}</option>)}</select></label>
+            <label>排序<select value={sort} onChange={(e)=>setSort(e.target.value as typeof sort)}><option value="default">综合排序</option><option value="priceAsc">价格从低到高</option><option value="priceDesc">价格从高到低</option></select></label>
             {filterDefinitions.map((definition)=>{
               const code=String(definition.code);
               const options=Array.from(new Set(categoryProducts.flatMap((p)=>structuredSpecs(p.structuredAttributes))
