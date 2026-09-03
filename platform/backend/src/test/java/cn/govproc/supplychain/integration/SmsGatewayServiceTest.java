@@ -11,7 +11,6 @@ import java.util.HexFormat;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
-import org.springframework.web.client.RestClient;
 
 class SmsGatewayServiceTest {
     @Test
@@ -26,7 +25,7 @@ class SmsGatewayServiceTest {
         });
         server.start();
         try {
-            var sms=new SmsGatewayService(RestClient.builder(),"http://127.0.0.1:"+server.getAddress().getPort(),"100078","10690","secret","unix");
+            var sms=new SmsGatewayService("http://127.0.0.1:"+server.getAddress().getPort(),"100078","10690","secret","unix");
             var response=sms.send("18698853145","接口测试");
             assertEquals(0,((Number)response.get("code")).intValue());
             var payload=received.get();String timestamp=String.valueOf(payload.get("timestamp"));
@@ -38,7 +37,7 @@ class SmsGatewayServiceTest {
     }
 
     @Test void rejectsInvalidMobileBeforeCallingGateway(){
-        var sms=new SmsGatewayService(RestClient.builder(),"http://127.0.0.1:1","100078","10690","secret","unix");
+        var sms=new SmsGatewayService("http://127.0.0.1:1","100078","10690","secret","unix");
         assertThrows(IllegalArgumentException.class,()->sms.send("123","测试"));
     }
 }

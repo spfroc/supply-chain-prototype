@@ -18,11 +18,10 @@ public class SmsGatewayService {
     private final RestClient client;
     private final String baseUrl,spId,accessCode,password,timestampFormat;
 
-    public SmsGatewayService(RestClient.Builder builder,
-      @Value("${app.sms.base-url:}") String baseUrl,@Value("${app.sms.sp-id:}") String spId,
+    public SmsGatewayService(@Value("${app.sms.base-url:}") String baseUrl,@Value("${app.sms.sp-id:}") String spId,
       @Value("${app.sms.access-code:}") String accessCode,@Value("${app.sms.password:}") String password,
       @Value("${app.sms.timestamp-format:unix}") String timestampFormat) {
-        this.client=builder.build();this.baseUrl=trimSlash(baseUrl);this.spId=spId.trim();
+        this.client=RestClient.create();this.baseUrl=trimSlash(baseUrl);this.spId=spId.trim();
         this.accessCode=accessCode.trim();this.password=password;this.timestampFormat=timestampFormat.trim();
     }
 
