@@ -155,6 +155,8 @@ function App() {
   const [current, setCurrent] = useState<Row>();
   const [authReady, setAuthReady] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
+  const [catalogLoading,setCatalogLoading]=useState(true);
+  const [catalogError,setCatalogError]=useState("");
   const pendingAction = useRef<undefined | (() => void)>(undefined);
   const [siteConfig, setSiteConfig] = useState<Row>({});
   const siteName = siteConfig["platform.name"] || "政企采购供应链";
@@ -170,6 +172,7 @@ function App() {
     }
   };
   const loadProducts = () => api<Row[]>("/api/public/catalog/products").then(setProducts);
+  const loadCatalog=async()=>{setCatalogLoading(true);setCatalogError("");try{const[nextProducts,nextCategories]=await Promise.all([api<Row[]>("/api/public/catalog/products"),api<Row[]>("/api/public/catalog/categories")]);setProducts(nextProducts);setCategories(nextCategories);}catch(error){setCatalogError((error as Error).message||"商品数据加载失败");}finally{setCatalogLoading(false);}};
   const loadAccount = async () => {
     const session = await api<Row>("/api/auth/session");
     if (!session.authenticated) throw new Error("请先登录");
@@ -200,8 +203,7 @@ function App() {
     void api<Row>("/api/public/portal")
       .then(setPortal)
       .catch(() => {});
-    void api<Row[]>("/api/public/catalog/categories").then(setCategories);
-    void loadProducts();
+    void loadCatalog();
     void loadAccount()
       .catch(() => {})
       .finally(() => setAuthReady(true));
@@ -361,6 +363,8 @@ function App() {
         </button>
       </header>
       <section className="mobile-content">
+        {catalogError&&<div className="m-catalog-feedback"><strong>商品数据加载失败</strong><small>{catalogError}</small><button onClick={()=>void loadCatalog()}>重新加载</button></div>}
+        {catalogLoading&&!products.length&&<div className="m-catalog-loading">正在加载商品数据…</div>}
         {tab === "home" && (
           <Home
             products={products}

@@ -256,6 +256,8 @@ function App() {
   const [current, setCurrent] = useState<Row>();
   const [authReady, setAuthReady] = useState(false);
   const [authOpen, setAuthOpen] = useState(false);
+  const [catalogLoading,setCatalogLoading]=useState(true);
+  const [catalogError,setCatalogError]=useState("");
   const pendingAction = useRef<undefined | (() => void)>(undefined);
   const [siteConfig, setSiteConfig] = useState<Row>({});
   const siteName = siteConfig["platform.name"] || "政企采购供应链";
@@ -286,6 +288,12 @@ function App() {
     setTimeout(() => setToast(""), 2200);
   };
   const loadProducts = () => api<Row[]>("/api/public/catalog/products").then(setProducts);
+  const loadCatalog=async()=>{
+    setCatalogLoading(true);setCatalogError("");
+    try{const [nextProducts,nextCategories]=await Promise.all([api<Row[]>("/api/public/catalog/products"),api<Row[]>("/api/public/catalog/categories")]);setProducts(nextProducts);setCategories(nextCategories);}
+    catch(error){setCatalogError((error as Error).message||"商品数据加载失败");}
+    finally{setCatalogLoading(false);}
+  };
   const loadCart = () =>
     api<Row[]>("/api/client/cart")
       .then(setCart)
@@ -325,8 +333,7 @@ function App() {
     void api<Row>("/api/public/portal")
       .then(setPortal)
       .catch(() => {});
-    void api<Row[]>("/api/public/catalog/categories").then(setCategories);
-    void loadProducts();
+    void loadCatalog();
     void loadAccount()
       .catch(() => {})
       .finally(() => setAuthReady(true));
@@ -592,6 +599,8 @@ function App() {
         })}
         <span>{hasAgreement ? "企业协议已生效" : current ? "企业采购账号" : "游客浏览"}</span>
       </nav>
+      {catalogError&&<div className="catalog-feedback error"><strong>商品数据加载失败</strong><span>{catalogError}</span><button onClick={()=>void loadCatalog()}>重新加载</button></div>}
+      {catalogLoading&&!products.length&&<div className="catalog-feedback loading">正在加载商品数据…</div>}
       {displayView === "home" && (
         <Home
           products={products}
@@ -1584,12 +1593,16 @@ function PlatformProducts({
 }) {
   const [data, setData] = useState<Row>({ products: [] });
   const [loading, setLoading] = useState(true);
-  useEffect(() => {
+  const [error,setError]=useState("");
+  const load=()=>{
     setLoading(true);
-    void api<Row>(`/api/public/portal/platforms/${platformId}/products`)
+    setError("");
+    return api<Row>(`/api/public/portal/platforms/${platformId}/products`)
       .then(setData)
+      .catch((reason)=>setError((reason as Error).message||"平台商品加载失败"))
       .finally(() => setLoading(false));
-  }, [platformId]);
+  };
+  useEffect(() => {void load();}, [platformId]);
   const openProduct = async (product: Row) => {
     setData((current) => ({
       ...current,
@@ -1621,9 +1634,11 @@ function PlatformProducts({
             </p>
           </div>
         </div>
-        {loading ? (
+        {error ? (
+          <div className="catalog-feedback error"><strong>平台商品加载失败</strong><span>{error}</span><button onClick={()=>void load()}>重新加载</button></div>
+        ) : loading ? (
           <div className="empty small">正在加载平台商品…</div>
-        ) : (
+        ) : (data.products || []).length ? (
           <div className="product-grid">
             {(data.products || []).map((product: Row, index: number) => (
               <ProductCard
@@ -1638,7 +1653,7 @@ function PlatformProducts({
               />
             ))}
           </div>
-        )}
+        ) : <div className="empty small">当前平台暂无可售商品</div>}
         {!loading && !(data.products || []).length && (
           <div className="empty">
             <h2>该平台暂未关联上架商品</h2>
