@@ -1499,15 +1499,14 @@ function Orders({cart}:{cart:()=>Promise<void>}) {
   const [rows, setRows] = useState<Row[]>([]);
   const [tab, setTab] = useState(-1);
   const [detail, setDetail] = useState<Row>();
-  useEffect(() => {
-    void api<Row[]>("/api/client/orders").then(setRows);
-  }, []);
+  const [loading,setLoading]=useState(true);const[error,setError]=useState("");
+  const load=async()=>{setLoading(true);try{setRows(await api<Row[]>("/api/client/orders"));setError("");}catch(e){setError((e as Error).message);}finally{setLoading(false);}};
+  useEffect(() => { void load(); }, []);
   const list =
     tab < 0 ? rows : rows.filter((r) => Number(r.orderStatus) === tab);
-  const show = async (r: Row) =>
-    setDetail(await api<Row>(`/api/client/orders/${r.id}`));
+  const show = async (r: Row) =>{try{setDetail(await api<Row>(`/api/client/orders/${r.id}`));}catch(e){Toast.show((e as Error).message);}};
   const repurchase=async(r:Row)=>{try{await api(`/api/client/purchase-tools/orders/${r.id}/repurchase`,{method:"POST"});await cart();}catch(e){Toast.show((e as Error).message);}};
-  const confirmReceipt=async(delivery:Row)=>{if(!detail||!window.confirm("确认已经收到该配送单商品？"))return;await api(`/api/client/service/orders/${detail.order.id}/deliveries/${encodeURIComponent(delivery.subOrderNo)}/confirm-receipt`,{method:"POST"});setDetail(await api<Row>(`/api/client/orders/${detail.order.id}`));setRows(await api<Row[]>("/api/client/orders"));};
+  const confirmReceipt=async(delivery:Row)=>{if(!detail||!window.confirm("确认已经收到该配送单商品？"))return;try{await api(`/api/client/service/orders/${detail.order.id}/deliveries/${encodeURIComponent(delivery.subOrderNo)}/confirm-receipt`,{method:"POST"});setDetail(await api<Row>(`/api/client/orders/${detail.order.id}`));await load();}catch(e){Toast.show((e as Error).message);}};
   if (detail)
     return (
       <div className="subpage h5-manage">
@@ -1579,7 +1578,7 @@ function Orders({cart}:{cart:()=>Promise<void>}) {
           </button>
         ))}
       </nav>
-      {list.map((r) => (
+      <H5LoadState loading={loading} error={error} empty={!list.length} emptyText={tab<0?"暂无订单":"该状态暂无订单"} retry={()=>void load()}>{list.map((r) => (
         <article key={r.id}>
           <header>
             <span>{dateTime(r.createdAt)}</span>
@@ -1608,7 +1607,7 @@ function Orders({cart}:{cart:()=>Promise<void>}) {
             <button onClick={() => void repurchase(r)}>再次购买</button>
           </footer>
         </article>
-      ))}
+      ))}</H5LoadState>
     </div>
   );
 }
@@ -1722,7 +1721,16 @@ function Mine({
 }
 function H5Frequent({back}:{back:()=>void}){const[rows,setRows]=useState<Row[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState("");const load=async()=>{setLoading(true);try{setRows(await api<Row[]>("/api/client/purchase-tools/frequent-items"));setError("");}catch(e){setError((e as Error).message);}finally{setLoading(false);}};useEffect(()=>{void load();},[]);const remove=async(id:number)=>{try{await api(`/api/client/purchase-tools/frequent-items/${id}`,{method:"DELETE"});await load();}catch(e){Toast.show((e as Error).message);}};const addAll=async()=>{try{await api("/api/client/purchase-tools/frequent-items/add-to-cart",{method:"POST",body:JSON.stringify({skuIds:[]})});Toast.show("已加入购物车");}catch(e){Toast.show((e as Error).message);}};return <div className="subpage h5-frequent"><header><button onClick={back}>‹</button><h1>常购清单</h1><button disabled={loading||!rows.length} onClick={()=>void addAll()}>全部加购</button></header><H5LoadState loading={loading} error={error} empty={!rows.length} emptyText="暂无常购商品" retry={()=>void load()}>{rows.map(r=><article key={r.skuId}><img src={r.image}/><div><strong>{r.title}</strong><small>{r.skuCode}</small><span>默认 {r.defaultQuantity} 件 · 库存 {r.availableStock}</span></div><button onClick={()=>void remove(r.skuId)}>移除</button></article>)}</H5LoadState></div>}
 
-function H5PurchaseImport({back}:{back:()=>void}){const[tasks,setTasks]=useState<Row[]>([]),[detail,setDetail]=useState<Row>(),[busy,setBusy]=useState(false);useEffect(()=>{void api<Row[]>("/api/client/purchase-tools/imports").then(setTasks);},[]);const open=async(id:number)=>setDetail(await api<Row>(`/api/client/purchase-tools/imports/${id}`));const quantity=async(row:Row,value:number)=>{if(!detail||value<1)return;setBusy(true);try{setDetail(await api<Row>(`/api/client/purchase-tools/imports/${detail.task.id}/items/${row.id}`,{method:"PUT",body:JSON.stringify({quantity:value})}));}finally{setBusy(false);}};const add=async()=>{if(!detail)return;setBusy(true);try{await api(`/api/client/purchase-tools/imports/${detail.task.id}/add-to-cart`,{method:"POST"});Toast.show("有效商品已加入购物车");}finally{setBusy(false);}};if(detail)return <div className="subpage h5-import"><header><button onClick={()=>setDetail(undefined)}>‹</button><h1>导入任务</h1><button disabled={busy||!Number(detail.task.validRows)} onClick={()=>void add()}>加入购物车</button></header><section className="h5-import-summary"><b>{detail.task.fileName}</b><span>共 {detail.task.totalRows} 行 · 有效 {detail.task.validRows} · 异常 {detail.task.invalidRows}</span></section>{detail.items.map((row:Row)=><article key={row.id}>{row.image?<img src={row.image}/>:<i>商</i>}<div><strong>{row.title||"未识别商品"}</strong><small>SKU：{row.skuCode||"—"}</small>{row.addressLabel&&<small>配送：{row.addressLabel}</small>}<em className={row.status==="VALID"?"ok":"bad"}>{row.status==="VALID"?"校验通过":row.errorMessage}</em></div>{row.skuId&&<label><input type="number" min="1" max="9999" defaultValue={row.quantity} disabled={busy} onBlur={e=>void quantity(row,Number(e.target.value))}/><small>件</small></label>}</article>)}</div>;return <div className="subpage h5-import"><header><button onClick={back}>‹</button><h1>批量采购</h1><span /></header><p className="h5-import-tip">Excel 文件请在 Web 端上传，移动端可查看结果、修改数量并加入购物车。</p>{tasks.length?tasks.map(row=><button className="h5-import-task" key={row.id} onClick={()=>void open(row.id)}><span><b>{row.fileName}</b><small>{row.createdAt}</small></span><em>有效 {row.validRows}<br/>异常 {row.invalidRows}</em><i>›</i></button>):<p className="h5-empty">暂无导入任务</p>}</div>}
+function H5PurchaseImport({back}:{back:()=>void}){
+  const[tasks,setTasks]=useState<Row[]>([]),[detail,setDetail]=useState<Row>(),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[error,setError]=useState("");
+  const load=async()=>{setLoading(true);try{setTasks(await api<Row[]>("/api/client/purchase-tools/imports"));setError("");}catch(e){setError((e as Error).message);}finally{setLoading(false);}};
+  useEffect(()=>{void load();},[]);
+  const open=async(id:number)=>{setLoading(true);try{setDetail(await api<Row>(`/api/client/purchase-tools/imports/${id}`));setError("");}catch(e){setError((e as Error).message);}finally{setLoading(false);}};
+  const quantity=async(row:Row,value:number)=>{if(!detail||value<1)return;setBusy(true);try{setDetail(await api<Row>(`/api/client/purchase-tools/imports/${detail.task.id}/items/${row.id}`,{method:"PUT",body:JSON.stringify({quantity:value})}));}catch(e){Toast.show((e as Error).message);}finally{setBusy(false);}};
+  const add=async()=>{if(!detail)return;setBusy(true);try{await api(`/api/client/purchase-tools/imports/${detail.task.id}/add-to-cart`,{method:"POST"});Toast.show("有效商品已加入购物车");}catch(e){Toast.show((e as Error).message);}finally{setBusy(false);}};
+  if(detail)return <div className="subpage h5-import"><header><button onClick={()=>{setDetail(undefined);setError("");}}>‹</button><h1>导入任务</h1><button disabled={busy||!Number(detail.task.validRows)} onClick={()=>void add()}>加入购物车</button></header><H5LoadState loading={loading} error={error} empty={!detail.items?.length} emptyText="该任务暂无明细" retry={()=>void open(detail.task.id)}><section className="h5-import-summary"><b>{detail.task.fileName}</b><span>共 {detail.task.totalRows} 行 · 有效 {detail.task.validRows} · 异常 {detail.task.invalidRows}</span></section>{detail.items.map((row:Row)=><article key={row.id}>{row.image?<img src={row.image}/>:<i>商</i>}<div><strong>{row.title||"未识别商品"}</strong><small>SKU：{row.skuCode||"—"}</small>{row.addressLabel&&<small>配送：{row.addressLabel}</small>}<em className={row.status==="VALID"?"ok":"bad"}>{row.status==="VALID"?"校验通过":row.errorMessage}</em></div>{row.skuId&&<label><input type="number" min="1" max="9999" defaultValue={row.quantity} disabled={busy} onBlur={e=>void quantity(row,Number(e.target.value))}/><small>件</small></label>}</article>)}</H5LoadState></div>;
+  return <div className="subpage h5-import"><header><button onClick={back}>‹</button><h1>批量采购</h1><span /></header><p className="h5-import-tip">Excel 文件请在 Web 端上传，移动端可查看结果、修改数量并加入购物车。</p><H5LoadState loading={loading} error={error} empty={!tasks.length} emptyText="暂无导入任务" retry={()=>void load()}>{tasks.map(row=><button className="h5-import-task" key={row.id} onClick={()=>void open(row.id)}><span><b>{row.fileName}</b><small>{row.createdAt}</small></span><em>有效 {row.validRows}<br/>异常 {row.invalidRows}</em><i>›</i></button>)}</H5LoadState></div>;
+}
 
 function H5Notifications({back}:{back:()=>void}){const[rows,setRows]=useState<Row[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState("");const load=async()=>{setLoading(true);try{setRows(await api<Row[]>("/api/client/notifications"));setError("");}catch(e){setError((e as Error).message);}finally{setLoading(false);}};useEffect(()=>{void load();},[]);const read=async(row:Row)=>{try{if(!Number(row.isRead)){await api(`/api/client/notifications/${row.id}/read`,{method:"PUT"});await load();}}catch(e){Toast.show((e as Error).message);}};const readAll=async()=>{try{await api("/api/client/notifications/read-all",{method:"PUT"});await load();}catch(e){Toast.show((e as Error).message);}};return <div className="subpage h5-notifications"><header><button onClick={back}>‹</button><h1>消息中心</h1><button disabled={loading||!rows.length} onClick={()=>void readAll()}>全部已读</button></header><H5LoadState loading={loading} error={error} empty={!rows.length} emptyText="暂无消息" retry={()=>void load()}>{rows.map(row=><article className={Number(row.isRead)?"read":""} key={row.id} onClick={()=>void read(row)}><i>{({ORDER:"订",AFTER_SALE:"售",STOCK:"货",AGREEMENT:"协",SYSTEM:"讯"} as Row)[row.messageType]||"讯"}</i><div><strong>{row.title}</strong><p>{row.content}</p><small>{row.createdAt}</small></div>{!Number(row.isRead)&&<em>未读</em>}</article>)}</H5LoadState></div>}
 
@@ -1742,16 +1750,23 @@ function H5Finance({ back }: { back: () => void }) {
   const [statements, setStatements] = useState<Row[]>([]);
   const [applications, setApplications] = useState<Row[]>([]);
   const [tab, setTab] = useState<"payables" | "statements" | "invoices">("payables");
-  useEffect(() => { void Promise.all([
-    api<Row>("/api/client/finance/summary"), api<Row[]>("/api/client/finance/payables"),
-    api<Row[]>("/api/client/finance/statements"), api<Row[]>("/api/client/finance/invoice-applications"),
-  ]).then(([s,p,st,i])=>{setSummary(s);setPayables(p);setStatements(st);setApplications(i);}).catch(e=>Toast.show((e as Error).message)); }, []);
+  const [loading,setLoading]=useState(true);const[error,setError]=useState("");
+  const load=async()=>{setLoading(true);try{const[s,p,st,i]=await Promise.all([
+    api<Row>("/api/client/finance/summary"),api<Row[]>("/api/client/finance/payables"),
+    api<Row[]>("/api/client/finance/statements"),api<Row[]>("/api/client/finance/invoice-applications"),
+  ]);setSummary(s);setPayables(p);setStatements(st);setApplications(i);setError("");}catch(e){setError((e as Error).message);}finally{setLoading(false);}};
+  useEffect(() => { void load(); }, []);
   return <div className="subpage h5-finance"><header><button onClick={back}>‹</button><h1>财务中心</h1><span /></header>
+    <H5LoadState loading={loading} error={error} empty={false} emptyText="" retry={()=>void load()}>
     <section className="h5-finance-summary"><article><span>未结应付</span><strong>{money(summary.outstandingAmount)}</strong><small>{summary.payableCount||0} 笔</small></article><article><span>已逾期</span><strong>{money(summary.overdueAmount)}</strong><small>{summary.overdueCount||0} 笔</small></article></section>
     <nav>{[["payables","应付"],["statements","对账单"],["invoices","开票申请"]].map(x=><button className={tab===x[0]?"active":""} key={x[0]} onClick={()=>setTab(x[0] as typeof tab)}>{x[1]}</button>)}</nav>
     <main>{tab==="payables"&&payables.map(row=><article key={row.id}><div><strong>{row.orderNo}</strong><span>{row.buyerName} · {row.createdAt}</span></div><b>{money(row.outstandingAmount)}</b><small>{Number(row.paymentStatus)===2?"已付款":Number(row.overdue)?"已逾期":"待付款"}</small></article>)}
+      {tab==="payables"&&!payables.length&&<p className="h5-empty">暂无应付订单</p>}
       {tab==="statements"&&statements.map(row=><article key={row.id}><div><strong>{row.statementNo}</strong><span>{row.periodStart} 至 {row.periodEnd} · {row.orderCount} 笔</span></div><b>{money(row.payableAmount)}</b><small>{["草稿","待确认","已确认","已结清","已作废"][row.status]}</small></article>)}
-      {tab==="invoices"&&applications.map(row=><article key={row.id}><div><strong>{row.applicationNo}</strong><span>{row.invoiceType} · {row.orderCount} 笔</span></div><b>{money(row.amount)}</b><small>{["待处理","开票中","已开具","已驳回"][row.status]}</small>{row.invoiceFileUrl&&<a href={row.invoiceFileUrl} target="_blank" rel="noreferrer">下载</a>}</article>)}</main>
+      {tab==="statements"&&!statements.length&&<p className="h5-empty">暂无对账单</p>}
+      {tab==="invoices"&&applications.map(row=><article key={row.id}><div><strong>{row.applicationNo}</strong><span>{row.invoiceType} · {row.orderCount} 笔</span></div><b>{money(row.amount)}</b><small>{["待处理","开票中","已开具","已驳回"][row.status]}</small>{row.invoiceFileUrl&&<a href={row.invoiceFileUrl} target="_blank" rel="noreferrer">下载</a>}</article>)}
+      {tab==="invoices"&&!applications.length&&<p className="h5-empty">暂无开票申请</p>}</main>
+    </H5LoadState>
   </div>;
 }
 function H5Manage({
@@ -1765,13 +1780,15 @@ function H5Manage({
   const [editing, setEditing] = useState<Row>();
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<Row>({});
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState("");
   const title =
     view === "addresses"
       ? "地址管理"
       : view === "invoices"
         ? "发票管理"
         : "企业成员";
-  const load = () => api<Row[]>(`/api/client/${view}`).then(setRows);
+  const load = async()=>{setLoading(true);try{setRows(await api<Row[]>(`/api/client/${view}`));setError("");}catch(e){setError((e as Error).message);}finally{setLoading(false);}};
   useEffect(() => {
     void load();
   }, [view]);
@@ -1845,7 +1862,7 @@ function H5Manage({
         )}
       </header>
       {view === "members" && <div className="h5-manage-tip">H5 端仅查看成员与授权结果；部门、角色和复杂权限请在 Web 端“组织与权限”中配置。</div>}
-      {rows.map((r) => (
+      <H5LoadState loading={loading} error={error} empty={!rows.length} emptyText={`暂无${title.replace("管理","")}记录`} retry={()=>void load()}>{rows.map((r) => (
         <article className="h5-manage-row" key={r.id}>
           <div>
             <strong>
@@ -1870,7 +1887,7 @@ function H5Manage({
             </p>
           )}
         </article>
-      ))}
+      ))}</H5LoadState>
       {open && (
         <div className="h5-form">
           <header>
