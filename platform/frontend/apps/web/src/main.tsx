@@ -608,6 +608,7 @@ function App() {
         <Products
           products={products}
           categories={categories}
+          solutions={portal.solution || []}
           initialCategory={categoryId}
           initialKeyword={searchKeyword}
           routeChanged={(nextCategory,keyword) => {
@@ -624,6 +625,7 @@ function App() {
           hasAgreement={hasAgreement}
           loggedIn={Boolean(current)}
           forceAgreement={displayView === "agreement-products"}
+          openSolution={(id) => applyNavigation("solution-detail", undefined, undefined, id)}
         />
       )}
       {(["solutions", "platforms", "content"] as View[]).includes(displayView) && (
@@ -1147,6 +1149,7 @@ function Home({
 function Products({
   products,
   categories,
+  solutions,
   initialCategory,
   initialKeyword,
   routeChanged,
@@ -1155,9 +1158,11 @@ function Products({
   hasAgreement,
   loggedIn,
   forceAgreement = false,
+  openSolution,
 }: {
   products: Row[];
   categories: Row[];
+  solutions: Row[];
   initialCategory?: number;
   initialKeyword?: string;
   routeChanged: (categoryId: number | undefined, keyword: string) => void;
@@ -1166,6 +1171,7 @@ function Products({
   hasAgreement: boolean;
   loggedIn: boolean;
   forceAgreement?: boolean;
+  openSolution: (id: number) => void;
 }) {
   const [keyword, setKeyword] = useState(initialKeyword || "");
   const [active, setActive] = useState<number | undefined>(initialCategory);
@@ -1211,7 +1217,7 @@ function Products({
         (!brand || String(p.brandName||"")===brand) &&
         (!active || Object.entries(attributeFilters).every(([code,values])=>!values.length||structuredSpecs(p.structuredAttributes)
           .some((item)=>String(item.code)===code&&values.includes(String(item.value))))) &&
-        (`${p.title || ""} ${p.summary || ""} ${p.brandName || ""} ${p.skuCode || ""}`
+        (`${p.title || ""} ${p.summary || ""} ${p.brandName || ""} ${p.model || ""} ${p.spuCode || ""} ${p.skuCode || ""}`
           .toLowerCase().includes(keyword.toLowerCase())),
     )
     .sort((a, b) =>
@@ -1219,6 +1225,10 @@ function Products({
         ? Number(productPrice(a)) - Number(productPrice(b))
         : 0,
     );
+  const normalizedKeyword=keyword.trim().toLowerCase();
+  const matchedSolutions=normalizedKeyword&&!active&&!forceAgreement
+    ? solutions.filter((row)=>`${row.title||""} ${row.subtitle||""} ${row.description||""}`.toLowerCase().includes(normalizedKeyword))
+    : [];
   const roots = categories.filter((x) => Number(x.level) === 1);
   const totalPages=Math.max(1,Math.ceil(filtered.length/pageSize));
   const paged=filtered.slice((page-1)*pageSize,page*pageSize);
@@ -1349,6 +1359,12 @@ function Products({
             </button>
             <span>{hasAgreement ? "协议价优先展示" : "商品原价展示"}</span>
           </div>
+          {matchedSolutions.length>0&&<section className="search-solution-results">
+            <header><div><b>场景方案</b><small>找到 {matchedSolutions.length} 个相关方案</small></div></header>
+            <div>{matchedSolutions.map((row)=><button key={row.id} onClick={()=>openSolution(Number(row.id))}>
+              {row.imageUrl?<img src={row.imageUrl} alt=""/>:<i>案</i>}<span><strong>{row.title}</strong><small>{row.subtitle||row.description||"企业一站式采购方案"}</small></span><em>查看方案 ›</em>
+            </button>)}</div>
+          </section>}
           <div className="product-grid">
             {paged.map((p, i) => (
               <ProductCard

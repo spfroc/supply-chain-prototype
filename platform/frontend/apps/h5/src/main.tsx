@@ -374,8 +374,10 @@ function App() {
           <Category
             products={products}
             categories={categories}
+            solutions={portal.solution || []}
             keyword={categoryKeyword}
             open={openProduct}
+            openSolution={(id)=>{setSolutionId(id);history.pushState({},"",`${location.pathname}?solutionId=${id}`);}}
             hasAgreement={hasAgreement}
             loggedIn={Boolean(current)}
           />
@@ -700,7 +702,7 @@ function Home({
       <label className="m-search">
         ⌕<input value={keyword} onChange={(e)=>setKeyword(e.target.value)}
           onKeyDown={(e)=>{if(e.key==="Enter") category(keyword.trim());}}
-          placeholder="搜索商品、品牌、型号…" />
+          placeholder="搜索商品、品牌、型号或方案" />
         <button onClick={()=>category(keyword.trim())}>搜索</button>
       </label>
       <section className="m-hero">
@@ -855,15 +857,19 @@ function Product({
 function Category({
   products,
   categories,
+  solutions,
   keyword,
   open,
+  openSolution,
   hasAgreement,
   loggedIn,
 }: {
   products: Row[];
   categories: Row[];
+  solutions: Row[];
   keyword: string;
   open: (r: Row) => void;
+  openSolution: (id: number) => void;
   hasAgreement: boolean;
   loggedIn: boolean;
 }) {
@@ -893,8 +899,12 @@ function Category({
     (p) => (!active || ids.includes(Number(p.categoryId))) && (!brand||String(p.brandName||"")===brand) &&
       Object.entries(attributeFilters).every(([code,value])=>!value||structuredSpecs(p.structuredAttributes)
         .some((item)=>String(item.code)===code&&String(item.value)===value)) &&
-      `${p.title||""} ${p.summary||""} ${p.brandName||""} ${p.skuCode||""}`.toLowerCase().includes(keyword.toLowerCase()),
+      `${p.title||""} ${p.summary||""} ${p.brandName||""} ${p.model||""} ${p.spuCode||""} ${p.skuCode||""}`.toLowerCase().includes(keyword.toLowerCase()),
   );
+  const normalizedKeyword=keyword.trim().toLowerCase();
+  const matchedSolutions=normalizedKeyword&&!active
+    ? solutions.filter((row)=>`${row.title||""} ${row.subtitle||""} ${row.description||""}`.toLowerCase().includes(normalizedKeyword))
+    : [];
   return (
     <div className="subpage">
       <header>
@@ -949,6 +959,9 @@ function Category({
             ))}
           </div>
           <h2>{hasAgreement ? "协议商品" : "全部商品"}</h2>
+          {matchedSolutions.length>0&&<div className="m-search-solutions"><h2>相关场景方案</h2>{matchedSolutions.map(row=><button key={row.id} onClick={()=>openSolution(Number(row.id))}>
+            {row.imageUrl?<img src={row.mobileImageUrl||row.imageUrl} alt=""/>:<i>案</i>}<span><strong>{row.title}</strong><small>{row.subtitle||"一站式采购方案"}</small></span><em>›</em>
+          </button>)}</div>}
           {visible.map((p, i) => (
             <button
               className="category-product"

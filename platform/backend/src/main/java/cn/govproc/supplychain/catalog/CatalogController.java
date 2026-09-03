@@ -36,7 +36,7 @@ public class CatalogController {
     List<ProductSummary> products() {
         Long enterpriseId=auth.optionalCurrent().map(ClientAuthService.CurrentUser::enterpriseId).orElse(null);
         return jdbc.sql("""
-            SELECT p.id AS product_id,s.id AS sku_id, p.spu_code, s.sku_code, p.title, COALESCE(NULLIF(s.sku_image,''),p.main_image) AS main_image,p.category_id,p.self_operated,
+            SELECT p.id AS product_id,s.id AS sku_id, p.spu_code, s.sku_code, p.title,p.model, COALESCE(NULLIF(s.sku_image,''),p.main_image) AS main_image,p.category_id,p.self_operated,
                    b.id AS brand_id,b.name AS brand_name,
                    JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')) AS gallery,
                    JSON_UNQUOTE(JSON_EXTRACT(p.attributes_json,'$.content')) AS attributes,
@@ -90,7 +90,7 @@ public class CatalogController {
             ORDER BY p.id DESC
             """).param("enterpriseId", enterpriseId).query((rs, n) -> new ProductSummary(
                 rs.getLong("product_id"),rs.getLong("sku_id"), rs.getString("spu_code"), rs.getString("sku_code"),
-                rs.getString("title"), rs.getString("main_image"),rs.getString("gallery"),
+                rs.getString("title"),rs.getString("model"), rs.getString("main_image"),rs.getString("gallery"),
                 rs.getString("attributes"),rs.getString("summary"),richTextSanitizer.clean(rs.getString("detail_html")),
                 rs.getString("delivery_description"),richTextSanitizer.clean(rs.getString("after_sales_html")),rs.getLong("category_id"),rs.getInt("self_operated"),rs.getLong("brand_id"),rs.getString("brand_name"),
                 rs.getBigDecimal("market_price"), rs.getBigDecimal("member_price"),
@@ -100,7 +100,7 @@ public class CatalogController {
     }
 
     public record ProductSummary(
-        long id,long skuId, String spuCode, String skuCode, String title, String mainImage,String gallery,
+        long id,long skuId, String spuCode, String skuCode, String title,String model, String mainImage,String gallery,
         String attributes,String summary,String detailHtml,String deliveryDescription,String afterSalesHtml,long categoryId,int selfOperated,long brandId,String brandName,
         BigDecimal marketPrice, BigDecimal memberPrice, BigDecimal agreementPrice, int availableStock,long soldCount,long clickCount,String structuredAttributes,String platformNames,String platformPrices,String variants,
         String badgeType,String customBadge,String badgePlatformPrefix,String services
