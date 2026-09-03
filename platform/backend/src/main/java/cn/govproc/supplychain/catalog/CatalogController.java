@@ -80,9 +80,9 @@ public class CatalogController {
             LEFT JOIN agreement_item ai ON ai.agreement_id = a.id AND ai.sku_id = s.id
                  AND ai.status = 1 AND ai.deleted_at IS NULL
             LEFT JOIN (
-                SELECT soldsku.spu_id,SUM(oi.quantity) AS sold_count
+                SELECT soldsku.spu_id,SUM(oi.quantity-oi.refunded_quantity) AS sold_count
                 FROM order_item oi JOIN product_sku soldsku ON soldsku.id=oi.sku_id JOIN order_main o ON o.id=oi.order_main_id
-                WHERE o.payment_status=2 AND o.order_status<>4 AND o.refund_status=0
+                WHERE o.payment_status=2 AND o.order_status<>4 AND o.refund_status<>1 AND oi.quantity>oi.refunded_quantity
                 GROUP BY soldsku.spu_id
             ) sales ON sales.spu_id=p.id
             WHERE p.status = 1 AND s.status = 1 AND s.deleted_at IS NULL

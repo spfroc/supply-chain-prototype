@@ -51,6 +51,7 @@ public class ServiceController {
             DATE_FORMAT(o.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
           FROM order_item oi JOIN order_main o ON o.id=oi.order_main_id JOIN product_sku s ON s.id=oi.sku_id JOIN product_spu p ON p.id=s.spu_id
           WHERE o.enterprise_id=:enterpriseId AND (:enterpriseWide=1 OR o.user_id=:userId) AND oi.fulfillment_status=3
+            AND oi.refunded_quantity<oi.quantity
             AND NOT EXISTS(SELECT 1 FROM after_sale_request a WHERE a.order_item_id=oi.id AND a.status NOT IN (4,5,6))
           ORDER BY oi.id DESC
           """).param("enterpriseId",enterpriseId()).param("enterpriseWide",enterpriseWide()?1:0).param("userId",userId()).query().listOfRows();
@@ -83,6 +84,8 @@ public class ServiceController {
         if(request.requestedQuantity()>ordered)throw new IllegalArgumentException("售后数量不能超过购买数量");
         int active=jdbc.sql("SELECT COUNT(*) FROM after_sale_request WHERE order_item_id=:id AND status NOT IN (4,5,6)").param("id",request.orderItemId()).query(Integer.class).single();
         if(active>0)throw new IllegalArgumentException("该商品已有处理中售后申请");
+        int processed=jdbc.sql("SELECT refunded_quantity FROM order_item WHERE id=:id").param("id",request.orderItemId()).query(Integer.class).single();
+        if(request.requestedQuantity()>ordered-processed)throw new IllegalArgumentException("售后数量超过剩余可申请数量");
         BigDecimal max=((BigDecimal)item.get("totalPrice")).multiply(BigDecimal.valueOf(request.requestedQuantity())).divide(BigDecimal.valueOf(ordered),2,java.math.RoundingMode.HALF_UP);
         if(request.requestedAmount()!=null&&request.requestedAmount().compareTo(max)>0)throw new IllegalArgumentException("申请金额不能超过对应商品金额");
         String no="SH"+LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"))+ThreadLocalRandom.current().nextInt(1000,10000);

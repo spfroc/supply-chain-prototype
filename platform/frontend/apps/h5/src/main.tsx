@@ -1515,9 +1515,9 @@ function Orders({cart}:{cart:()=>Promise<void>}) {
           <p>
             订单状态 <em>{statuses[detail.order.orderStatus]}</em>
           </p>
-          {Number(detail.order.refundStatus || 0) === 1 && (
+          {Number(detail.order.refundStatus || 0) > 0 && (
             <p>
-              退款状态 <em>已退款 {money(detail.order.refundAmount)}</em>
+              退款状态 <em>{Number(detail.order.refundStatus)===1?"已全额退款":"部分退款"} {money(detail.order.refundAmount)}</em>
               <small>{detail.order.refundReason} · {dateTime(detail.order.refundedAt)}</small>
             </p>
           )}

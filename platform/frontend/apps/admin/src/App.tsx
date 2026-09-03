@@ -2034,7 +2034,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
             </div>)}</div>
             <div className="order-amount-cell"><strong>¥{Number(r.payableAmount).toFixed(2)}</strong><span>商品：¥{Number(r.itemAmount||0).toFixed(2)}</span><span>运费：¥{Number(r.freightAmount||0).toFixed(2)}</span><small>{mergeOrderListItems(r.items).length} 种 / {r.itemCount} 件</small></div>
             <div className="order-buyer-cell"><strong>{r.enterpriseName}</strong><span>{r.buyerName||"—"}{r.buyerUsername?`（${r.buyerUsername}）`:""}</span><small>{r.buyerPhone||"未填写联系电话"}</small></div>
-            <div className="order-status-cell"><Tag color={Number(r.orderStatus)===3?"green":Number(r.orderStatus)===4?"default":"blue"}>{["待付款", "待发货", "运输中", "已完成", "已取消", "部分发货"][Number(r.orderStatus)]}</Tag><Tag color={Number(r.paymentStatus)===2?"green":"orange"}>{["待付款", "待确认", "已确认"][Number(r.paymentStatus)]}</Tag>{Number(r.refundStatus||0)===1&&<Tag color="red">已退款</Tag>}</div>
+            <div className="order-status-cell"><Tag color={Number(r.orderStatus)===3?"green":Number(r.orderStatus)===4?"default":"blue"}>{["待付款", "待发货", "运输中", "已完成", "已取消", "部分发货"][Number(r.orderStatus)]}</Tag><Tag color={Number(r.paymentStatus)===2?"green":"orange"}>{["待付款", "待确认", "已确认"][Number(r.paymentStatus)]}</Tag>{Number(r.refundStatus||0)>0&&<Tag color="red">{Number(r.refundStatus)===1?"已全额退款":"部分退款"}</Tag>}</div>
             <div className="order-card-actions"><Button type="link" onClick={()=>void orderDetail(r)}>订单详情</Button>{[0,2].includes(Number(r.orderStatus))&&<Button type={Number(r.orderStatus)===0?"primary":"link"} onClick={()=>void advanceOrder(r)}>{Number(r.orderStatus)===0?"确认到账":"确认完成"}</Button>}{Number(r.orderStatus)===3&&Number(r.refundStatus||0)===0&&<Button type="link" danger onClick={()=>showRefund(r)}>退款</Button>}</div>
           </div>
         </article>,
@@ -2734,9 +2734,9 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
                   key: "refund",
                   label: "退款状态",
                   children:
-                    Number(detail.order.refundStatus || 0) === 1 ? (
+                    Number(detail.order.refundStatus || 0) > 0 ? (
                       <Space direction="vertical" size={2}>
-                        <Tag color="red">已退款</Tag>
+                        <Tag color="red">{Number(detail.order.refundStatus)===1?"已全额退款":"部分退款"}</Tag>
                         <span>退款金额：¥{Number(detail.order.refundAmount).toFixed(2)}</span>
                         <span>退款原因：{detail.order.refundReason}</span>
                         <small>{dateTime(detail.order.refundedAt)}</small>

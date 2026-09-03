@@ -2484,10 +2484,10 @@ function Orders({ go }: { go: (v: View) => void }) {
                   订单状态
                   <strong>{orderStatus[detail.order.orderStatus]}</strong>
                 </span>
-                {Number(detail.order.refundStatus || 0) === 1 && (
+                {Number(detail.order.refundStatus || 0) > 0 && (
                   <span>
                     退款状态
-                    <strong className="refund-status">已退款 {money(detail.order.refundAmount)}</strong>
+                    <strong className="refund-status">{Number(detail.order.refundStatus)===1?"已全额退款":"部分退款"} {money(detail.order.refundAmount)}</strong>
                     <small>{detail.order.refundReason} · {dateTime(detail.order.refundedAt)}</small>
                   </span>
                 )}

@@ -91,10 +91,10 @@ public class AdminBusinessController {
           FROM product_spu p JOIN product_sku s ON s.spu_id=p.id AND s.deleted_at IS NULL
             AND s.id=(SELECT MIN(s0.id) FROM product_sku s0 WHERE s0.spu_id=p.id AND s0.deleted_at IS NULL)
           LEFT JOIN (
-            SELECT sku.spu_id,SUM(oi.quantity) AS soldCount,COUNT(DISTINCT oi.order_main_id) AS orderCount,
-              SUM(oi.total_price) AS salesAmount
+            SELECT sku.spu_id,SUM(oi.quantity-oi.refunded_quantity) AS soldCount,COUNT(DISTINCT oi.order_main_id) AS orderCount,
+              SUM(oi.total_price*(oi.quantity-oi.refunded_quantity)/oi.quantity) AS salesAmount
             FROM order_item oi JOIN product_sku sku ON sku.id=oi.sku_id JOIN order_main o ON o.id=oi.order_main_id
-            WHERE o.payment_status=2 AND o.order_status<>4 AND o.refund_status=0
+            WHERE o.payment_status=2 AND o.order_status<>4 AND o.refund_status<>1 AND oi.quantity>oi.refunded_quantity
             GROUP BY sku.spu_id
           ) sales ON sales.spu_id=p.id
           WHERE p.deleted_at IS NULL
@@ -854,7 +854,8 @@ public class AdminBusinessController {
         if(r.refundAmount().compareTo(BigDecimal.ZERO)<=0||r.refundAmount().compareTo(payable)>0)
             throw new IllegalArgumentException("退款金额必须大于0且不能超过订单实付金额");
         require(jdbc.sql("""
-          UPDATE order_main SET refund_status=1,refund_amount=:amount,refund_reason=:reason,refunded_at=NOW()
+          UPDATE order_main SET refund_status=CASE WHEN :amount>=payable_amount THEN 1 ELSE 2 END,
+            refund_amount=:amount,refund_reason=:reason,refunded_at=NOW()
           WHERE id=:id AND order_status=3 AND payment_status=2 AND refund_status=0
           """).params(Map.of("id",id,"amount",r.refundAmount(),"reason",r.refundReason())).update(),
           "订单退款状态已变化，请刷新后重试");

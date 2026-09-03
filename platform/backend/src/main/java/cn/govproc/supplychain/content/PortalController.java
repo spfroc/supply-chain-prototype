@@ -105,9 +105,9 @@ public class PortalController {
             JOIN product_sku s ON s.id=si.sku_id AND s.status=1 AND s.deleted_at IS NULL
             JOIN product_spu p ON p.id=s.spu_id AND p.status=1 AND p.deleted_at IS NULL
             LEFT JOIN (
-                SELECT oi.sku_id,SUM(oi.quantity) AS soldCount
+                SELECT oi.sku_id,SUM(oi.quantity-oi.refunded_quantity) AS soldCount
                 FROM order_item oi JOIN order_main o ON o.id=oi.order_main_id
-                WHERE o.payment_status=2 AND o.order_status<>4 AND o.refund_status=0
+                WHERE o.payment_status=2 AND o.order_status<>4 AND o.refund_status<>1 AND oi.quantity>oi.refunded_quantity
                 GROUP BY oi.sku_id
             ) sales ON sales.sku_id=s.id
             WHERE si.solution_id=:solutionId AND si.deleted_at IS NULL
@@ -143,9 +143,9 @@ public class PortalController {
               AND CURRENT_DATE BETWEEN a.effective_date AND a.expiry_date AND a.deleted_at IS NULL
             LEFT JOIN agreement_item ai ON ai.agreement_id=a.id AND ai.sku_id=s.id AND ai.status=1 AND ai.deleted_at IS NULL
             LEFT JOIN (
-                SELECT oi.sku_id,SUM(oi.quantity) AS soldCount
+                SELECT oi.sku_id,SUM(oi.quantity-oi.refunded_quantity) AS soldCount
                 FROM order_item oi JOIN order_main o ON o.id=oi.order_main_id
-                WHERE o.payment_status=2 AND o.order_status<>4 AND o.refund_status=0
+                WHERE o.payment_status=2 AND o.order_status<>4 AND o.refund_status<>1 AND oi.quantity>oi.refunded_quantity
                 GROUP BY oi.sku_id
             ) sales ON sales.sku_id=s.id
             WHERE pp.platform_id=:platformId AND pp.listing_status=1 AND pp.deleted_at IS NULL
