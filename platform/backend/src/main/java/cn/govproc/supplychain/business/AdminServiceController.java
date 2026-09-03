@@ -1,5 +1,7 @@
 package cn.govproc.supplychain.business;
 
+import cn.govproc.supplychain.common.PageSupport;
+
 import cn.govproc.supplychain.notification.NotificationService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -20,11 +22,9 @@ public class AdminServiceController {
     public AdminServiceController(JdbcClient jdbc,NotificationService notifications){this.jdbc=jdbc;this.notifications=notifications;}
 
     @GetMapping
-    List<Map<String,Object>> list(@RequestParam(required=false) Integer status,@RequestParam(required=false) String keyword){
-        String where=" WHERE 1=1"; var params=new java.util.HashMap<String,Object>();
-        if(status!=null){where+=" AND a.status=:status";params.put("status",status);}
-        if(keyword!=null&&!keyword.isBlank()){where+=" AND (a.service_no LIKE :keyword OR o.order_no LIKE :keyword OR e.name LIKE :keyword OR p.title LIKE :keyword OR u.real_name LIKE :keyword)";params.put("keyword","%"+keyword.trim()+"%");}
-        return jdbc.sql("""
+    Object list(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                @RequestParam(required=false) Integer status,@RequestParam(defaultValue="") String keyword){
+        String base="""
           SELECT a.id,a.service_no AS serviceNo,a.service_type AS serviceType,a.reason,a.requested_quantity AS requestedQuantity,
             a.requested_amount AS requestedAmount,a.status,a.handling_result AS handlingResult,a.contact_name AS contactName,
             a.contact_phone AS contactPhone,o.order_no AS orderNo,e.name AS enterpriseName,u.real_name AS applicantName,
@@ -33,7 +33,10 @@ public class AdminServiceController {
           FROM after_sale_request a JOIN order_main o ON o.id=a.order_main_id JOIN enterprise e ON e.id=a.enterprise_id
           JOIN enterprise_user u ON u.id=a.applicant_user_id JOIN order_item oi ON oi.id=a.order_item_id
           JOIN product_sku s ON s.id=oi.sku_id JOIN product_spu p ON p.id=s.spu_id
-          """+where+" ORDER BY a.id DESC").params(params).query().listOfRows();
+          """;
+        if(page==null)return jdbc.sql("SELECT q.* FROM ("+base+") q ORDER BY q.id DESC").query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
+          List.of("serviceNo","orderNo","enterpriseName","title","applicantName","contactPhone","skuCode"),"status");
     }
 
     @GetMapping("/{id}")

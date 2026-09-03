@@ -19,8 +19,14 @@ $brands=Request -path '/api/admin/content/brands/list?page=1&pageSize=5'
 Check "PAGE-005 brand pagination" { $brands.records.Count -le 5 -and $brands.totalPages -ge 1 }
 $attributes=Request -path '/api/admin/business/attributes?categoryId=1&associated=true&page=1&pageSize=5'
 Check "PAGE-006 associated attribute pagination" { $attributes.records.Count -le 5 -and $attributes.total -ge $attributes.records.Count }
+$afterSales=Request -path '/api/admin/business/after-sales?page=1&pageSize=5'
+Check "PAGE-007 after-sales pagination" { $afterSales.records.Count -le 5 -and $afterSales.total -ge $afterSales.records.Count }
+$statements=Request -path '/api/admin/business/finance/statements?page=1&pageSize=5'
+Check "PAGE-008 statement pagination" { $statements.records.Count -le 5 -and $statements.total -ge $statements.records.Count }
+$invoices=Request -path '/api/admin/business/finance/invoice-applications?page=1&pageSize=5'
+Check "PAGE-009 invoice pagination" { $invoices.records.Count -le 5 -and $invoices.total -ge $invoices.records.Count }
 $legacy=Request -path '/api/admin/business/products'
-Check "PAGE-007 legacy array compatibility" { $legacy -is [array] -and $legacy.Count -ge $products.records.Count }
+Check "PAGE-010 legacy array compatibility" { $legacy -is [array] -and $legacy.Count -ge $products.records.Count }
 
 "Completed: passed $passed, failed $failed"
 if($failed -gt 0){exit 1}

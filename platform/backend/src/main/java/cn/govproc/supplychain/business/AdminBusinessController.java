@@ -1056,14 +1056,18 @@ public class AdminBusinessController {
           .params(Map.of("memberId",memberId,"roleId",roleIds.getFirst())).update();
     }
     @GetMapping("/finance/statements")
-    List<Map<String,Object>> financeStatements() {
-        return jdbc.sql("""
+    Object financeStatements(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                             @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
+        String base="""
           SELECT s.id,s.statement_no AS statementNo,e.name AS enterpriseName,
             DATE_FORMAT(s.period_start,'%Y-%m-%d') AS periodStart,DATE_FORMAT(s.period_end,'%Y-%m-%d') AS periodEnd,
             s.order_count AS orderCount,s.payable_amount AS payableAmount,s.paid_amount AS paidAmount,s.status,
             DATE_FORMAT(s.due_date,'%Y-%m-%d') AS dueDate,DATE_FORMAT(s.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
-          FROM reconciliation_statement s JOIN enterprise e ON e.id=s.enterprise_id ORDER BY s.id DESC
-          """).query().listOfRows();
+          FROM reconciliation_statement s JOIN enterprise e ON e.id=s.enterprise_id
+          """;
+        if(page==null)return jdbc.sql("SELECT q.* FROM ("+base+") q ORDER BY q.id DESC").query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
+          List.of("statementNo","enterpriseName","periodStart","periodEnd","dueDate"),"status");
     }
     @PutMapping("/finance/statements/{id}/status")
     void updateFinanceStatement(@PathVariable long id,@Valid @RequestBody FinanceStatementStatusRequest request) {
@@ -1081,16 +1085,20 @@ public class AdminBusinessController {
           """).param("id",id).update();
     }
     @GetMapping("/finance/invoice-applications")
-    List<Map<String,Object>> financeInvoiceApplications() {
-        return jdbc.sql("""
+    Object financeInvoiceApplications(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
+                                      @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
+        String base="""
           SELECT a.id,a.application_no AS applicationNo,e.name AS enterpriseName,u.real_name AS applicantName,
             a.invoice_title AS invoiceTitle,a.tax_no AS taxNo,a.invoice_type AS invoiceType,
             a.recipient_email AS recipientEmail,a.amount,a.status,a.invoice_no AS invoiceNo,
             a.invoice_file_url AS invoiceFileUrl,a.failure_reason AS failureReason,COUNT(ao.order_main_id) AS orderCount,
             DATE_FORMAT(a.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
           FROM invoice_application a JOIN enterprise e ON e.id=a.enterprise_id JOIN enterprise_user u ON u.id=a.applicant_user_id
-          LEFT JOIN invoice_application_order ao ON ao.application_id=a.id GROUP BY a.id ORDER BY a.id DESC
-          """).query().listOfRows();
+          LEFT JOIN invoice_application_order ao ON ao.application_id=a.id GROUP BY a.id
+          """;
+        if(page==null)return jdbc.sql("SELECT q.* FROM ("+base+") q ORDER BY q.id DESC").query().listOfRows();
+        return PageSupport.query(jdbc,base,"q.id DESC",Map.of(),page,pageSize,keyword,status,
+          List.of("applicationNo","enterpriseName","applicantName","invoiceTitle","taxNo","invoiceNo","recipientEmail"),"status");
     }
     @PutMapping("/finance/invoice-applications/{id}")
     void processInvoiceApplication(@PathVariable long id,@Valid @RequestBody InvoiceProcessRequest request) {

@@ -1166,12 +1166,12 @@ function EnterpriseUsers() {
 }
 
 function AfterSalesManagement(){
-  const {message}=AntApp.useApp(); const rows=useLoad<Row[]>(()=>rootApi("/api/admin/business/after-sales"));
+  const {message}=AntApp.useApp(); const rows=usePagedLoad("/api/admin/business/after-sales",10);
   const [detail,setDetail]=useState<Row>(); const [processing,setProcessing]=useState<Row>(); const [form]=Form.useForm();
   const open=async(row:Row)=>setDetail(await rootApi(`/api/admin/business/after-sales/${row.id}`));
   const process=async()=>{try{const values=await form.validateFields();await rootMutation(`/api/admin/business/after-sales/${processing?.id}/status`,{method:"PUT",body:JSON.stringify(values)});setProcessing(undefined);message.success("售后状态已更新");await rows.refresh();}catch(error){if(error instanceof Error)message.error(error.message);}};
   const typeText=(v:string)=>({RETURN:"退货",EXCHANGE:"换货",REPAIR:"维修",REFUND:"退款"}[v]||v); const statusText=(v:number)=>["待处理","处理中","待寄回","待收货","已完成","已驳回","已取消"][v]||"未知";
-  return <><Card className="admin-card"><Table<Row> rowKey="id" loading={rows.loading} dataSource={rows.data||[]} searchPlaceholder="搜索售后单、订单、企业、申请人或商品" columns={[
+  return <><Card className="admin-card"><Table<Row> rowKey="id" loading={rows.loading} dataSource={rows.data||[]} server={{...rows.server,statusOptions:[{value:"0",label:"待处理"},{value:"1",label:"处理中"},{value:"2",label:"待客户寄回"},{value:"3",label:"待平台收货"},{value:"4",label:"已完成"},{value:"5",label:"已驳回"},{value:"6",label:"已取消"}]}} searchPlaceholder="搜索售后单、订单、企业、申请人、手机号、商品或 SKU" columns={[
     {title:"售后单",dataIndex:"serviceNo",render:(v:unknown,record:Row)=><button className="table-link" onClick={()=>void open(record)}>{String(v)}</button>},
     {title:"企业 / 申请人",render:(_:unknown,r:Row)=><span>{r.enterpriseName}<small>{r.applicantName} · {r.contactPhone}</small></span>},
     {title:"商品",render:(_:unknown,r:Row)=><div className="admin-product-cell"><img src={r.image}/><span><b>{r.title}</b><small>{r.skuCode} · 订单 {r.orderNo}</small></span></div>},
@@ -1187,22 +1187,22 @@ function AfterSalesManagement(){
 
 function FinanceManagement() {
   const {message,modal}=AntApp.useApp();
-  const statements=useLoad<Row[]>(()=>rootApi("/api/admin/business/finance/statements"));
-  const invoices=useLoad<Row[]>(()=>rootApi("/api/admin/business/finance/invoice-applications"));
+  const statements=usePagedLoad("/api/admin/business/finance/statements",10);
+  const invoices=usePagedLoad("/api/admin/business/finance/invoice-applications",10);
   const [invoiceForm]=Form.useForm();
   const [processing,setProcessing]=useState<Row>();
   const settle=(row:Row)=>modal.confirm({title:`确认 ${row.statementNo} 已全额到款？`,content:"确认后关联订单将同步标记为已付款。",onOk:async()=>{await rootMutation(`/api/admin/business/finance/statements/${row.id}/status`,{method:"PUT",body:JSON.stringify({status:3,remark:"平台财务确认到款"})});message.success("对账单已结清");await statements.refresh();}});
   const showInvoice=(row:Row)=>{setProcessing(row);invoiceForm.resetFields();invoiceForm.setFieldsValue({status:row.status===0?1:row.status,invoiceNo:row.invoiceNo,invoiceFileUrl:row.invoiceFileUrl,failureReason:row.failureReason});};
   const saveInvoice=async()=>{try{const values=await invoiceForm.validateFields();await rootMutation(`/api/admin/business/finance/invoice-applications/${processing?.id}`,{method:"PUT",body:JSON.stringify(values)});setProcessing(undefined);message.success("开票申请已更新");await invoices.refresh();}catch(error){if(error instanceof Error)message.error(error.message);}};
   return <Card className="data-card"><Tabs items={[
-    {key:"statements",label:"企业对账单",children:<Table rowKey="id" loading={statements.loading} dataSource={statements.data||[]} columns={[
+    {key:"statements",label:"企业对账单",children:<Table rowKey="id" loading={statements.loading} dataSource={statements.data||[]} server={{...statements.server,statusOptions:[{value:"0",label:"草稿"},{value:"1",label:"待确认"},{value:"2",label:"已确认"},{value:"3",label:"已结清"},{value:"4",label:"已作废"}]}} searchPlaceholder="搜索对账单号、企业、账期或付款截止日期" columns={[
       {title:"对账单",render:(_:unknown,row:Row)=><Space direction="vertical" size={1}><strong>{row.statementNo}</strong><small>{row.createdAt}</small></Space>},
       {title:"企业",dataIndex:"enterpriseName"},{title:"对账期间",render:(_:unknown,row:Row)=>`${row.periodStart} 至 ${row.periodEnd}`},{title:"订单数",dataIndex:"orderCount"},
       {title:"应付 / 已付",render:(_:unknown,row:Row)=><Space direction="vertical" size={1}><strong>¥{Number(row.payableAmount).toFixed(2)}</strong><small>已付 ¥{Number(row.paidAmount).toFixed(2)}</small></Space>},
       {title:"状态",dataIndex:"status",render:(v)=><Tag color={Number(v)===3?"green":Number(v)===4?"default":"orange"}>{["草稿","待确认","已确认","已结清","已作废"][Number(v)]}</Tag>},
       {title:"付款截止",dataIndex:"dueDate"},{title:"操作",render:(_:unknown,row:Row)=><Space>{[1,2].includes(Number(row.status))&&<Button type="link" onClick={()=>settle(row)}>确认到款</Button>}</Space>},
     ]}/>},
-    {key:"invoices",label:"开票申请",children:<Table rowKey="id" loading={invoices.loading} dataSource={invoices.data||[]} columns={[
+    {key:"invoices",label:"开票申请",children:<Table rowKey="id" loading={invoices.loading} dataSource={invoices.data||[]} server={{...invoices.server,statusOptions:[{value:"0",label:"待处理"},{value:"1",label:"开票中"},{value:"2",label:"已开具"},{value:"3",label:"已驳回"}]}} searchPlaceholder="搜索申请单号、企业、申请人、抬头、税号、发票号或邮箱" columns={[
       {title:"申请单",render:(_:unknown,row:Row)=><Space direction="vertical" size={1}><strong>{row.applicationNo}</strong><small>{row.createdAt}</small></Space>},
       {title:"企业 / 申请人",render:(_:unknown,row:Row)=><Space direction="vertical" size={1}><span>{row.enterpriseName}</span><small>{row.applicantName}</small></Space>},
       {title:"发票信息",render:(_:unknown,row:Row)=><Space direction="vertical" size={1}><span>{row.invoiceTitle}</span><small>{row.invoiceType} · {row.orderCount} 笔</small></Space>},
