@@ -56,3 +56,9 @@ app:
     public-url: ${ALIYUN_OSS_PUBLIC_URL:}
     object-prefix: ${ALIYUN_OSS_OBJECT_PREFIX:supply-chain/}
     migrate-local-on-start: ${ALIYUN_OSS_MIGRATE_LOCAL_ON_START:false}
+  sms:
+    base-url: ${SMS_MARKETING_TIMESTAMP_API:${SMS_BASE_URL:}}
+    sp-id: ${SMS_MARKETING_ORGCODE:}
+    access-code: ${SMS_MARKETING_BTYPE:}
+    password: ${SMS_MARKETING_PASSWORD:}
+    timestamp-format: ${SMS_MARKETING_TIMESTAMP_FORMAT:unix}
