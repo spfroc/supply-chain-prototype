@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { Row } from "./main";
+import { LoadState } from "./LoadState";
 
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(new URL(path, window.location.origin), {
@@ -27,7 +28,10 @@ export function OrganizationPage({ go }: Props) {
   const [departmentForm, setDepartmentForm] = useState<Row>();
   const [memberForm, setMemberForm] = useState<Row>();
   const [error, setError] = useState("");
+  const [loadError,setLoadError]=useState("");
+  const [loading,setLoading]=useState(true);
   const load = async () => {
+    setLoading(true);setLoadError("");
     try {
       const [departmentRows, roleRows, permissionRows, memberRows] = await Promise.all([
         api<Row[]>("/api/client/organization/departments"),
@@ -36,7 +40,8 @@ export function OrganizationPage({ go }: Props) {
         api<Row[]>("/api/client/members"),
       ]);
       setDepartments(departmentRows); setRoles(roleRows); setPermissions(permissionRows); setMembers(memberRows); setError("");
-    } catch (e) { setError((e as Error).message); }
+    } catch (e) { setLoadError((e as Error).message); }
+    finally { setLoading(false); }
   };
   useEffect(() => { void load(); }, []);
   const permissionsByModule = useMemo(() => Object.entries(permissions.reduce<Record<string, Row[]>>((all, item) => {
@@ -79,6 +84,7 @@ export function OrganizationPage({ go }: Props) {
     <section>
       <div className="account-heading"><div><h1>组织与权限</h1><p>维护部门、自定义角色、数据范围和成员授权</p></div></div>
       {error && <div className="organization-error">{error}</div>}
+      <LoadState loading={loading} error={loadError} empty={false} emptyText="" retry={()=>void load()}>
       <div className="organization-grid">
         <section className="organization-card">
           <header><div><strong>部门管理</strong><span>{departments.length} 个部门</span></div><button onClick={()=>setDepartmentForm({parentId:null,name:'',sortOrder:0,status:1})}>＋ 添加部门</button></header>
@@ -93,6 +99,7 @@ export function OrganizationPage({ go }: Props) {
         <header><div><strong>成员授权</strong><span>角色变化保存后立即生效</span></div></header>
         {members.map(row=><article key={row.id}><div><strong>{row.realName}　@{row.username}</strong><span>{row.departmentName||'未分配部门'} · {row.roleNames||row.roleCode}</span></div><button onClick={()=>setMemberForm({...row,roleIds:parseIds(row.roleIds)})}>配置角色</button></article>)}
       </section>
+      </LoadState>
     </section>
     {departmentForm&&<div className="dialog-mask"><div className="client-dialog form-dialog"><button className="dialog-close" onClick={()=>setDepartmentForm(undefined)}>×</button><h2>{departmentForm.id?'编辑':'新增'}部门</h2><label>部门名称<input value={departmentForm.name||''} onChange={e=>setDepartmentForm({...departmentForm,name:e.target.value})}/></label><label>上级部门<select value={departmentForm.parentId||''} onChange={e=>setDepartmentForm({...departmentForm,parentId:e.target.value?Number(e.target.value):null})}><option value="">无（一级部门）</option>{departments.filter(x=>x.id!==departmentForm.id).map(x=><option value={x.id} key={x.id}>{x.name}</option>)}</select></label><label>排序<input type="number" value={departmentForm.sortOrder||0} onChange={e=>setDepartmentForm({...departmentForm,sortOrder:Number(e.target.value)})}/></label><button className="save-button" onClick={()=>void saveDepartment()}>保存</button></div></div>}
     {roleForm&&<div className="dialog-mask"><div className="client-dialog form-dialog organization-dialog"><button className="dialog-close" onClick={()=>setRoleForm(undefined)}>×</button><h2>{roleForm.id?'编辑':'新增'}角色</h2>{!roleForm.id&&<label>角色编码<input value={roleForm.roleCode} onChange={e=>setRoleForm({...roleForm,roleCode:e.target.value.toUpperCase()})}/></label>}<label>角色名称<input value={roleForm.name} onChange={e=>setRoleForm({...roleForm,name:e.target.value})}/></label><label>数据范围<select value={roleForm.dataScope} onChange={e=>setRoleForm({...roleForm,dataScope:e.target.value})}><option value="SELF">本人</option><option value="DEPARTMENT">所属部门</option><option value="ENTERPRISE">本企业</option></select></label><label className="check-line"><input type="checkbox" checked={!!roleForm.readOnly} onChange={e=>setRoleForm({...roleForm,readOnly:e.target.checked?1:0})}/>只读角色</label><div className="permission-groups">{permissionsByModule.map(([module,items])=><fieldset key={module}><legend>{module}</legend>{items.map(item=><label className="check-line" key={item.permissionCode}><input type="checkbox" checked={roleForm.permissionCodes.includes(item.permissionCode)} onChange={e=>setRoleForm({...roleForm,permissionCodes:e.target.checked?[...roleForm.permissionCodes,item.permissionCode]:roleForm.permissionCodes.filter(x=>x!==item.permissionCode)})}/>{item.name}</label>)}</fieldset>)}</div><button className="save-button" onClick={()=>void saveRole()}>保存</button></div></div>}
