@@ -42,6 +42,11 @@ public class CollectJobController {
         return jobs.retryFailed(id, http.getHeader("Authorization"));
     }
 
+    @PostMapping("/collect-jobs/{id}/stop")
+    Map<String, Object> stop(@PathVariable long id) {
+        return jobs.stop(id);
+    }
+
     @PostMapping("/collect-jobs")
     Map<String, Object> create(@Valid @RequestBody BatchRequest request, HttpServletRequest http,
                                Principal principal) {

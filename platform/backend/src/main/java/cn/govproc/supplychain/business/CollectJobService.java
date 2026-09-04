@@ -40,6 +40,7 @@ public class CollectJobService {
         SELECT j.id, j.mode, j.platform, j.status,
           j.total_count AS totalCount, j.success_count AS successCount,
           j.fail_count AS failCount, j.skip_count AS skipCount,
+          (SELECT COUNT(*) FROM collect_job_item ci WHERE ci.job_id=j.id AND ci.status='CANCELLED') AS cancelledCount,
           (j.success_count + j.fail_count + j.skip_count) AS finishedCount,
           CASE WHEN j.total_count = 0 THEN 0
             ELSE ROUND(100 * (j.success_count + j.fail_count + j.skip_count) / j.total_count) END AS progress,
@@ -82,6 +83,8 @@ public class CollectJobService {
 
     @EventListener(ApplicationReadyEvent.class)
     public void recoverInterruptedJobs() {
+        jdbc.sql("UPDATE collect_job_item i JOIN collect_job j ON j.id=i.job_id SET i.status='CANCELLED', i.error_code='cancelled', i.error_message='中止期间服务重启，请核对商品入库结果', i.finished_at=NOW() WHERE j.status='CANCELLING' AND i.status IN ('PENDING','RUNNING')").update();
+        jdbc.sql("UPDATE collect_job SET status='CANCELLED', error_message='中止期间服务重启，请核对商品入库结果', finished_at=NOW() WHERE status='CANCELLING'").update();
         int items = jdbc.sql("""
             UPDATE collect_job_item
             SET status='FAILED', error_code='interrupted',
@@ -223,6 +226,27 @@ public class CollectJobService {
         return job;
     }
 
+    public Map<String, Object> stop(long jobId) {
+        Boolean stopped = tx.execute(transaction -> {
+            int changed = jdbc.sql("UPDATE collect_job SET status='CANCELLING', error_message='正在中止，等待当前请求完成' WHERE id=:id AND status IN ('PENDING','RUNNING')")
+                .param("id", jobId).update();
+            if (changed == 0) {
+                get(jobId);
+                return false;
+            }
+            jdbc.sql("UPDATE collect_job_item SET status='CANCELLED', error_code='cancelled', error_message='用户中止，未执行', finished_at=NOW() WHERE job_id=:id AND status='PENDING'")
+                .param("id", jobId).update();
+            return true;
+        });
+        if (Boolean.TRUE.equals(stopped)) refreshJobProgress(jobId);
+        return get(jobId);
+    }
+
+    private boolean stopping(long jobId) {
+        return jdbc.sql("SELECT COUNT(*) FROM collect_job WHERE id=:id AND status IN ('CANCELLING','CANCELLED')")
+            .param("id", jobId).query(Integer.class).single() > 0;
+    }
+
     public Map<String, Object> retryFailed(long jobId, String authorization) {
         requireCollector(authorization);
         Integer claimed = tx.execute(status -> {
@@ -230,7 +254,7 @@ public class CollectJobService {
                 UPDATE collect_job j
                 SET status='PENDING', error_message=NULL, started_at=NULL, finished_at=NULL
                 WHERE j.id=:id
-                  AND j.status NOT IN ('PENDING','RUNNING')
+                  AND j.status NOT IN ('PENDING','RUNNING','CANCELLING')
                   AND EXISTS (
                     SELECT 1 FROM collect_job_item i
                     WHERE i.job_id=j.id AND i.status='FAILED'
@@ -298,6 +322,7 @@ public class CollectJobService {
             : Math.max(1, attemptsOverride);
         Map<String, Object> lastSuccess = null;
         for (Map<String, Object> item : items) {
+            if (stopping(jobId)) break;
             if (!"PENDING".equals(String.valueOf(item.get("status")))) {
                 continue;
             }
@@ -305,7 +330,7 @@ public class CollectJobService {
             if (collected != null) {
                 lastSuccess = collected;
             }
-            if ("BATCH".equals(mode) && batchItemDelayMs > 0) {
+            if (!stopping(jobId) && "BATCH".equals(mode) && batchItemDelayMs > 0) {
                 sleepQuietly(Math.min(batchItemDelayMs, 300_000));
             }
         }
@@ -318,10 +343,11 @@ public class CollectJobService {
         long itemId = ((Number) item.get("id")).longValue();
         String platform = String.valueOf(item.get("platform"));
         String url = String.valueOf(item.get("url"));
-        jdbc.sql("""
+        int claimed = jdbc.sql("""
             UPDATE collect_job_item SET status='RUNNING', started_at=NOW(), error_message=NULL
-            WHERE id=:id
+            WHERE id=:id AND status='PENDING'
             """).param("id", itemId).update();
+        if (claimed == 0) return null;
         refreshJobProgress(jobId);
 
         if ("unknown".equals(platform)) {
@@ -335,6 +361,10 @@ public class CollectJobService {
         String lastCode = "collect_failed";
         String lastMessage = "采集失败";
         while (attempts < maxAttempts) {
+            if (stopping(jobId)) {
+                finishItem(itemId, jobId, "CANCELLED", "cancelled", "用户中止，不再尝试", attempts, null);
+                return null;
+            }
             attempts++;
             jdbc.sql("UPDATE collect_job_item SET attempt_count=:n WHERE id=:id")
                 .param("n", attempts).param("id", itemId).update();
@@ -414,7 +444,7 @@ public class CollectJobService {
             SET status=:status, error_code=:errorCode, error_message=:errorMessage,
                 attempt_count=:attempts, product_id=:productId, sku_code=:skuCode, title=:title,
                 finished_at=NOW()
-            WHERE id=:id
+            WHERE id=:id AND status NOT IN ('CANCELLING','CANCELLED')
             """).param("status", status)
             .param("errorCode", errorCode)
             .param("errorMessage", trim(errorMessage, 1000))
@@ -463,12 +493,14 @@ public class CollectJobService {
             UPDATE collect_job
             SET status=:status, error_message=:error,
                 finished_at=CASE WHEN :pending=0 THEN NOW() ELSE finished_at END
-            WHERE id=:id
+            WHERE id=:id AND status NOT IN ('CANCELLING','CANCELLED')
             """).param("status", status)
             .param("error", error)
             .param("pending", pending)
             .param("id", jobId)
             .update();
+        jdbc.sql("UPDATE collect_job SET status='CANCELLED', error_message='用户已中止；已成功采集的商品保留', finished_at=NOW() WHERE id=:id AND status='CANCELLING' AND NOT EXISTS (SELECT 1 FROM collect_job_item i WHERE i.job_id=:id AND i.status IN ('PENDING','RUNNING'))")
+            .param("id", jobId).update();
     }
 
     private List<Map<String, Object>> itemsOf(long jobId) {

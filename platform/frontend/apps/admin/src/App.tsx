@@ -266,6 +266,8 @@ const detectCollectPlatform = (url: string) => {
 };
 const collectJobStatus = (value?: string) =>
   ({
+    CANCELLING: { label: "中止中", color: "warning" },
+    CANCELLED: { label: "已中止", color: "default" },
     PENDING: { label: "排队中", color: "default" },
     RUNNING: { label: "采集中", color: "processing" },
     SUCCEEDED: { label: "已完成", color: "success" },
@@ -274,6 +276,7 @@ const collectJobStatus = (value?: string) =>
   } as Record<string, { label: string; color: string }>)[String(value || "")] || { label: String(value || "—"), color: "default" };
 const collectItemStatus = (value?: string) =>
   ({
+    CANCELLED: { label: "已中止", color: "default" },
     PENDING: { label: "等待中", color: "default" },
     RUNNING: { label: "采集中", color: "processing" },
     SUCCEEDED: { label: "成功", color: "success" },
@@ -4456,11 +4459,24 @@ function CollectJobs() {
   const rows = usePagedLoad("/api/admin/business/products/collect-jobs", 10);
   const [detail, setDetail] = useState<Row>();
   const [retryingId, setRetryingId] = useState<number>();
+  const stopJob = (row: Row) => Modal.confirm({
+    title: `中止采集任务 #${row.id}？`,
+    content: "停止等待项及后续重试，当前请求完成后中止。已成功入库的商品会保留。",
+    okText: "中止任务", cancelText: "返回",
+    onOk: async () => {
+      try {
+        await rootMutation(`/api/admin/business/products/collect-jobs/${row.id}/stop`, { method: "POST" });
+        if (detail?.id === row.id) setDetail(await rootApi<Row>(`/api/admin/business/products/collect-jobs/${row.id}`));
+        await rows.refreshQuiet();
+        message.success("已提交中止请求");
+      } catch (error) { message.error((error as Error).message); throw error; }
+    },
+  });
   const refreshRef = useRef<() => Promise<void> | void>(rows.refreshQuiet);
   refreshRef.current = rows.refreshQuiet;
   const runningKey = rows.data.map((row) => `${row.id}:${row.status}:${row.finishedCount}`).join("|");
   useEffect(() => {
-    const running = rows.data.some((row) => ["PENDING", "RUNNING"].includes(String(row.status)));
+    const running = rows.data.some((row) => ["PENDING", "RUNNING", "CANCELLING"].includes(String(row.status)));
     if (!running) return;
     const timer = window.setInterval(() => void refreshRef.current(), 4000);
     return () => window.clearInterval(timer);
@@ -4500,7 +4516,7 @@ function CollectJobs() {
     });
   };
   useEffect(() => {
-    if (!detail?.id || !["PENDING", "RUNNING"].includes(String(detail.status))) return;
+    if (!detail?.id || !["PENDING", "RUNNING", "CANCELLING"].includes(String(detail.status))) return;
     const timer = window.setInterval(async () => {
       try {
         const next = await rootApi<Row>(`/api/admin/business/products/collect-jobs/${detail.id}`);
@@ -4527,6 +4543,8 @@ function CollectJobs() {
             statusOptions: [
               { label: "排队中", value: "PENDING" },
               { label: "采集中", value: "RUNNING" },
+              { label: "中止中", value: "CANCELLING" },
+              { label: "已中止", value: "CANCELLED" },
               { label: "已完成", value: "SUCCEEDED" },
               { label: "部分完成", value: "PARTIAL" },
               { label: "失败", value: "FAILED" },
@@ -4552,7 +4570,7 @@ function CollectJobs() {
                 <div>
                   <Progress percent={Number(row.progress || 0)} size="small"
                     format={() => `${row.finishedCount || 0}/${row.totalCount || 0}`} />
-                  <small>成功 {row.successCount || 0} · 失败 {row.failCount || 0} · 跳过 {row.skipCount || 0}</small>
+                  <small>成功 {row.successCount || 0} · 失败 {row.failCount || 0} · 跳过 {row.skipCount || 0} · 中止 {row.cancelledCount || 0}</small>
                 </div>
               ) : "—",
             },
@@ -4568,7 +4586,8 @@ function CollectJobs() {
                   <Button type="link" onClick={() => void openDetail(row)}>
                     {row.mode === "BATCH" ? "详情" : "查看"}
                   </Button>
-                  {Number(row.failCount || 0) > 0 && !["PENDING", "RUNNING"].includes(String(row.status)) && (
+                  {["PENDING", "RUNNING"].includes(String(row.status)) && <Button type="link" danger onClick={() => stopJob(row)}>中止</Button>}
+                  {Number(row.failCount || 0) > 0 && !["PENDING", "RUNNING", "CANCELLING"].includes(String(row.status)) && (
                     <Button type="link" loading={retryingId === Number(row.id)} onClick={() => retryFailed(row)}>重试</Button>
                   )}
                 </Space>
@@ -4582,7 +4601,7 @@ function CollectJobs() {
         width={880}
         open={Boolean(detail)}
         onClose={() => setDetail(undefined)}
-        extra={detail && Number(detail.failCount || 0) > 0 && !["PENDING", "RUNNING"].includes(String(detail.status)) ? (
+        extra={detail && ["PENDING", "RUNNING"].includes(String(detail.status)) ? <Button danger onClick={() => stopJob(detail)}>中止任务</Button> : detail && Number(detail.failCount || 0) > 0 && !["PENDING", "RUNNING", "CANCELLING"].includes(String(detail.status)) ? (
           <Button type="primary" loading={retryingId === Number(detail.id)} onClick={() => retryFailed(detail)}>
             重试失败项
           </Button>
@@ -4600,7 +4619,7 @@ function CollectJobs() {
             </Descriptions>
             {detail.mode === "BATCH" && (
               <Progress percent={Number(detail.progress || 0)} style={{ marginBottom: 16 }}
-                format={() => `成功 ${detail.successCount || 0} / 失败 ${detail.failCount || 0} / 跳过 ${detail.skipCount || 0}`} />
+                format={() => `成功 ${detail.successCount || 0} / 失败 ${detail.failCount || 0} / 跳过 ${detail.skipCount || 0} / 中止 ${detail.cancelledCount || 0}`} />
             )}
             <AntTable
               size="small"
