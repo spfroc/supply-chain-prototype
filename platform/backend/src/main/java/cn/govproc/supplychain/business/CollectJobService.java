@@ -281,7 +281,7 @@ public class CollectJobService {
             }
             String status = jdbc.sql("SELECT status FROM collect_job WHERE id=:id")
                 .param("id", jobId).query(String.class).single();
-            if ("PENDING".equals(status) || "RUNNING".equals(status)) {
+            if ("PENDING".equals(status) || "RUNNING".equals(status) || "CANCELLING".equals(status)) {
                 throw new ResponseStatusException(HttpStatus.CONFLICT, "任务正在执行，请勿重复重试");
             }
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "该任务没有可重试的失败项");
