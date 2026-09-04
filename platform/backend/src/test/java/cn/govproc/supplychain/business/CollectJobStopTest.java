@@ -19,9 +19,13 @@ class CollectJobStopTest {
         PlatformTransactionManager manager = mock(PlatformTransactionManager.class);
         when(manager.getTransaction(any())).thenReturn(mock(TransactionStatus.class));
         when(jdbc.sql(anyString()).param(eq("id"), eq(7L)).update()).thenReturn(0);
-        when(jdbc.sql(contains("WHERE j.id=:id")).param("id", 7L).query().listOfRows())
+        JdbcClient.StatementSpec jobQuery = mock(JdbcClient.StatementSpec.class, RETURNS_DEEP_STUBS);
+        when(jdbc.sql(contains("WHERE j.id=:id"))).thenReturn(jobQuery);
+        when(jobQuery.param("id", 7L).query().listOfRows())
             .thenReturn(List.of(Map.of("id", 7L, "status", "CANCELLED")));
-        when(jdbc.sql(contains("WHERE i.job_id=:id ORDER BY")).param("id", 7L).query().listOfRows())
+        JdbcClient.StatementSpec itemQuery = mock(JdbcClient.StatementSpec.class, RETURNS_DEEP_STUBS);
+        when(jdbc.sql(contains("WHERE i.job_id=:id ORDER BY"))).thenReturn(itemQuery);
+        when(itemQuery.param("id", 7L).query().listOfRows())
             .thenReturn(List.of());
         RestClient collector = mock(RestClient.class);
         CollectJobService service = new CollectJobService(jdbc, collector,
