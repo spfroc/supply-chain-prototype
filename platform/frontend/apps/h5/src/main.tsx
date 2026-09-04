@@ -160,11 +160,15 @@ function App() {
   const [solutionsOpen, setSolutionsOpen] = useState(false);
   const [current, setCurrent] = useState<Row>();
   const [authReady, setAuthReady] = useState(false);
+  const [accountError,setAccountError]=useState("");
   const [authOpen, setAuthOpen] = useState(false);
   const [catalogLoading,setCatalogLoading]=useState(true);
   const [catalogError,setCatalogError]=useState("");
   const pendingAction = useRef<undefined | (() => void)>(undefined);
   const [siteConfig, setSiteConfig] = useState<Row>({});
+  const [publicLoading,setPublicLoading]=useState(true);
+  const [publicError,setPublicError]=useState("");
+  const loadPublic=async()=>{setPublicLoading(true);setPublicError("");try{const results=await Promise.allSettled([api<Row>("/api/public/config").then(setSiteConfig),api<Row>("/api/public/portal").then(setPortal)]);const failed=results.find(result=>result.status==="rejected");if(failed?.status==="rejected")throw failed.reason;}catch(error){setPublicError((error as Error).message||"门户初始化失败");}finally{setPublicLoading(false);}};
   const siteName = siteConfig["platform.name"] || "政企采购供应链";
   const siteLogo = String(siteConfig["platform.logo"] || "").trim();
   const contactLandline = String(siteConfig["contact.landline"] || "").trim();
@@ -179,13 +183,14 @@ function App() {
   };
   const loadProducts = () => api<Row[]>("/api/public/catalog/products").then(setProducts);
   const loadCatalog=async()=>{setCatalogLoading(true);setCatalogError("");try{const[nextProducts,nextCategories]=await Promise.all([api<Row[]>("/api/public/catalog/products"),api<Row[]>("/api/public/catalog/categories")]);setProducts(nextProducts);setCategories(nextCategories);}catch(error){setCatalogError((error as Error).message||"商品数据加载失败");}finally{setCatalogLoading(false);}};
-  const loadAccount = async () => {
+  const loadAccount = async (initial=false) => {
     const session = await api<Row>("/api/auth/session");
-    if (!session.authenticated) throw new Error("请先登录");
+    if (!session.authenticated) {if(initial)return;throw new Error("请先登录");}
     setCurrent(session.user);
     setProfile(await api<Row>("/api/client/profile"));
     await loadCart();
   };
+  const initializeAccount=async()=>{setAuthReady(false);setAccountError("");try{await loadAccount(true);}catch(error){setAccountError((error as Error).message||"登录状态加载失败");}finally{setAuthReady(true);}};
   const requireAuth = (action: () => void) => {
     if (current) {
       action();
@@ -203,16 +208,9 @@ function App() {
     action?.();
   };
   useEffect(() => {
-    void api<Row>("/api/public/config")
-      .then(setSiteConfig)
-      .catch(() => {});
-    void api<Row>("/api/public/portal")
-      .then(setPortal)
-      .catch(() => {});
+    void loadPublic();
     void loadCatalog();
-    void loadAccount()
-      .catch(() => {})
-      .finally(() => setAuthReady(true));
+    void initializeAccount();
   }, []);
   useEffect(()=>{
     const pop=()=>{
@@ -302,6 +300,7 @@ function App() {
     void loadProducts();
     navigateTab("home");
   };
+  if(accountError) return <div className="mobile-app"><H5LoadState loading={false} error={accountError} empty={false} emptyText="" retry={()=>void initializeAccount()}><span/></H5LoadState></div>;
   if (!authReady) return <div className="m-auth-loading">正在加载…</div>;
   const hasAgreement = Boolean(current && profile.agreementName);
   if (solutionId)
@@ -322,6 +321,7 @@ function App() {
         )}
       </>
     );
+  if(solutionsOpen&&(publicLoading||publicError||!portal.solution?.length))return <div className="mobile-app"><header className="sub-header"><button onClick={()=>setSolutionsOpen(false)}>‹ 返回</button><h2>场景方案</h2></header><H5LoadState loading={publicLoading} error={publicError} empty={!portal.solution?.length} emptyText="暂无场景方案" retry={()=>void loadPublic()}><span/></H5LoadState></div>;
   if (solutionsOpen)
     return <MobileSolutionList solutions={portal.solution || []} back={() => setSolutionsOpen(false)} open={(id) => {
       setSolutionId(id);
@@ -369,9 +369,11 @@ function App() {
         </button>
       </header>
       <section className="mobile-content">
+        {publicLoading&&<div role="status" className="m-catalog-loading">正在加载门户配置…</div>}
+        {publicError&&<div role="alert" className="m-catalog-feedback"><strong>门户配置加载失败</strong><small>{publicError}</small><button onClick={()=>void loadPublic()}>重新加载</button></div>}
         {catalogError&&<div className="m-catalog-feedback"><strong>商品数据加载失败</strong><small>{catalogError}</small><button onClick={()=>void loadCatalog()}>重新加载</button></div>}
         {catalogLoading&&!products.length&&<div className="m-catalog-loading">正在加载商品数据…</div>}
-        {tab === "home" && (
+        {tab === "home" && !publicLoading && !publicError && !catalogLoading && !catalogError && (
           <Home
             products={products}
             solutions={portal.solution || []}
@@ -389,7 +391,7 @@ function App() {
             loggedIn={Boolean(current)}
           />
         )}
-        {tab === "category" && (
+        {tab === "category" && !catalogLoading && !catalogError && (
           <Category
             products={products}
             categories={categories}
@@ -649,13 +651,15 @@ function MobileSolutionDetail({ solutionId, back, requireAuth, reloadCart, check
   const [data, setData] = useState<Row>({ products: [] });
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [selectedItems, setSelectedItems] = useState<Record<number, boolean>>({});
-  useEffect(() => {
-    void api<Row>(`/api/public/portal/solutions/${solutionId}`).then((value) => {
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState("");
+  const load=async()=>{setLoading(true);setError("");try{const value=await api<Row>(`/api/public/portal/solutions/${solutionId}`);
       setData(value);
       setQuantities(Object.fromEntries((value.products || []).map((row: Row) => [row.skuId, Number(row.defaultQuantity) || 1])));
       setSelectedItems(Object.fromEntries((value.products || []).map((row: Row) => [row.skuId, Number(row.requiredItem) === 1])));
-    }).catch((error) => Toast.show(error.message));
-  }, [solutionId]);
+    }catch(error){setError((error as Error).message);}finally{setLoading(false);}};
+  useEffect(()=>{void load();},[solutionId]);
+  if(loading||error||!data.solution)return <div className="mobile-app"><header className="sub-header"><button onClick={back}>‹ 返回</button><h2>方案详情</h2></header><H5LoadState loading={loading} error={error} empty={!data.solution} emptyText="方案不存在或已停用" retry={()=>void load()}><span/></H5LoadState></div>;
   const chosen = (data.products || []).filter((row: Row) => Number(row.requiredItem) === 1 || selectedItems[row.skuId]);
   const total = chosen.reduce((sum: number, row: Row) => sum + Number(row.marketPrice || 0) * Number(quantities[row.skuId] || 1), 0);
   const submit = () => requireAuth(async () => {
@@ -1289,11 +1293,10 @@ function Checkout({
   const [addresses, setAddresses] = useState<Row[]>([]);
   const [allocations, setAllocations] = useState<Record<string, Row[]>>({});
   const [submitting, setSubmitting] = useState(false);
-  useEffect(() => {
-    void api<Row[]>("/api/client/addresses")
-      .then(setAddresses)
-      .catch((error) => Toast.show((error as Error).message));
-  }, []);
+  const [initLoading,setInitLoading]=useState(true);
+  const [initError,setInitError]=useState("");
+  const loadInitial=async()=>{setInitLoading(true);setInitError("");try{setAddresses(await api<Row[]>("/api/client/addresses"));}catch(error){setInitError((error as Error).message);}finally{setInitLoading(false);}};
+  useEffect(()=>{void loadInitial();},[]);
   const currentAddress = addresses[0];
   useEffect(() => {
     if (!addresses.length) return;
@@ -1399,6 +1402,7 @@ function Checkout({
       setSubmitting(false);
     }
   };
+  if(initLoading||initError)return <div className="subpage"><header><button onClick={back}>‹</button><h1>确认订单</h1></header><H5LoadState loading={initLoading} error={initError} empty={false} emptyText="" retry={()=>void loadInitial()}><span/></H5LoadState></div>;
   if (!selected.length)
     return (
       <div className="subpage">

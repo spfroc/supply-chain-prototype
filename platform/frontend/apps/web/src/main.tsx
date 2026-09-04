@@ -256,11 +256,15 @@ function App() {
   const [toast, setToast] = useState("");
   const [current, setCurrent] = useState<Row>();
   const [authReady, setAuthReady] = useState(false);
+  const [accountError,setAccountError]=useState("");
   const [authOpen, setAuthOpen] = useState(false);
   const [catalogLoading,setCatalogLoading]=useState(true);
   const [catalogError,setCatalogError]=useState("");
   const pendingAction = useRef<undefined | (() => void)>(undefined);
   const [siteConfig, setSiteConfig] = useState<Row>({});
+  const [publicLoading,setPublicLoading]=useState(true);
+  const [publicError,setPublicError]=useState("");
+  const loadPublic=async()=>{setPublicLoading(true);setPublicError("");try{const results=await Promise.allSettled([api<Row>("/api/public/config").then(setSiteConfig),api<Row>("/api/public/portal").then(setPortal)]);const failed=results.find(result=>result.status==="rejected");if(failed?.status==="rejected")throw failed.reason;}catch(error){setPublicError((error as Error).message||"门户初始化失败");}finally{setPublicLoading(false);}};
   const siteName = siteConfig["platform.name"] || "政企采购供应链";
   const siteLogo = String(siteConfig["platform.logo"] || "").trim();
   const englishName = String(siteConfig["platform.englishName"] || "SUPPLY CHAIN").trim();
@@ -299,9 +303,9 @@ function App() {
     api<Row[]>("/api/client/cart")
       .then(setCart)
       .catch((e) => notify(e.message));
-  const loadAccount = async () => {
+  const loadAccount = async (initial=false) => {
     const session = await api<Row>("/api/auth/session");
-    if (!session.authenticated) throw new Error("请先登录");
+    if (!session.authenticated) {if(initial)return;throw new Error("请先登录");}
     setCurrent(session.user);
     const [p, s] = await Promise.all([
       api<Row>("/api/client/profile"),
@@ -311,6 +315,7 @@ function App() {
     setSummary(s);
     await loadCart();
   };
+  const initializeAccount=async()=>{setAuthReady(false);setAccountError("");try{await loadAccount(true);}catch(error){setAccountError((error as Error).message||"登录状态加载失败");}finally{setAuthReady(true);}};
   const requireAuth = (action: () => void) => {
     if (current) {
       action();
@@ -328,20 +333,13 @@ function App() {
     action?.();
   };
   useEffect(() => {
-    void api<Row>("/api/public/config")
-      .then(setSiteConfig)
-      .catch(() => {});
-    void api<Row>("/api/public/portal")
-      .then(setPortal)
-      .catch(() => {});
+    void loadPublic();
     void loadCatalog();
-    void loadAccount()
-      .catch(() => {})
-      .finally(() => setAuthReady(true));
+    void initializeAccount();
   }, []);
   useEffect(() => {
-    if (authReady && !current && protectedViews.has(view)) setAuthOpen(true);
-  }, [authReady, current, view]);
+    if (authReady && !accountError && !current && protectedViews.has(view)) setAuthOpen(true);
+  }, [authReady, accountError, current, view]);
   useEffect(() => {
     const pop = () => {
       const route = parseRoute();
@@ -509,6 +507,7 @@ function App() {
     const configured = new URL(item.linkUrl, location.origin);
     return configured.pathname.replace(/\/$/, "") !== "/web/agreement-products" || hasAgreement;
   });
+  if(accountError) return <main className="page"><LoadState loading={false} error={accountError} empty={false} emptyText="" retry={()=>void initializeAccount()}><span/></LoadState></main>;
   if (!authReady)
     return <div className="auth-loading">正在加载企业采购平台…</div>;
   return (
@@ -600,9 +599,11 @@ function App() {
         })}
         <span>{hasAgreement ? "企业协议已生效" : current ? "企业采购账号" : "游客浏览"}</span>
       </nav>
+      {publicLoading&&<div role="status" className="catalog-feedback loading">正在加载门户配置…</div>}
+      {publicError&&<div role="alert" className="catalog-feedback error"><strong>门户配置加载失败</strong><span>{publicError}</span><button onClick={()=>void loadPublic()}>重新加载</button></div>}
       {catalogError&&<div className="catalog-feedback error"><strong>商品数据加载失败</strong><span>{catalogError}</span><button onClick={()=>void loadCatalog()}>重新加载</button></div>}
       {catalogLoading&&!products.length&&<div className="catalog-feedback loading">正在加载商品数据…</div>}
-      {displayView === "home" && (
+      {displayView === "home" && !publicLoading && !publicError && !catalogLoading && !catalogError && (
         <Home
           products={products}
           categories={categories}
@@ -614,7 +615,7 @@ function App() {
           loggedIn={Boolean(current)}
         />
       )}
-      {(displayView === "products" || displayView === "agreement-products") && (
+      {(displayView === "products" || displayView === "agreement-products") && !catalogLoading && !catalogError && (
         <Products
           products={products}
           categories={categories}
@@ -638,7 +639,7 @@ function App() {
           openSolution={(id) => applyNavigation("solution-detail", undefined, undefined, id)}
         />
       )}
-      {(["solutions", "platforms", "content"] as View[]).includes(displayView) && (
+      {(["solutions", "platforms", "content"] as View[]).includes(displayView) && !publicLoading && !publicError && (
         <PortalList
           type={displayView as "solutions" | "platforms" | "content"}
           rows={
@@ -664,7 +665,7 @@ function App() {
           notify={notify}
         />
       )}
-      {displayView === "article-detail" && articleId && (
+      {displayView === "article-detail" && articleId && !publicLoading && !publicError && (
         <ArticleDetail
           article={(portal.content || []).find((row: Row) => Number(row.id) === articleId)}
           back={() => navigate("content")}
@@ -1421,6 +1422,7 @@ function PortalList({
       : type === "platforms"
         ? "平台比价"
         : "内容中心";
+  if(!rows.length)return <main className="page"><button onClick={back}>返回首页</button><LoadState loading={false} error="" empty emptyText={`暂无${title}内容`} retry={()=>{}}><span/></LoadState></main>;
   if (type === "content") return (
     <main className="page content-center">
       <div className="breadcrumb"><button onClick={back}>首页</button>　/　内容中心</div>
@@ -1512,13 +1514,15 @@ function SolutionDetail({
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [selectedItems, setSelectedItems] = useState<Record<number, boolean>>({});
   const [submitting, setSubmitting] = useState(false);
-  useEffect(() => {
-    void api<Row>(`/api/public/portal/solutions/${solutionId}`).then((value) => {
+  const [loading,setLoading]=useState(true);
+  const [error,setError]=useState("");
+  const load=async()=>{setLoading(true);setError("");try{const value=await api<Row>(`/api/public/portal/solutions/${solutionId}`);
       setData(value);
       setQuantities(Object.fromEntries((value.products || []).map((row: Row) => [row.skuId, Number(row.defaultQuantity) || 1])));
       setSelectedItems(Object.fromEntries((value.products || []).map((row: Row) => [row.skuId, Number(row.requiredItem) === 1])));
-    }).catch((error) => notify(error.message));
-  }, [solutionId]);
+    }catch(error){setError((error as Error).message);}finally{setLoading(false);}};
+  useEffect(()=>{void load();},[solutionId]);
+  if(loading||error||!data.solution)return <main className="page solution-detail-page"><button onClick={back}>返回场景方案</button><LoadState loading={loading} error={error} empty={!data.solution} emptyText="方案不存在或已停用" retry={()=>void load()}><span/></LoadState></main>;
   const chosen = (data.products || []).filter((row: Row) => Number(row.requiredItem) === 1 || selectedItems[row.skuId]);
   const total = chosen.reduce((sum: number, row: Row) => sum + Number(row.marketPrice || 0) * Number(quantities[row.skuId] || 1), 0);
   const submit = () => requireAuth(async () => {
@@ -2140,12 +2144,10 @@ function Checkout({
   const [submitting, setSubmitting] = useState(false);
   const [bankAccounts,setBankAccounts]=useState<Row[]>([]);
   const [bankAccountId,setBankAccountId]=useState<number>();
-  useEffect(() => {
-    void api<Row[]>("/api/client/addresses")
-      .then(setAddresses)
-      .catch((error) => notify(error.message));
-  }, []);
-  useEffect(()=>{void api<Row[]>("/api/public/payment-bank-accounts").then(rows=>{setBankAccounts(rows);setBankAccountId(Number(rows[0]?.id)||undefined)}).catch(e=>notify(e.message));},[]);
+  const [initLoading,setInitLoading]=useState(true);
+  const [initError,setInitError]=useState("");
+  const loadInitial=async()=>{setInitLoading(true);setInitError("");try{const[a,b]=await Promise.all([api<Row[]>("/api/client/addresses"),api<Row[]>("/api/public/payment-bank-accounts")]);setAddresses(a);setBankAccounts(b);setBankAccountId(Number(b[0]?.id)||undefined);}catch(error){setInitError((error as Error).message);}finally{setInitLoading(false);}};
+  useEffect(()=>{void loadInitial();},[]);
   const currentAddress = addresses[0];
   useEffect(() => {
     if (!addresses.length) return;
@@ -2243,6 +2245,7 @@ function Checkout({
       setSubmitting(false);
     }
   };
+  if(initLoading||initError)return <main className="page"><button onClick={back}>返回购物车</button><LoadState loading={initLoading} error={initError} empty={false} emptyText="" retry={()=>void loadInitial()}><span/></LoadState></main>;
   if (!selected.length)
     return (
       <main className="page">

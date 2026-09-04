@@ -20,6 +20,7 @@ import {
   Result,
   Select,
   Space,
+  Spin,
   Statistic,
   Switch,
   Table as AntTable,
@@ -55,6 +56,7 @@ function GuardedModal({guardUnsaved=true,onCancel,afterOpenChange,modalRender,..
 const Modal=Object.assign(GuardedModal,{confirm:AntModal.confirm});
 
 type ManagedTableProps<T extends Row> = TableProps<T> & {
+  loadState?: {error:string;refresh:()=>Promise<void>};
   searchPlaceholder?: string;
   toolbarExtra?: ReactNode;
   selectionActions?: (selected: T[], clearSelection: () => void) => ReactNode;
@@ -79,6 +81,7 @@ function Table<T extends Row>({
   rowKey = "id",
   rowSelection,
   server,
+  loadState,
   selectionActions,
   toolbarExtra,
   searchPlaceholder = "搜索当前列表的名称、编码或关键字段",
@@ -138,6 +141,7 @@ function Table<T extends Row>({
       : (total: number) => `共 ${total} 条`,
   };
   return <div className="managed-table">
+    {(server?.error || loadState?.error) && <Alert type="error" showIcon message="列表加载失败" description={server?.error || loadState?.error} action={<Button onClick={()=>server ? server.retry?.() : void loadState?.refresh()}>重新加载</Button>} style={{marginBottom:12}}/>}
     <div className="managed-table-toolbar">
       <Space wrap className="managed-table-search-row">
         <Input.Search allowClear value={server ? server.keyword : keyword} onChange={(event) => server ? server.setKeyword(event.target.value) : setKeyword(event.target.value)} placeholder={searchPlaceholder} style={{ width: 320 }} />
@@ -176,7 +180,7 @@ function Table<T extends Row>({
           rowSelection?.onChange?.(keys, selectedRows, info);
         },
       }}
-      pagination={pager}
+      pagination={pagination === false ? false : pager}
       onChange={(nextPagination, filters, sorter, extra) => {
         if (server) server.setPage(nextPagination.current || 1, nextPagination.pageSize || server.pageSize);
         props.onChange?.(nextPagination, filters, sorter, extra);
@@ -372,7 +376,10 @@ async function rootApi<T>(path: string): Promise<T> {
   if(existing)return existing as Promise<T>;
   const request=(async()=>{
     const response = await fetch(path, { headers: apiHeaders() });
-    if (!response.ok) throw new Error(`请求失败（${response.status}）`);
+    if (!response.ok) {
+      const payload=await response.json().catch(()=>({}));
+      throw new Error(payload.detail||payload.message||`请求失败（${response.status}）`);
+    }
     return response.json() as Promise<T>;
   })();
   inflightRootRequests.set(path,request);
@@ -939,10 +946,10 @@ function AdminApp({ logout }: { logout: () => void }) {
   const {message}=AntApp.useApp();
   const [module, setModule] = useState<Module>("overview");
   const [admin, setAdmin] = useState<Row>({});
+  const adminLoad=useLoad<Row>(()=>api("/me"));
   const [health,setHealth]=useState<Row>();
   const [globalSearch,setGlobalSearch]=useState("");
   useEffect(() => {
-    void api<Row>("/me").then(setAdmin);
     const refresh=()=>void rootApi<Row>("/api/public/status").then(setHealth).catch(()=>setHealth({status:"DOWN"}));
     refresh();const timer=setInterval(refresh,60000);return()=>clearInterval(timer);
   }, []);
@@ -950,6 +957,7 @@ function AdminApp({ logout }: { logout: () => void }) {
     () => new Set(String(admin.permissionCodes || "").split(",").filter(Boolean)),
     [admin.permissionCodes],
   );
+  useEffect(()=>{if(adminLoad.data)setAdmin(adminLoad.data);},[adminLoad.data]);
   const allowed = (value: Module) => !modulePermission[value] || permissionSet.has(modulePermission[value]!);
   const visibleNavItems = useMemo(() => navItems.map((item) => item.children
     ? { ...item, children: item.children.filter((child) => allowed(child.key as Module)) }
@@ -1003,6 +1011,7 @@ function AdminApp({ logout }: { logout: () => void }) {
     const target=(Object.keys(titles) as Module[]).find((key)=>allowed(key)&&titles[key].join(" ").toLowerCase().includes(keyword));
     if(target)setModule(target);else message.warning("没有找到匹配的管理页面");
   };
+  if(adminLoad.loading||adminLoad.error) return <main className="login-page"><Card title="管理后台初始化"><LoadBoundary load={adminLoad}><span/></LoadBoundary><Button onClick={logout}>返回登录</Button></Card></main>;
   return (
     <Layout className="admin-shell">
       <Layout.Sider width={242} className="admin-sider">
@@ -1155,7 +1164,7 @@ function EnterpriseUsers() {
       ]}/>
     </Card>
     <Modal open={open} title={`${editing?"编辑":"新增"}企业用户`} onCancel={()=>setOpen(false)} onOk={()=>void save()}>
-      <Form form={form} layout="vertical">
+      <LoadFeedback loads={[enterprises]}/><Form form={form} layout="vertical">
         <Form.Item name="enterpriseId" label="所属企业" rules={[{required:true,message:"请选择所属企业"}]}><Select showSearch optionFilterProp="label" disabled={!!editing} options={(enterprises.data||[]).map((row)=>({value:row.id,label:row.name}))}/></Form.Item>
         <Form.Item name="username" label="登录账号" rules={[{required:true,message:"请输入登录账号"},{min:3,max:80}]}><Input disabled={!!editing}/></Form.Item>
         <Form.Item name="password" label={editing?"重置密码":"初始密码"} extra={editing?"不修改密码请留空":undefined} rules={[{required:!editing,message:"请输入初始密码"},{min:8,max:72,message:"密码长度必须为8至72位"}]}><Input.Password autoComplete="new-password"/></Form.Item>
@@ -1286,12 +1295,8 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
   const collectNeedPrice = collectPlatform === "jd";
   const selectedProductCategory = Form.useWatch("categoryId", form);
   const listBadgeType = Form.useWatch("badgeType", listBadgeForm);
-  const [attributeTemplate, setAttributeTemplate] = useState<Row[]>([]);
-  useEffect(() => {
-    if (module !== "products" || !selectedProductCategory) { setAttributeTemplate([]); return; }
-    void rootApi<Row[]>(`/api/admin/business/attributes/category/${selectedProductCategory}`)
-      .then(setAttributeTemplate).catch(() => setAttributeTemplate([]));
-  }, [module, selectedProductCategory]);
+  const attributeLoad = useLoad<Row[]>(() => rootApi(`/api/admin/business/attributes/category/${selectedProductCategory}`), [module, selectedProductCategory], module === "products" && !!selectedProductCategory);
+  const attributeTemplate = selectedProductCategory ? attributeLoad.data || [] : [];
   const [memberForm] = Form.useForm();
   const [logisticsForm] = Form.useForm();
   const [refundForm] = Form.useForm();
@@ -2096,6 +2101,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
           : "采购订单列表";
   return (
     <>
+      <LoadFeedback loads={[enterprises,products,categories,brands,platforms,agreementOptions,logisticsCompanies,productServices,productBadgeOptions,stockConfig,productTemplates]}/>
       <Card
         className="data-card"
         title={listTitle||defaultListTitle}
@@ -2390,7 +2396,8 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
               </div> },
               { key: "attributes", label: `规格属性${attributeTemplate.length ? `（${attributeTemplate.length}）` : ""}`, children: <div className="two-column-form">
                 <div className="full"><Alert type="info" showIcon message="以下字段根据所选三级分类生成；标有“继承自上级分类”的属性由一级或二级分类自动提供。" /></div>
-                {attributeTemplate.length === 0 && <div className="full"><Alert type="warning" showIcon message="当前分类尚未配置属性模板，可在“属性模板”页面添加。" /></div>}
+                <div className="full"><LoadFeedback loads={[attributeLoad]} /></div>
+                {!attributeLoad.loading && !attributeLoad.error && attributeTemplate.length === 0 && <div className="full"><Alert type="warning" showIcon message="当前分类尚未配置属性模板，可在“属性模板”页面添加。" /></div>}
                 {attributeTemplate.map((attribute) => {
                   const name = ["attributeValues", String(attribute.id)];
                   const rules = Number(attribute.requiredFlag) === 1 ? [{ required: true, message: `请填写${attribute.name}` }] : [];
@@ -3043,7 +3050,7 @@ function AttributeTemplates() {
       <Table rowKey="id" loading={rows.loading} dataSource={rows.data || []} columns={columns} server={rows.server} searchPlaceholder="搜索属性名称、编码、分组或输入方式" />
     </Card>
     <Modal open={open} title={`${editing?"编辑":"新增"}属性`} onCancel={()=>setOpen(false)} onOk={save} width={760}>
-      <Form form={form} layout="vertical" className="two-column-form">
+      <LoadFeedback loads={[categories]}/><Form form={form} layout="vertical" className="two-column-form">
         <Form.Item name="name" label="属性名称" rules={[{required:true}]}><Input placeholder="例如：内存容量" /></Form.Item>
         <Form.Item name="code" label="属性编码" rules={[{required:true,pattern:/^[A-Za-z][A-Za-z0-9_]*$/,message:"使用字母、数字和下划线"}]}><Input placeholder="MEMORY_SIZE" disabled={Boolean(editing)} /></Form.Item>
         <Form.Item name="groupName" label="属性分组" rules={[{required:true}]}><Input placeholder="规格参数" /></Form.Item>
@@ -3308,6 +3315,7 @@ function Categories() {
           rowKey="id"
           loading={rows.loading}
           dataSource={treeData}
+          loadState={rows}
           columns={columns}
           expandable={{
             expandedRowKeys:expandedCategoryKeys,
@@ -3422,7 +3430,7 @@ function Categories() {
   );
 }
 
-function SeoSettings(){const {message}=AntApp.useApp();const result=useLoad<Row>(()=>rootApi("/api/admin/content/seo-settings"));const [form]=Form.useForm();useEffect(()=>{if(result.data)form.setFieldsValue(result.data)},[result.data,form]);const save=async()=>{try{const v=await form.validateFields();await rootMutation("/api/admin/content/seo-settings",{method:"PUT",body:JSON.stringify(v)});message.success("SEO/GEO配置已保存");}catch(e){if(e instanceof Error)message.error(e.message)}};return <Card className="data-card settings-card" title="全站 SEO / GEO 配置" extra={<Button type="primary" onClick={()=>void save()}>保存配置</Button>}><Form form={form} layout="vertical" className="settings-form"><section className="form-section"><header><strong>搜索展示</strong><span>应用于 Web 全站标题和搜索结果摘要</span></header><div className="form-grid"><Form.Item className="form-span-2" name="title" label="网站标题" rules={[{required:true}]}><Input/></Form.Item><Form.Item className="form-span-2" name="description" label="网站描述" rules={[{required:true}]}><Input.TextArea rows={3}/></Form.Item><Form.Item className="form-span-2" name="keywords" label="SEO关键词" rules={[{required:true}]}><Input.TextArea rows={2} placeholder="使用逗号分隔"/></Form.Item><Form.Item className="form-span-2" name="geoKeywords" label="GEO地域/生成式搜索关键词" rules={[{required:true}]}><Input.TextArea rows={2} placeholder="使用逗号分隔"/></Form.Item><Form.Item name="organizationName" label="组织名称" rules={[{required:true}]}><Input/></Form.Item></div></section></Form></Card>}
+function SeoSettings(){const {message}=AntApp.useApp();const result=useLoad<Row>(()=>rootApi("/api/admin/content/seo-settings"));const [form]=Form.useForm();useEffect(()=>{if(result.data)form.setFieldsValue(result.data)},[result.data,form]);const save=async()=>{try{const v=await form.validateFields();await rootMutation("/api/admin/content/seo-settings",{method:"PUT",body:JSON.stringify(v)});message.success("SEO/GEO配置已保存");}catch(e){if(e instanceof Error)message.error(e.message)}};return <Card className="data-card settings-card" title="全站 SEO / GEO 配置" extra={<Button type="primary" disabled={result.loading||Boolean(result.error)} onClick={()=>void save()}>保存配置</Button>}><LoadFeedback loads={[result]}/><Form disabled={result.loading||Boolean(result.error)} form={form} layout="vertical" className="settings-form"><section className="form-section"><header><strong>搜索展示</strong><span>应用于 Web 全站标题和搜索结果摘要</span></header><div className="form-grid"><Form.Item className="form-span-2" name="title" label="网站标题" rules={[{required:true}]}><Input/></Form.Item><Form.Item className="form-span-2" name="description" label="网站描述" rules={[{required:true}]}><Input.TextArea rows={3}/></Form.Item><Form.Item className="form-span-2" name="keywords" label="SEO关键词" rules={[{required:true}]}><Input.TextArea rows={2} placeholder="使用逗号分隔"/></Form.Item><Form.Item className="form-span-2" name="geoKeywords" label="GEO地域/生成式搜索关键词" rules={[{required:true}]}><Input.TextArea rows={2} placeholder="使用逗号分隔"/></Form.Item><Form.Item name="organizationName" label="组织名称" rules={[{required:true}]}><Input/></Form.Item></div></section></Form></Card>}
 
 function BankAccounts(){const {message,modal}=AntApp.useApp();const rows=usePagedLoad("/api/admin/content/bank-accounts",10);const [form]=Form.useForm();const [editing,setEditing]=useState<Row>();const [open,setOpen]=useState(false);const show=(r?:Row)=>{setEditing(r);form.resetFields();form.setFieldsValue(r||{sortOrder:10,status:1,branchName:""});setOpen(true)};const save=async()=>{try{const v=await form.validateFields();await rootMutation(`/api/admin/content/bank-accounts${editing?`/${editing.id}`:""}`,{method:editing?"PUT":"POST",body:JSON.stringify(v)});message.success("收款账号已保存");setOpen(false);void rows.refresh()}catch(e){if(e instanceof Error)message.error(e.message)}};const remove=(r:Row)=>modal.confirm({title:`删除收款账号“${r.bankName}”？`,okButtonProps:{danger:true},onOk:async()=>{await rootMutation(`/api/admin/content/bank-accounts/${r.id}`,{method:"DELETE"});void rows.refresh()}});return <><Card className="data-card" title="收款银行账号" extra={<Button type="primary" onClick={()=>show()}>＋ 新增账号</Button>}><Table rowKey="id" loading={rows.loading} dataSource={rows.data} server={rows.server} columns={[{title:"开户名称",dataIndex:"accountName"},{title:"开户银行",dataIndex:"bankName"},{title:"银行账号",dataIndex:"accountNumber"},{title:"开户支行",dataIndex:"branchName"},{title:"顺序",dataIndex:"sortOrder",width:80},{title:"状态",dataIndex:"status",width:90,render:v=><Tag color={Number(v)===1?"green":"default"}>{Number(v)===1?"启用":"停用"}</Tag>},{title:"操作",width:150,render:(_,r)=><Space><Button type="link" onClick={()=>show(r)}>编辑</Button><Button danger type="link" onClick={()=>remove(r)}>删除</Button></Space>}]}/></Card><Modal open={open} title={`${editing?"编辑":"新增"}收款账号`} onCancel={()=>setOpen(false)} onOk={()=>void save()}><Form form={form} layout="vertical"><Form.Item name="accountName" label="开户名称" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="bankName" label="开户银行" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="accountNumber" label="银行账号" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="branchName" label="开户支行"><Input/></Form.Item><Form.Item name="sortOrder" label="排序" rules={[{required:true}]}><InputNumber min={0} style={{width:"100%"}}/></Form.Item><Form.Item name="status" label="状态" rules={[{required:true}]}><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]}/></Form.Item></Form></Modal></>}
 
@@ -3434,7 +3442,8 @@ function FooterSettings() {
   const save=async()=>{try{const values=await form.validateFields();await rootMutation("/api/admin/content/footer-settings",{method:"PUT",body:JSON.stringify(values)});
     message.success("页脚配置已保存");void result.refresh();}catch(error){if(error instanceof Error)message.error(error.message);}};
   return <Card className="data-card settings-card" title="门户页脚配置">
-    <Tabs items={[{key:"base",label:"基础与备案",children:<><div className="settings-action"><Button type="primary" onClick={()=>void save()}>保存配置</Button></div><Form form={form} layout="vertical" className="settings-form">
+    <LoadFeedback loads={[result]}/>
+    <Tabs items={[{key:"base",label:"基础与备案",children:<><div className="settings-action"><Button type="primary" disabled={result.loading||Boolean(result.error)} onClick={()=>void save()}>保存配置</Button></div><Form disabled={result.loading||Boolean(result.error)} form={form} layout="vertical" className="settings-form">
       <section className="form-section"><header><strong>栏目标题</strong><span>配置 Web 门户页脚四个固定栏目的显示名称，限2～6个汉字</span></header><div className="form-grid">
         <Form.Item name="aboutTitle" label="关于栏目" rules={[{required:true},{pattern:/^[\u3400-\u9fff]{2,6}$/,message:"请输入2至6个汉字"}]}><Input maxLength={6} showCount placeholder="关于壹采" /></Form.Item>
         <Form.Item name="officialTitle" label="平台栏目" rules={[{required:true},{pattern:/^[\u3400-\u9fff]{2,6}$/,message:"请输入2至6个汉字"}]}><Input maxLength={6} showCount placeholder="官方平台" /></Form.Item>
@@ -3508,8 +3517,9 @@ function ContactSettings() {
     message.success("门户联系方式已保存");void result.refresh();
   }catch(error){if(error instanceof Error)message.error(error.message);}};
   const qr=Form.useWatch("wechatQr",form);
-  return <Card className="settings-card" title="Web 门户悬浮联系方式" extra={<Button type="primary" onClick={()=>void save()}>保存配置</Button>}>
-    <Form form={form} layout="vertical" className="settings-form">
+  return <Card className="settings-card" title="Web 门户悬浮联系方式" extra={<Button type="primary" disabled={result.loading||Boolean(result.error)} onClick={()=>void save()}>保存配置</Button>}>
+    <LoadFeedback loads={[result]}/>
+    <Form disabled={result.loading||Boolean(result.error)} form={form} layout="vertical" className="settings-form">
       <section className="form-section"><header><strong>电话与邮箱</strong><span>用于 Web 端右侧悬浮联系栏</span></header><div className="form-grid">
         <Form.Item name="landline" label="座机" rules={[{required:true,message:"请输入座机号码"}]}><Input placeholder="例如：0531-86099058" /></Form.Item>
         <Form.Item name="mobile" label="手机" rules={[{required:true,message:"请输入手机号码"}]}><Input placeholder="例如：13105315957" /></Form.Item>
@@ -3547,7 +3557,7 @@ function HelpLinks() {
       ]}/>
     </Card>
     <Modal open={open} title={`${editing?"编辑":"新增"}服务链接`} onCancel={()=>setOpen(false)} onOk={()=>void save()}>
-      <Form form={form} layout="vertical">
+      <LoadFeedback loads={[articles]}/><Form form={form} layout="vertical">
         <Form.Item name="title" label="链接标题" rules={[{required:true,message:"请输入链接标题"}]}><Input /></Form.Item>
         <Form.Item name="articleId" label="链接文章" rules={[{required:true,message:"请选择文章"}]}><Select showSearch optionFilterProp="label" options={(articles.data||[]).filter(row=>Number(row.status)===1).map(row=>({value:Number(row.id),label:`${row.title}${row.subtitle?` · ${row.subtitle}`:""}`}))} /></Form.Item>
         <Form.Item name="icon" label="图标" rules={[{required:true}]}><Select options={iconOptions} /></Form.Item>
@@ -3635,7 +3645,7 @@ function AssociationProducts({type}:{type:"PLATFORM"|"AGREEMENT"|"SOLUTION"}) {
     return <div className="association-target-cell"><strong>{matched?.[1]||text}</strong>{matched?.[2]&&<small>{matched[2]}</small>}</div>;
   };
   return <><Card className="data-card association-products-card" title={`商品列表 · ${labels[type]}`} extra={<Button type="primary" onClick={()=>show()}>＋ 加入商品</Button>}>
-    <Table size="small" rowKey="relationId" loading={rows.loading} dataSource={rows.data} server={{...rows.server,statusOptions}}
+    <LoadFeedback loads={[targets]}/><Table size="small" rowKey="relationId" loading={rows.loading} dataSource={rows.data} server={{...rows.server,statusOptions}}
       searchPlaceholder={`搜索商品名称、SPU、SKU或${labels[type]}`}
       toolbarExtra={<Select allowClear showSearch optionFilterProp="label" value={targetFilter} onChange={(value)=>setTargetFilter(value)} placeholder={`全部${labels[type].slice(2)}`} style={{width:190}} options={targetOptions}/>} scroll={{x:type==="PLATFORM"?1450:1260}}
       selectionActions={(selected,clear)=><><Button disabled={!selected.length} danger onClick={()=>removeRows(selected,clear)}>批量移除</Button>{type!=="SOLUTION"&&<><Button disabled={!selected.length} onClick={()=>void updateStatus(selected,1,clear)}>{type==="PLATFORM"?"批量上架":"批量启用"}</Button><Button disabled={!selected.length} onClick={()=>void updateStatus(selected,0,clear)}>{type==="PLATFORM"?"批量下架":"批量停用"}</Button></>}</>}
@@ -3657,7 +3667,7 @@ function AssociationProducts({type}:{type:"PLATFORM"|"AGREEMENT"|"SOLUTION"}) {
       ]} />
   </Card>
   <Modal open={open} title={`${editing?"编辑关联":"加入商品"} · ${labels[type]}`} onCancel={()=>setOpen(false)} onOk={()=>void save()}>
-    <Form form={form} layout="vertical"><Form.Item name="targetId" label={labels[type]} rules={[{required:true}]}><Select disabled={Boolean(editing)} showSearch optionFilterProp="label" options={targetOptions}/></Form.Item>
+    <LoadFeedback loads={[products]}/><Form form={form} layout="vertical"><Form.Item name="targetId" label={labels[type]} rules={[{required:true}]}><Select disabled={Boolean(editing)} showSearch optionFilterProp="label" options={targetOptions}/></Form.Item>
       <Form.Item name="skuId" label="商品 SKU" rules={[{required:!editing,message:"请选择商品 SKU"}]}><Select disabled={Boolean(editing)} loading={products.loading} showSearch optionFilterProp="label" options={selectableSkus.map((row)=>({value:Number(row.id||row.skuId),label:`${row.title} · ${row.skuCode}`}))}/></Form.Item>
       {type!=="SOLUTION"&&<Form.Item name="associationPrice" label={type==="PLATFORM"?"平台售价":"协议价格"} rules={[{required:true}]}><InputNumber min={0} precision={2} style={{width:"100%"}}/></Form.Item>}
       {type==="PLATFORM"&&<Form.Item name="productUrl" label="商品链接"><Input/></Form.Item>}
@@ -3668,13 +3678,14 @@ function AssociationProducts({type}:{type:"PLATFORM"|"AGREEMENT"|"SOLUTION"}) {
 }
 
 function HomeAds(){
-  const {message,modal}=AntApp.useApp();const rows=usePagedLoad("/api/admin/content/home-ads",10);const floors=useLoad<Row[]>(()=>rootApi("/api/admin/content/home-floors?page=1&pageSize=100")).data as any;
-  const floorRows=Array.isArray(floors)?floors:(floors?.records||floors?.content||[]);const [form]=Form.useForm();const [itemForm]=Form.useForm();const [open,setOpen]=useState(false);const [editing,setEditing]=useState<Row>();const [group,setGroup]=useState<Row>();const [items,setItems]=useState<Row[]>([]);const [itemsOpen,setItemsOpen]=useState(false);const [itemEditing,setItemEditing]=useState<Row>();const [itemEditorOpen,setItemEditorOpen]=useState(false);
+  const {message,modal}=AntApp.useApp();const rows=usePagedLoad("/api/admin/content/home-ads",10);const floorLoad=useLoad<Row[]>(()=>rootApi("/api/admin/content/home-floors"));const floors=floorLoad.data;
+  const floorRows=floors||[];const [form]=Form.useForm();const [itemForm]=Form.useForm();const [open,setOpen]=useState(false);const [editing,setEditing]=useState<Row>();const [group,setGroup]=useState<Row>();const [items,setItems]=useState<Row[]>([]);const [itemsOpen,setItemsOpen]=useState(false);const [itemEditing,setItemEditing]=useState<Row>();const [itemEditorOpen,setItemEditorOpen]=useState(false);
+  const [itemsLoading,setItemsLoading]=useState(false);const [itemsError,setItemsError]=useState("");
   const layouts:Row={FULL:"通栏横幅",DOUBLE:"双栏专区",TRIPLE:"三栏专区",GRID4:"四宫格",FEATURED:"左大右小",CAROUSEL:"轮播广告"};
   const placements:Row={TOP:"首页顶部",BEFORE_FLOOR:"指定楼层之前",AFTER_FLOOR:"指定楼层之后",BOTTOM:"首页底部"};
   const show=(row?:Row)=>{setEditing(row);form.resetFields();form.setFieldsValue(row||{layoutType:"DOUBLE",placement:"TOP",targetScope:"ALL",sortOrder:10,status:1,anchorFloorId:null,startsAt:null,endsAt:null});setOpen(true);};
   const save=async()=>{try{const v=await form.validateFields();await rootMutation(`/api/admin/content/home-ads${editing?`/${editing.id}`:""}`,{method:editing?"PUT":"POST",body:JSON.stringify({...v,anchorFloorId:v.anchorFloorId||null,startsAt:v.startsAt||null,endsAt:v.endsAt||null})});message.success("广告组已保存");setOpen(false);void rows.refresh();}catch(e){message.error((e as Error).message)}};
-  const manage=async(row:Row)=>{setGroup(row);setItemsOpen(true);setItems(await rootApi<Row[]>(`/api/admin/content/home-ads/${row.id}/items`));};
+  const manage=async(row:Row)=>{setGroup(row);setItemsOpen(true);setItems([]);setItemsLoading(true);setItemsError("");try{setItems(await rootApi<Row[]>(`/api/admin/content/home-ads/${row.id}/items`));}catch(error){setItemsError((error as Error).message);}finally{setItemsLoading(false);}};
   const showItem=(row?:Row)=>{setItemEditing(row);itemForm.resetFields();itemForm.setFieldsValue(row||{title:"",openTarget:"SELF",sortOrder:items.length*10+10,status:1});setItemEditorOpen(true);};
   const saveItem=async()=>{try{const v=await itemForm.validateFields();await rootMutation(`/api/admin/content/home-ads/${group!.id}/items${itemEditing?`/${itemEditing.id}`:""}`,{method:itemEditing?"PUT":"POST",body:JSON.stringify({...v,h5ImageUrl:v.h5ImageUrl||null,linkUrl:v.linkUrl||null})});message.success("广告图片已保存");setItemEditorOpen(false);await manage(group!);}catch(e){message.error((e as Error).message)}};
   const removeItem=(row:Row)=>modal.confirm({title:"移除该广告图片？",okButtonProps:{danger:true},onOk:async()=>{await rootMutation(`/api/admin/content/home-ads/${group!.id}/items/${row.id}`,{method:"DELETE"});await manage(group!);}});
@@ -3682,8 +3693,8 @@ function HomeAds(){
   return <><Card className="data-card" title="首页广告组" extra={<Button type="primary" onClick={()=>show()}>＋ 新增广告组</Button>}><Table rowKey="id" loading={rows.loading} dataSource={rows.data} server={{...rows.server,statusOptions:[{label:"启用",value:"1"},{label:"停用",value:"0"}]}} searchPlaceholder="搜索广告组名称、版式或位置" columns={[
     {title:"广告组",render:(_,r)=><><strong>{r.name}</strong><small className="subline">{layouts[r.layoutType]} · {r.itemCount} 张图片</small></>},{title:"插入位置",render:(_,r)=>`${placements[r.placement]||r.placement}${r.anchorFloorId?` · 楼层 #${r.anchorFloorId}`:""}`},{title:"显示端",dataIndex:"targetScope",render:v=>({ALL:"Web + H5",WEB:"Web",H5:"H5"} as Row)[v]},{title:"排序",dataIndex:"sortOrder",width:80},{title:"状态",dataIndex:"status",width:90,render:v=><Tag color={Number(v)===1?"green":"default"}>{Number(v)===1?"启用":"停用"}</Tag>},{title:"操作",width:210,render:(_,r)=><Space><Button type="link" onClick={()=>void manage(r)}>广告项</Button><Button type="link" onClick={()=>show(r)}>编辑</Button><Button type="link" danger onClick={()=>remove(r)}>删除</Button></Space>}
   ]}/></Card>
-  <Modal open={open} title={`${editing?"编辑":"新增"}广告组`} width={760} onCancel={()=>setOpen(false)} onOk={()=>void save()}><Form form={form} layout="vertical" className="two-column-form"><Form.Item name="name" label="广告组名称" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="layoutType" label="展示版式" rules={[{required:true}]}><Select options={Object.entries(layouts).map(([value,label])=>({value,label}))}/></Form.Item><Form.Item name="placement" label="插入位置" rules={[{required:true}]}><Select options={Object.entries(placements).map(([value,label])=>({value,label}))}/></Form.Item><Form.Item noStyle shouldUpdate={(a,b)=>a.placement!==b.placement}>{({getFieldValue})=>["BEFORE_FLOOR","AFTER_FLOOR"].includes(getFieldValue("placement"))?<Form.Item name="anchorFloorId" label="指定楼层" rules={[{required:true}]}><Select options={(floorRows||[]).map((r:Row)=>({value:Number(r.id),label:r.title}))}/></Form.Item>:<span/>}</Form.Item><Form.Item name="targetScope" label="显示端"><Select options={[{value:"ALL",label:"Web + H5"},{value:"WEB",label:"仅 Web"},{value:"H5",label:"仅 H5"}]}/></Form.Item><Form.Item name="sortOrder" label="排序"><InputNumber min={0} style={{width:"100%"}}/></Form.Item><Form.Item name="startsAt" label="生效时间"><Input type="datetime-local"/></Form.Item><Form.Item name="endsAt" label="失效时间"><Input type="datetime-local"/></Form.Item><Form.Item name="status" label="状态"><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]}/></Form.Item></Form></Modal>
-  <Modal open={itemsOpen} title={`${group?.name||""} · 广告项`} width={900} footer={null} onCancel={()=>setItemsOpen(false)}><div style={{textAlign:"right",marginBottom:12}}><Button type="primary" onClick={()=>showItem()}>＋ 添加图片</Button></div><Table rowKey="id" pagination={false} dataSource={items} columns={[{title:"图片",width:160,render:(_,r)=><img src={r.webImageUrl} alt={r.title} style={{width:130,height:60,objectFit:"cover",borderRadius:6}}/>},{title:"标题",dataIndex:"title"},{title:"链接",dataIndex:"linkUrl",render:v=>v||"—"},{title:"打开方式",dataIndex:"openTarget",render:v=>v==="BLANK"?"新页面":"当前页面"},{title:"排序",dataIndex:"sortOrder",width:70},{title:"状态",dataIndex:"status",width:70,render:v=>Number(v)===1?"显示":"隐藏"},{title:"操作",width:130,render:(_,r)=><Space><Button type="link" onClick={()=>showItem(r)}>编辑</Button><Button type="link" danger onClick={()=>removeItem(r)}>移除</Button></Space>}]} /></Modal>
+  <Modal open={open} title={`${editing?"编辑":"新增"}广告组`} width={760} onCancel={()=>setOpen(false)} onOk={()=>void save()}><LoadFeedback loads={[floorLoad]}/><Form form={form} layout="vertical" className="two-column-form"><Form.Item name="name" label="广告组名称" rules={[{required:true}]}><Input/></Form.Item><Form.Item name="layoutType" label="展示版式" rules={[{required:true}]}><Select options={Object.entries(layouts).map(([value,label])=>({value,label}))}/></Form.Item><Form.Item name="placement" label="插入位置" rules={[{required:true}]}><Select options={Object.entries(placements).map(([value,label])=>({value,label}))}/></Form.Item><Form.Item noStyle shouldUpdate={(a,b)=>a.placement!==b.placement}>{({getFieldValue})=>["BEFORE_FLOOR","AFTER_FLOOR"].includes(getFieldValue("placement"))?<Form.Item name="anchorFloorId" label="指定楼层" rules={[{required:true}]}><Select options={(floorRows||[]).map((r:Row)=>({value:Number(r.id),label:r.title}))}/></Form.Item>:<span/>}</Form.Item><Form.Item name="targetScope" label="显示端"><Select options={[{value:"ALL",label:"Web + H5"},{value:"WEB",label:"仅 Web"},{value:"H5",label:"仅 H5"}]}/></Form.Item><Form.Item name="sortOrder" label="排序"><InputNumber min={0} style={{width:"100%"}}/></Form.Item><Form.Item name="startsAt" label="生效时间"><Input type="datetime-local"/></Form.Item><Form.Item name="endsAt" label="失效时间"><Input type="datetime-local"/></Form.Item><Form.Item name="status" label="状态"><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]}/></Form.Item></Form></Modal>
+  <Modal open={itemsOpen} title={`${group?.name||""} · 广告项`} width={900} footer={null} onCancel={()=>setItemsOpen(false)}><div style={{textAlign:"right",marginBottom:12}}><Button type="primary" disabled={itemsLoading||Boolean(itemsError)} onClick={()=>showItem()}>＋ 添加图片</Button></div><Table rowKey="id" pagination={false} loading={itemsLoading} loadState={{error:itemsError,refresh:()=>manage(group!)}} dataSource={items} columns={[{title:"图片",width:160,render:(_,r)=><img src={r.webImageUrl} alt={r.title} style={{width:130,height:60,objectFit:"cover",borderRadius:6}}/>},{title:"标题",dataIndex:"title"},{title:"链接",dataIndex:"linkUrl",render:v=>v||"—"},{title:"打开方式",dataIndex:"openTarget",render:v=>v==="BLANK"?"新页面":"当前页面"},{title:"排序",dataIndex:"sortOrder",width:70},{title:"状态",dataIndex:"status",width:70,render:v=>Number(v)===1?"显示":"隐藏"},{title:"操作",width:130,render:(_,r)=><Space><Button type="link" onClick={()=>showItem(r)}>编辑</Button><Button type="link" danger onClick={()=>removeItem(r)}>移除</Button></Space>}]} /></Modal>
   <Modal open={itemEditorOpen} title={`${itemEditing?"编辑":"新增"}广告项`} width={760} onCancel={()=>setItemEditorOpen(false)} onOk={()=>void saveItem()}><Form form={itemForm} layout="vertical" className="two-column-form"><Form.Item name="title" label="广告标题"><Input/></Form.Item><Form.Item name="linkUrl" label="跳转链接"><Input placeholder="站内路径或完整网址"/></Form.Item><Form.Item name="webImageUrl" label="Web 图片" className="full" rules={[{required:true,message:"请上传 Web 图片"}]}><ProductImageUpload kind="adWeb"/></Form.Item><Form.Item name="h5ImageUrl" label="H5 图片（不填则使用 Web 图片）" className="full"><ProductImageUpload kind="adH5"/></Form.Item><Form.Item name="openTarget" label="打开方式"><Select options={[{value:"SELF",label:"当前页面"},{value:"BLANK",label:"新页面"}]}/></Form.Item><Form.Item name="sortOrder" label="排序"><InputNumber min={0} style={{width:"100%"}}/></Form.Item><Form.Item name="status" label="状态"><Select options={[{value:1,label:"显示"},{value:0,label:"隐藏"}]}/></Form.Item></Form></Modal></>;
 }
 
@@ -3703,19 +3714,25 @@ function HomeFloors() {
   const [floor, setFloor] = useState<Row>();
   const [items, setItems] = useState<Row[]>([]);
   const [itemsOpen, setItemsOpen] = useState(false);
+  const [itemsLoading,setItemsLoading]=useState(false);
+  const [itemsError,setItemsError]=useState("");
   const selectionRule = Form.useWatch("selectionRule", form);
   const contentType = Form.useWatch("contentType", form);
+  const [selectionLoading,setSelectionLoading]=useState(false);
+  const [selectionError,setSelectionError]=useState("");
+  const loadSelection = async (row:Row) => {
+    setSelectionLoading(true);setSelectionError("");
+    try { const selected=await rootApi<Row[]>(`/api/admin/content/home-floors/${row.id}/items`);form.setFieldValue("contentIds",selected.map(item=>Number(item.contentId))); }
+    catch(error){setSelectionError((error as Error).message);}
+    finally{setSelectionLoading(false);}
+  };
   const show = async (row?: Row) => {
     setEditing(row);
     form.resetFields();
     form.setFieldsValue(row || { contentType: "PRODUCT", selectionRule: "LATEST", displayCount: 4, targetScope: "ALL", sortOrder: 0, status: 1 });
     setOpen(true);
-    if(row?.selectionRule === "MANUAL") {
-      try {
-        const selected=await rootApi<Row[]>(`/api/admin/content/home-floors/${row.id}/items`);
-        form.setFieldValue("contentIds",selected.map((item)=>Number(item.contentId)));
-      } catch (error) { message.error((error as Error).message); }
-    }
+    setSelectionError("");
+    if(row?.selectionRule === "MANUAL") await loadSelection(row);
   };
   const save = async () => {
     try {
@@ -3729,7 +3746,8 @@ function HomeFloors() {
   };
   const manageItems = async (row: Row) => {
     setFloor(row); setItemsOpen(true); itemForm.resetFields();
-    const result = await rootApi<Row[]>(`/api/admin/content/home-floors/${row.id}/items`); setItems(result);
+    setItems([]);setItemsLoading(true);setItemsError("");
+    try{setItems(await rootApi<Row[]>(`/api/admin/content/home-floors/${row.id}/items`));}catch(error){setItemsError((error as Error).message);}finally{setItemsLoading(false);}
   };
   const addItem = async () => {
     try {
@@ -3757,6 +3775,7 @@ function HomeFloors() {
   const typeLabels: Record<string,string> = { PRODUCT: "商品", SOLUTION: "方案", CATEGORY: "分类", CONTENT: "文章" };
   const ruleLabels: Record<string,string> = { MANUAL: "手动选择", LATEST: "最新上架", SALES: "销量排行", VIEWS: "浏览排行", CATEGORY: "指定分类", BRAND: "指定品牌", PLATFORM: "指定平台", AGREEMENT: "协议商品" };
   return <>
+    <LoadFeedback loads={[products,categories,brands,platforms,articles]}/>
     <Card className="data-card" title="首页楼层列表" extra={<Button type="primary" onClick={() => void show()}>＋ 新增楼层</Button>}>
       <Table rowKey="id" loading={rows.loading} dataSource={rows.data} server={rows.server} searchPlaceholder="搜索楼层名称、副标题或选品规则" columns={[
         { title: "楼层", render: (_, row) => <><strong>{row.title}</strong><small className="subline">{row.subtitle || "—"}</small></> },
@@ -3768,8 +3787,9 @@ function HomeFloors() {
         { title: "操作", width: 210, render: (_, row) => <Space>{row.selectionRule === "MANUAL" && <Button type="link" onClick={() => void manageItems(row)}>内容管理</Button>}<Button type="link" onClick={() => void show(row)}>编辑</Button></Space> },
       ]} />
     </Card>
-    <Modal open={open} title={`${editing?"编辑":"新增"}首页楼层`} width={720} onCancel={() => setOpen(false)} onOk={() => void save()}>
-      <Form form={form} layout="vertical" className="two-column-form">
+    <Modal open={open} title={`${editing?"编辑":"新增"}首页楼层`} width={720} okButtonProps={{disabled:selectionLoading||!!selectionError}} onCancel={() => setOpen(false)} onOk={() => void save()}>
+      <LoadFeedback loads={[{loading:selectionLoading,error:selectionError,refresh:()=>loadSelection(editing!)}]} />
+      <Form form={form} disabled={selectionLoading||!!selectionError} layout="vertical" className="two-column-form">
         <Form.Item name="title" label="楼层名称" rules={[{required:true}]}><Input placeholder="例如：最新上架" /></Form.Item>
         <Form.Item name="subtitle" label="楼层副标题"><Input /></Form.Item>
         <Form.Item name="contentType" label="内容类型" rules={[{required:true}]}><Select options={Object.entries(typeLabels).map(([value,label])=>({value,label}))} /></Form.Item>
@@ -3787,7 +3807,7 @@ function HomeFloors() {
       </Form>
     </Modal>
     <Modal open={itemsOpen} title={`${floor?.title||""} · 内容管理`} width={860} footer={null} className="floor-items-modal" onCancel={() => setItemsOpen(false)}>
-      <Form form={itemForm} className="floor-item-add-form">
+      <Form disabled={itemsLoading||Boolean(itemsError)} form={itemForm} className="floor-item-add-form">
         <Form.Item name="contentId" label="添加楼层内容" rules={[{required:true,message:"请选择或输入内容"}]}>
           {floor?.contentType==="PRODUCT"
             ? <Select showSearch optionFilterProp="label" placeholder="输入商品名称或 SKU 搜索并选择" options={selectableSkus.map(row=>({value:Number(row.id||row.skuId),label:`${row.title} · ${row.skuCode}`}))} />
@@ -3797,7 +3817,7 @@ function HomeFloors() {
         </Form.Item>
         <Button type="primary" onClick={() => void addItem()}>添加</Button>
       </Form>
-      <div className="floor-items-table"><Table rowKey="id" pagination={false} dataSource={items} columns={[{title:"内容",render:(_,row)=><><strong>{row.title||`内容 #${row.contentId}`}</strong><small className="subline">{row.subtitle}</small></>},{title:"展示顺序",width:150,render:(_,row,index)=><Space size={4}><Button className="sort-arrow-button" disabled={index===0} onClick={()=>void moveItem(index,-1)} title="上移">↑</Button><Button className="sort-arrow-button" disabled={index===items.length-1} onClick={()=>void moveItem(index,1)} title="下移">↓</Button><Typography.Text type="secondary">第 {index+1} 位</Typography.Text></Space>},{title:"操作",width:90,render:(_,row)=><Button type="link" danger onClick={()=>void removeItem(row)}>移除</Button>}]} /></div>
+      <div className="floor-items-table"><Table rowKey="id" pagination={false} loading={itemsLoading} loadState={{error:itemsError,refresh:()=>manageItems(floor!)}} dataSource={items} columns={[{title:"内容",render:(_,row)=><><strong>{row.title||`内容 #${row.contentId}`}</strong><small className="subline">{row.subtitle}</small></>},{title:"展示顺序",width:150,render:(_,row,index)=><Space size={4}><Button className="sort-arrow-button" disabled={index===0} onClick={()=>void moveItem(index,-1)} title="上移">↑</Button><Button className="sort-arrow-button" disabled={index===items.length-1} onClick={()=>void moveItem(index,1)} title="下移">↓</Button><Typography.Text type="secondary">第 {index+1} 位</Typography.Text></Space>},{title:"操作",width:90,render:(_,row)=><Button type="link" danger onClick={()=>void removeItem(row)}>移除</Button>}]} /></div>
     </Modal>
   </>;
 }
@@ -3820,7 +3840,7 @@ function PortalManager({ module }: { module: Module }) {
   const rows = isBrand ? brandRows : resourceRows;
   const products = useLoad<Row[]>(() =>
     rootApi("/api/admin/business/products"),
-  );
+  [],["platforms","solutions"].includes(module));
   const selectableSkus=expandProductSkus(products.data||[]).filter((sku)=>Number(sku.status)===1);
   const [form] = Form.useForm();
   const [open, setOpen] = useState(false);
@@ -4049,6 +4069,7 @@ function PortalManager({ module }: { module: Module }) {
   ];
   return (
     <>
+      <LoadFeedback loads={[products]}/>
       <Card
         className="data-card"
         title={current.title}
@@ -4379,26 +4400,42 @@ function PortalManager({ module }: { module: Module }) {
 function useLoad<T>(loader: () => Promise<T>, deps: unknown[] = [], enabled = true) {
   const { message } = AntApp.useApp();
   const [data, setData] = useState<T>();
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(enabled);
   const [error, setError] = useState("");
+  const requestVersion=useRef(0);
   const refresh = async () => {
+    const version=++requestVersion.current;
     setLoading(true);
     setError("");
     try {
-      setData(await loader());
+      const next=await loader();
+      if(version===requestVersion.current)setData(next);
     } catch (error) {
+      if(version!==requestVersion.current)return;
       const detail=(error as Error).message||"数据加载失败";
       setError(detail);
       message.error(detail);
     } finally {
-      setLoading(false);
+      if(version===requestVersion.current)setLoading(false);
     }
   };
   useEffect(() => {
-    if(!enabled){setLoading(false);return;}
+    if(!enabled){setLoading(false);setError("");return;}
     void refresh();
+    return ()=>{requestVersion.current++;};
   }, [enabled,...deps]);
   return { data, loading, error, refresh };
+}
+
+function LoadBoundary({load,children,empty=false,emptyText="暂无数据"}:{load:{data?:unknown;loading:boolean;error:string;refresh:()=>Promise<void>};children:ReactNode;empty?:boolean;emptyText?:string}) {
+  if(load.error) return <Result status="error" title="数据加载失败" subTitle={load.error} extra={<Button type="primary" onClick={()=>void load.refresh()}>重新加载</Button>}/>;
+  if(load.loading&&load.data===undefined) return <div role="status" style={{padding:32,textAlign:"center"}}><Spin/><div style={{marginTop:12,color:"#64748b"}}>正在加载数据…</div></div>;
+  if(empty) return <Result status="info" title={emptyText}/>;
+  return <Spin spinning={load.loading}>{children}</Spin>;
+}
+
+function LoadFeedback({loads}:{loads:{loading:boolean;error:string;refresh:()=>Promise<void>}[]}) {
+  return <>{loads.some(load=>load.loading)&&<div role="status" style={{padding:12}}><Spin size="small"/> 正在加载选项…</div>}{loads.filter(load=>load.error).map((load,index)=><Alert key={index} type="error" showIcon message="数据加载失败，请重试后再操作" description={load.error} action={<Button onClick={()=>void load.refresh()}>重新加载</Button>} style={{marginBottom:12}}/>)}</>;
 }
 
 type PageResult<T> = { records: T[]; total: number; page: number; pageSize: number; totalPages: number };
@@ -4413,7 +4450,9 @@ function usePagedLoad(endpoint: string, initialPageSize = 10, deps: unknown[] = 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [revision, setRevision] = useState(0);
+  const requestVersion=useRef(0);
   const load = async (quiet = false) => {
+    const version=++requestVersion.current;
     if (!quiet) setLoading(true);
     if (!quiet) setError("");
     try {
@@ -4423,22 +4462,25 @@ function usePagedLoad(endpoint: string, initialPageSize = 10, deps: unknown[] = 
       if (keyword.trim()) url.searchParams.set("keyword", keyword.trim());
       if (status !== undefined) url.searchParams.set("status", status);
       const result = await rootApi<PageResult<Row>>(url.pathname + url.search);
+      if(version!==requestVersion.current)return;
+      setError("");
       setData(result.records || []);
       setTotal(Number(result.total || 0));
       if (result.total > 0 && page > Math.max(1, result.totalPages)) setPageValue(Math.max(1, result.totalPages));
     } catch (error) {
+      if(version!==requestVersion.current)return;
+      const detail=(error as Error).message||"列表加载失败";
+      setError(detail);
       if (!quiet) {
-        const detail=(error as Error).message||"列表加载失败";
-        setError(detail);
         message.error(detail);
       }
     }
-    finally { setLoading(false); }
+    finally { if(version===requestVersion.current)setLoading(false); }
   };
   useEffect(() => {
     if (!enabled) { setData([]); setTotal(0); setLoading(false); return; }
     const timer = window.setTimeout(() => void load(), keyword ? 300 : 0);
-    return () => window.clearTimeout(timer);
+    return () => {window.clearTimeout(timer);requestVersion.current++;};
   }, [endpoint, page, pageSize, keyword, status, revision, enabled, ...deps]);
   const server = {
     total, page, pageSize, keyword, status,
@@ -4654,13 +4696,15 @@ function CollectJobs() {
 }
 
 function Overview({ go }: { go: (value: Module) => void }) {
-  const { data = {}, loading } = useLoad<Row>(() => api("/summary"));
+  const result = useLoad<Row>(() => api("/summary"));
+  const { data = {}, loading } = result;
   const metrics = [
     ["后台用户", data.users ?? 0, "用", "#e9f2ff"],
     ["系统角色", data.roles ?? 0, "角", "#e8faf6"],
     ["权限点", data.permissions ?? 0, "权", "#f4edff"],
     ["今日操作", data.todayLogs ?? 0, "志", "#fff4e5"],
   ];
+  if(result.error)return <LoadBoundary load={result}><span/></LoadBoundary>;
   return (
     <>
       <div className="metric-grid">
@@ -4858,7 +4902,7 @@ function Users() {
         okText="保存"
         width={680}
       >
-        <Form form={form} layout="vertical" className="two-column-form">
+        <LoadFeedback loads={[roles]}/><Form form={form} layout="vertical" className="two-column-form">
           <Form.Item
             name="username"
             label="登录账号"
@@ -5046,7 +5090,7 @@ function Roles() {
           </Button>
         }
       >
-        <Form form={form} layout="vertical">
+        <LoadFeedback loads={[permissions]}/><Form form={form} layout="vertical">
           <Form.Item name="name" label="角色名称" rules={[{ required: true }]}>
             <Input />
           </Form.Item>
@@ -5374,7 +5418,7 @@ function Configs() {
     });
   return (
     <>
-      <Card className="config-tabs">
+      <Card className="config-tabs"><LoadBoundary load={result}>
         <Tabs
           items={[
             ...groups.map(([group, items]) => ({
@@ -5485,7 +5529,7 @@ function Configs() {
             },
           ]}
         />
-      </Card>
+      </LoadBoundary></Card>
       <Modal
         open={optionOpen}
         title={editingOption ? "编辑选项配置" : "新增选项配置"}
