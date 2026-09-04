@@ -167,8 +167,8 @@ function Table<T extends Row>({
       dataSource={filteredRows}
       locale={{
         ...props.locale,
-        emptyText: server?.error
-          ? <Result status="error" title="列表加载失败" subTitle={server.error} extra={<Button type="primary" onClick={server.retry}>重新加载</Button>} />
+        emptyText: (server?.error || loadState?.error)
+          ? <Typography.Text type="secondary">数据尚未加载成功，请使用上方“重新加载”重试。</Typography.Text>
           : props.locale?.emptyText,
       }}
       rowSelection={{
