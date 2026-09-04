@@ -4496,10 +4496,37 @@ function usePagedLoad(endpoint: string, initialPageSize = 10, deps: unknown[] = 
   return { data, total, loading, server, refresh: async () => setRevision((value) => value + 1), refreshQuiet: () => load(true) };
 }
 
+function CollectJobInputs({jobId,onClose}:{jobId:number;onClose:()=>void}) {
+  const result=useLoad<Row>(()=>rootApi(`/api/admin/business/products/collect-jobs/${jobId}`),[jobId]);
+  const items:Row[]=result.data?.items||[];
+  const priceText=(item:Row)=>item.memberPrice==null?"":String(item.memberPrice);
+  const lineText=(item:Row)=>`${item.url}${priceText(item)?`\t${priceText(item)}`:""}`;
+  const batchText=items.map(lineText).join("\n");
+  return <Modal open title={`采集任务 #${jobId} · 链接与价格`} width={900} onCancel={onClose} footer={<Button onClick={onClose}>关闭</Button>}>
+    <LoadBoundary load={result} empty={!result.loading&&!result.error&&items.length===0} emptyText="该任务暂无采集条目">
+      <Alert type="info" showIcon message="价格为创建任务时填写的售价，不是采集后的商品价格。复制后可粘贴到批量采集输入框；未填写价格的条目需按目标平台要求补填。" style={{marginBottom:16}}/>
+      <Space wrap style={{marginBottom:12}}>
+        <Typography.Text strong copyable={{text:batchText,tooltips:["复制全部链接与价格","已复制"]}}>全部链接与价格</Typography.Text>
+        <Typography.Text copyable={{text:items.map(item=>item.url).join("\n"),tooltips:["仅复制全部链接","已复制"]}}>仅链接</Typography.Text>
+        <Typography.Text type="secondary">共 {items.length} 条</Typography.Text>
+      </Space>
+      <AntTable<Row> size="small" rowKey="id" pagination={false} scroll={{y:340}} dataSource={items} columns={[
+        {title:"平台",width:90,render:(_,item)=>collectPlatformLabel(String(item.platform))},
+        {title:"商品链接",render:(_,item)=><Typography.Text style={{wordBreak:"break-all"}} copyable={{text:item.url}}>{item.url}</Typography.Text>},
+        {title:"提交售价",width:130,render:(_,item)=>priceText(item)?<Typography.Text copyable={{text:priceText(item)}}>¥{priceText(item)}</Typography.Text>:<Typography.Text type="secondary">未填写</Typography.Text>},
+        {title:"复制",width:100,render:(_,item)=><Typography.Text copyable={{text:lineText(item),tooltips:["复制本行链接与价格","已复制"]}}>本行</Typography.Text>},
+      ]}/>
+      <div style={{marginTop:16}}>批量文本（每行一条，链接与价格以制表符分隔）</div>
+      <Input.TextArea aria-label="任务链接与价格批量文本" readOnly value={batchText} autoSize={{minRows:3,maxRows:6}} style={{marginTop:8}}/>
+    </LoadBoundary>
+  </Modal>;
+}
+
 function CollectJobs() {
   const { message } = AntApp.useApp();
   const rows = usePagedLoad("/api/admin/business/products/collect-jobs", 10);
   const [detail, setDetail] = useState<Row>();
+  const [inputJobId,setInputJobId]=useState<number>();
   const [retryingId, setRetryingId] = useState<number>();
   const stopJob = (row: Row) => Modal.confirm({
     title: `中止采集任务 #${row.id}？`,
@@ -4622,12 +4649,13 @@ function CollectJobs() {
             { title: "创建时间", dataIndex: "createdAt", width: 170, render: dateTime },
             {
               title: "操作",
-              width: 150,
+              width: 230,
               render: (_: unknown, row: Row) => (
-                <Space size={0}>
+                <Space size={0} wrap>
                   <Button type="link" onClick={() => void openDetail(row)}>
                     {row.mode === "BATCH" ? "详情" : "查看"}
                   </Button>
+                  <Button type="link" onClick={()=>setInputJobId(Number(row.id))}>链接/价格</Button>
                   {["PENDING", "RUNNING"].includes(String(row.status)) && <Button type="link" danger onClick={() => stopJob(row)}>中止</Button>}
                   {Number(row.failCount || 0) > 0 && !["PENDING", "RUNNING", "CANCELLING"].includes(String(row.status)) && (
                     <Button type="link" loading={retryingId === Number(row.id)} onClick={() => retryFailed(row)}>重试</Button>
@@ -4638,6 +4666,7 @@ function CollectJobs() {
           ]}
         />
       </Card>
+      {inputJobId!=null&&<CollectJobInputs key={inputJobId} jobId={inputJobId} onClose={()=>setInputJobId(undefined)}/>}
       <Drawer
         title={detail ? `采集任务 #${detail.id}` : "采集任务详情"}
         width={880}
