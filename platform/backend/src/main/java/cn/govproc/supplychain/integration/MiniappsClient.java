@@ -1,7 +1,6 @@
 package cn.govproc.supplychain.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -19,15 +18,12 @@ import org.springframework.web.client.RestClient;
 @Component
 public class MiniappsClient {
     private final RestClient http;
-    private final ObjectMapper mapper;
     private final String apiId;
     private final String secret;
 
-    public MiniappsClient(ObjectMapper mapper,
-        @Value("${app.miniapps.base-url:https://main.miniappss.com/terminal}") String baseUrl,
+    public MiniappsClient(@Value("${app.miniapps.base-url:https://main.miniappss.com/terminal}") String baseUrl,
         @Value("${app.miniapps.api-id:}") String apiId,
         @Value("${app.miniapps.secret:}") String secret) {
-        this.mapper = mapper;
         this.http = RestClient.builder().baseUrl(baseUrl.replaceAll("/+$", "")).build();
         this.apiId = apiId.trim();
         this.secret = secret.trim();

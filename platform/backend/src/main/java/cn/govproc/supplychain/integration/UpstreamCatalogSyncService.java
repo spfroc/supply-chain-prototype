@@ -36,13 +36,13 @@ public class UpstreamCatalogSyncService {
     private final int pageSize;
     private volatile boolean messagePolling;
 
-    public UpstreamCatalogSyncService(JdbcClient jdbc, MiniappsClient client, ObjectMapper mapper,
+    public UpstreamCatalogSyncService(JdbcClient jdbc, MiniappsClient client,
         PlatformTransactionManager transactionManager, @Qualifier("collectJobExecutor") java.util.concurrent.Executor taskExecutor,
         @Value("${app.miniapps.sync-page-size:100}") int pageSize,
         @Value("${app.miniapps.detail-concurrency:16}") int concurrency) {
         this.jdbc = jdbc;
         this.client = client;
-        this.mapper = mapper;
+        this.mapper = new ObjectMapper();
         this.tx = new TransactionTemplate(transactionManager);
         this.background = taskExecutor;
         this.pageSize = Math.max(1, Math.min(pageSize, 100));
