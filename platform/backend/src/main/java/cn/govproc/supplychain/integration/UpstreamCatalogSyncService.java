@@ -223,17 +223,23 @@ public class UpstreamCatalogSyncService {
         int library = data.path("library").asInt();
         Long productId = jdbc.sql("SELECT product_id FROM upstream_product_mapping WHERE provider=:provider AND external_sku=:sku AND library=:library")
             .param("provider",PROVIDER).param("sku",sku).param("library",library).query(Long.class).optional().orElse(null);
-        if (type == 1 && productId != null) {
-            int state = data.path("state").asInt();
-            jdbc.sql("UPDATE product_spu SET status=:state WHERE id=:id").param("state",state==1?1:2).param("id",productId).update();
-            jdbc.sql("UPDATE product_sku SET status=:state WHERE spu_id=:id").param("state",state==1?1:0).param("id",productId).update();
-        } else if (type == 2 && "del".equalsIgnoreCase(data.path("ope").asText()) && productId != null) {
+        if (type == 2 && "del".equalsIgnoreCase(data.path("ope").asText())) {
+            if (productId == null) return;
             jdbc.sql("UPDATE product_spu SET status=2,deleted_at=NOW() WHERE id=:id").param("id",productId).update();
             jdbc.sql("UPDATE product_sku SET status=0,deleted_at=NOW() WHERE spu_id=:id").param("id",productId).update();
-        } else {
+            return;
+        }
+        if (productId == null || type >= 2) {
             DetailResult result = fetchWithRetry(mapper.createObjectNode().put("sku",sku).put("library",library));
             if (result.detail() == null) throw new IllegalStateException(result.error());
             upsertProduct(result.detail());
+            productId = jdbc.sql("SELECT product_id FROM upstream_product_mapping WHERE provider=:provider AND external_sku=:sku AND library=:library")
+                .param("provider",PROVIDER).param("sku",sku).param("library",library).query(Long.class).single();
+        }
+        if (type == 1) {
+            int state = data.path("state").asInt();
+            jdbc.sql("UPDATE product_spu SET status=:state WHERE id=:id").param("state",state==1?1:2).param("id",productId).update();
+            jdbc.sql("UPDATE product_sku SET status=:state WHERE spu_id=:id").param("state",state==1?1:0).param("id",productId).update();
         }
     }
 
