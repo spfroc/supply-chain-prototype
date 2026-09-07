@@ -1315,11 +1315,13 @@ function Checkout({
     0,
   );
   const [addresses, setAddresses] = useState<Row[]>([]);
+  const [bankAccounts,setBankAccounts]=useState<Row[]>([]);
+  const [bankAccountId,setBankAccountId]=useState<number>();
   const [allocations, setAllocations] = useState<Record<string, Row[]>>({});
   const [submitting, setSubmitting] = useState(false);
   const [initLoading,setInitLoading]=useState(true);
   const [initError,setInitError]=useState("");
-  const loadInitial=async()=>{setInitLoading(true);setInitError("");try{setAddresses(await api<Row[]>("/api/client/addresses"));}catch(error){setInitError((error as Error).message);}finally{setInitLoading(false);}};
+  const loadInitial=async()=>{setInitLoading(true);setInitError("");try{const[nextAddresses,nextBanks]=await Promise.all([api<Row[]>("/api/client/addresses"),api<Row[]>("/api/public/payment-bank-accounts")]);setAddresses(nextAddresses);setBankAccounts(nextBanks);setBankAccountId(Number(nextBanks[0]?.id)||undefined);}catch(error){setInitError((error as Error).message);}finally{setInitLoading(false);}};
   useEffect(()=>{void loadInitial();},[]);
   const currentAddress = addresses[0];
   useEffect(() => {
@@ -1376,6 +1378,10 @@ function Checkout({
       Toast.show("请先在用户中心添加收货地址");
       return;
     }
+    if(!bankAccountId){
+      Toast.show("暂无可用收款银行，请联系管理员配置");
+      return;
+    }
     const invalid = selected.find((row) => {
       const items = allocations[String(row.skuId)] || [];
       return (
@@ -1404,6 +1410,7 @@ function Checkout({
               quantity: Number(item.quantity),
             })),
           ),
+          bankAccountId,
         }),
       });
       await reload();
@@ -1509,13 +1516,18 @@ function Checkout({
           </div>
         ))}
       </section>
-      <section className="mobile-checkout-card mobile-payment">
-        <span><strong>支付方式</strong><small>订单提交后线下完成付款</small></span>
-        <b>银行转账</b>
+      <section className="mobile-checkout-card mobile-bank-accounts">
+        <h2>收款银行</h2>
+        <p>请选择订单线下转账的收款账号</p>
+        {bankAccounts.map(row=><label className={bankAccountId===Number(row.id)?"active":""} key={row.id}>
+          <input type="radio" name="mobile-bank" checked={bankAccountId===Number(row.id)} onChange={()=>setBankAccountId(Number(row.id))}/>
+          <span><strong>{row.bankName}</strong><small>{row.accountName}</small><b>{row.accountNumber}</b>{row.branchName&&<small>{row.branchName}</small>}</span>
+        </label>)}
+        {!bankAccounts.length&&<p className="mobile-bank-empty">暂无可用收款账号，请联系管理员</p>}
       </section>
       <footer className="mobile-checkout-submit">
         <span>应付 <strong>{money(total)}</strong></span>
-        <button disabled={!currentAddress || submitting} onClick={() => void submit()}>
+        <button disabled={!currentAddress || !bankAccountId || submitting} onClick={() => void submit()}>
           {submitting ? "提交中…" : "提交订单"}
         </button>
       </footer>
