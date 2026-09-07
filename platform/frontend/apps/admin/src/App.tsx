@@ -211,6 +211,7 @@ type Module =
   | "seoSettings"
   | "enterprises"
   | "enterpriseUsers"
+  | "salesEnterprises"
   | "agreements"
   | "agreementProducts"
   | "agreementOrders"
@@ -798,6 +799,7 @@ const navItems = [
     key: "enterpriseCenter", label: "企业管理", children: [
       { key: "enterprises", label: "企业管理", icon: <MenuIcon name="enterprise" /> },
       { key: "enterpriseUsers", label: "用户管理", icon: <MenuIcon name="user" /> },
+      { key: "salesEnterprises", label: "我邀请的企业", icon: <MenuIcon name="enterprise" /> },
     ],
   },
   {
@@ -834,6 +836,7 @@ const modulePermission: Partial<Record<Module, string>> = {
   navigations: "product:manage", banners: "product:manage", solutions: "product:manage",
   homeFloors: "product:manage", homeAds:"product:manage",
   contents: "product:manage", contactSettings: "product:manage", serviceFeatures: "product:manage", footerSettings: "product:manage", seoSettings:"product:manage", enterprises: "enterprise:manage", enterpriseUsers: "enterprise:manage",
+  salesEnterprises: "sales:enterprise:view",
   agreements: "agreement:manage", agreementProducts: "agreement:manage", agreementOrders: "order:manage",
   solutionProducts: "product:manage",
   orders: "order:manage", afterSales: "order:manage", finance: "order:manage", users: "system:user", roles: "system:role",
@@ -993,6 +996,7 @@ function AdminApp({ logout }: { logout: () => void }) {
     seoSettings: ["SEO/GEO配置", "配置全站搜索引擎、地域搜索和生成式搜索优化信息"],
     enterprises: ["企业管理", "查看企业客户、成员账户和有效采购协议"],
     enterpriseUsers: ["企业用户管理", "以用户维度查看、创建、编辑和维护全部企业账号"],
+    salesEnterprises: ["我邀请的企业", "查看通过本人邀请码注册并关联的企业"],
     agreements: ["协议管理", "维护协议商品关联及企业专属成交价格"],
     agreementProducts: ["协议商品管理", "按采购协议维护商品范围与企业专属价格"],
     agreementOrders: ["协议订单管理", "查看协议产生的采购订单与履约进度"],
@@ -1085,6 +1089,7 @@ function AdminApp({ logout }: { logout: () => void }) {
           {module === "agreementOrders" && <BusinessModule module="orders" endpointOverride="/agreement-orders" listTitle="协议订单列表" extraColumn="agreementName" />}
           {module === "platformOrders" && <BusinessModule module="orders" endpointOverride="/platform-orders" listTitle="平台关联商品订单列表" extraColumn="platformNames" />}
           {module === "enterpriseUsers" && <EnterpriseUsers />}
+          {module === "salesEnterprises" && <SalesEnterprises />}
           {module === "finance" && <FinanceManagement />}
           {module === "afterSales" && <AfterSalesManagement />}
           {module === "categories" && <Categories />}
@@ -3520,6 +3525,9 @@ function ContactSettings() {
   return <Card className="settings-card" title="Web 门户悬浮联系方式" extra={<Button type="primary" disabled={result.loading||Boolean(result.error)} onClick={()=>void save()}>保存配置</Button>}>
     <LoadFeedback loads={[result]}/>
     <Form disabled={result.loading||Boolean(result.error)} form={form} layout="vertical" className="settings-form">
+      <section className="form-section"><header><strong>显示控制</strong><span>仅控制 Web 端右侧悬浮联系栏，不影响页脚联系方式</span></header><div className="form-grid">
+        <Form.Item name="floatingEnabled" label="悬浮联系栏" valuePropName="checked"><Switch checkedChildren="显示" unCheckedChildren="隐藏" /></Form.Item>
+      </div></section>
       <section className="form-section"><header><strong>电话与邮箱</strong><span>用于 Web 端右侧悬浮联系栏</span></header><div className="form-grid">
         <Form.Item name="landline" label="座机" rules={[{required:true,message:"请输入座机号码"}]}><Input placeholder="例如：0531-86099058" /></Form.Item>
         <Form.Item name="mobile" label="手机" rules={[{required:true,message:"请输入手机号码"}]}><Input placeholder="例如：13105315957" /></Form.Item>
@@ -4005,6 +4013,10 @@ function PortalManager({ module }: { module: Module }) {
         </div>
       ),
     },
+    ...(module === "solutions" ? [
+      {title:"应用场景",dataIndex:"scenarioName",width:150,render:(value:string)=>value||"未设置"},
+      {title:"预算",dataIndex:"budgetAmount",width:120,render:(value:number)=>value==null?"未设置":`¥${Number(value).toFixed(2)}`},
+    ] : []),
     ...(isBrand
       ? []
       : [
@@ -4106,6 +4118,10 @@ function PortalManager({ module }: { module: Module }) {
           <Form.Item name="sortOrder" label="排序">
             <InputNumber min={0} style={{ width: "100%" }} />
           </Form.Item>
+          {module === "solutions" && <>
+            <Form.Item name="scenarioName" label="应用场景" rules={[{required:true,message:"请输入应用场景"}]}><Input placeholder="例如：会议室、新员工入职" /></Form.Item>
+            <Form.Item name="budgetAmount" label="方案预算" rules={[{required:true,message:"请输入方案预算"}]}><InputNumber min={0} precision={2} prefix="¥" style={{width:"100%"}} /></Form.Item>
+          </>}
           <Form.Item
             name={isBrand ? "description" : "subtitle"}
             label={module === "solutions" ? "适用场景" : "说明"}
@@ -4803,6 +4819,20 @@ function Overview({ go }: { go: (value: Module) => void }) {
   );
 }
 
+function InvitedEnterpriseTable({rows}:{rows:Row[]}){
+  return <AntTable<Row> rowKey="id" size="small" pagination={false} dataSource={rows} columns={[
+    {title:"企业名称",dataIndex:"name"},{title:"统一社会信用代码",dataIndex:"creditCode"},
+    {title:"联系人",render:(_,r)=><>{r.contactName}<small className="subline">{r.contactPhone}</small></>},
+    {title:"成员",dataIndex:"memberCount",width:80},{title:"审核状态",dataIndex:"auditStatus",width:100,render:v=>Number(v)===1?"已通过":Number(v)===2?"待审核":"未通过"},
+    {title:"注册时间",dataIndex:"createdAt",width:170},
+  ]}/>;
+}
+
+function SalesEnterprises(){
+  const rows=useLoad<Row[]>(()=>rootApi("/api/admin/system/my-invited-enterprises"));
+  return <Card className="data-card" title="邀请企业列表"><LoadBoundary load={rows} empty={!rows.loading&&!rows.error&&!rows.data?.length} emptyText="暂无通过您的邀请码注册的企业"><InvitedEnterpriseTable rows={rows.data||[]}/></LoadBoundary></Card>;
+}
+
 function Users() {
   const { message, modal } = AntApp.useApp();
   const roles = useLoad<Row[]>(() => api("/roles"));
@@ -4810,6 +4840,9 @@ function Users() {
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Row>();
   const [form] = Form.useForm();
+  const [invited,setInvited]=useState<{user:Row;rows:Row[]} | null>(null);
+  const generateInvite=async(row:Row)=>{try{const result=await api(`/users/${row.id}/invite-code`,{method:"POST"}) as Row;message.success(`邀请码 ${result.inviteCode} 已生成`);void users.refresh();}catch(error){message.error((error as Error).message);}};
+  const showInvited=async(row:Row)=>{try{setInvited({user:row,rows:await rootApi<Row[]>(`/api/admin/system/users/${row.id}/invited-enterprises`)});}catch(error){message.error((error as Error).message);}};
   const show = (row?: Row) => {
     setEditing(row);
     form.setFieldsValue(
@@ -4883,6 +4916,7 @@ function Users() {
       dataIndex: "roleNames",
       render: (value) => <Tag color="blue">{value || "未分配"}</Tag>,
     },
+    {title:"业务员邀请码",width:160,render:(_,row)=>row.inviteCode?<Typography.Text copyable={{text:row.inviteCode}}>{row.inviteCode}</Typography.Text>:<Button type="link" onClick={()=>void generateInvite(row)}>生成邀请码</Button>},
     {
       title: "状态",
       dataIndex: "status",
@@ -4900,6 +4934,7 @@ function Users() {
           <Button type="link" onClick={() => show(row)}>
             编辑
           </Button>
+          {row.inviteCode&&<Button type="link" onClick={()=>void showInvited(row)}>邀请企业（{row.invitedEnterpriseCount||0}）</Button>}
         </Space>
       ),
     },
@@ -4989,6 +5024,9 @@ function Users() {
             />
           </Form.Item>
         </Form>
+      </Modal>
+      <Modal open={!!invited} width={960} title={`${invited?.user.realName||""} 邀请的企业`} footer={<Button onClick={()=>setInvited(null)}>关闭</Button>} onCancel={()=>setInvited(null)}>
+        <InvitedEnterpriseTable rows={invited?.rows||[]}/>
       </Modal>
     </Card>
   );

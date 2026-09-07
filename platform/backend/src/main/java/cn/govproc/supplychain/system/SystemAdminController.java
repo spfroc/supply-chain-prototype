@@ -64,18 +64,54 @@ public class SystemAdminController {
     Object users(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
                  @RequestParam(defaultValue="") String keyword,@RequestParam(required=false) Integer status) {
         String base="""
-            SELECT u.id, u.username, u.real_name AS realName, u.phone, u.email, u.status,
+            SELECT u.id, u.username, u.real_name AS realName, u.phone, u.email, u.invite_code AS inviteCode, u.status,
+                   COUNT(DISTINCT e.id) AS invitedEnterpriseCount,
                    DATE_FORMAT(u.last_login_at, '%Y-%m-%d %H:%i:%s') AS lastLoginAt,
                    DATE_FORMAT(u.created_at, '%Y-%m-%d %H:%i:%s') AS createdAt,
-                   GROUP_CONCAT(r.name ORDER BY r.id SEPARATOR '、') AS roleNames,
-                   GROUP_CONCAT(r.id ORDER BY r.id) AS roleIds
+                   GROUP_CONCAT(DISTINCT r.name ORDER BY r.id SEPARATOR '、') AS roleNames,
+                   GROUP_CONCAT(DISTINCT r.id ORDER BY r.id) AS roleIds
             FROM sys_admin_user u
             LEFT JOIN sys_admin_user_role ur ON ur.user_id = u.id
             LEFT JOIN sys_role r ON r.id = ur.role_id
+            LEFT JOIN enterprise e ON e.salesperson_user_id=u.id AND e.deleted_at IS NULL
             WHERE u.deleted_at IS NULL
             GROUP BY u.id
             """;
         return pagedOrAll(base,"q.id",page,pageSize,keyword,status,List.of("username","realName","phone","email","roleNames"),"status");
+    }
+
+    @PostMapping("/users/{id}/invite-code")
+    @Transactional
+    Map<String,Object> generateInviteCode(@PathVariable long id) {
+        var users=jdbc.sql("SELECT invite_code AS inviteCode FROM sys_admin_user WHERE id=:id AND deleted_at IS NULL FOR UPDATE")
+            .param("id",id).query().listOfRows();
+        if(users.isEmpty()) throw new IllegalArgumentException("用户不存在");
+        Object existing=users.getFirst().get("inviteCode");
+        if(existing!=null&&!String.valueOf(existing).isBlank()) return Map.of("inviteCode",existing);
+        String code;
+        do { code=UUID.randomUUID().toString().replace("-","").substring(0,10).toUpperCase(); }
+        while(jdbc.sql("SELECT COUNT(*) FROM sys_admin_user WHERE invite_code=:code").param("code",code).query(Long.class).single()>0);
+        jdbc.sql("UPDATE sys_admin_user SET invite_code=:code WHERE id=:id AND invite_code IS NULL")
+            .param("code",code).param("id",id).update();
+        return Map.of("inviteCode",code);
+    }
+
+    @GetMapping("/users/{id}/invited-enterprises")
+    List<Map<String,Object>> invitedEnterprises(@PathVariable long id) {
+        return jdbc.sql("""
+            SELECT e.id,e.name,e.credit_code AS creditCode,e.contact_name AS contactName,
+              e.contact_phone AS contactPhone,e.audit_status AS auditStatus,e.status,
+              COUNT(DISTINCT eu.id) AS memberCount,DATE_FORMAT(e.created_at,'%Y-%m-%d %H:%i:%s') AS createdAt
+            FROM enterprise e LEFT JOIN enterprise_user eu ON eu.enterprise_id=e.id AND eu.deleted_at IS NULL
+            WHERE e.salesperson_user_id=:id AND e.deleted_at IS NULL GROUP BY e.id ORDER BY e.id DESC
+            """).param("id",id).query().listOfRows();
+    }
+
+    @GetMapping("/my-invited-enterprises")
+    List<Map<String,Object>> myInvitedEnterprises(Principal principal) {
+        long id=jdbc.sql("SELECT id FROM sys_admin_user WHERE username=:username AND status=1 AND deleted_at IS NULL")
+            .param("username",principal.getName()).query(Long.class).single();
+        return invitedEnterprises(id);
     }
 
     @PostMapping("/users")

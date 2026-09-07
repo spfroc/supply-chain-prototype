@@ -41,6 +41,13 @@ public class ClientAuthController {
         String creditCode=r.creditCode().trim().toUpperCase();
         String username=r.username().trim();
         String phone=r.phone().trim();
+        Long salespersonId=null;
+        if(r.inviteCode()!=null&&!r.inviteCode().isBlank()) {
+            var invitees=jdbc.sql("SELECT id FROM sys_admin_user WHERE invite_code=:code AND status=1 AND deleted_at IS NULL")
+              .param("code",r.inviteCode().trim().toUpperCase()).query(Long.class).list();
+            if(invitees.isEmpty()) throw new IllegalArgumentException("邀请码无效或已停用，请核对后重试");
+            salespersonId=invitees.getFirst();
+        }
         long usernameExists=jdbc.sql("""
           SELECT COUNT(*) FROM enterprise_user
           WHERE username=:username AND deleted_at IS NULL
@@ -65,10 +72,11 @@ public class ClientAuthController {
         long enterpriseId;
         if(newEnterprise) {
             jdbc.sql("""
-              INSERT INTO enterprise(name,credit_code,contact_name,contact_phone,audit_status,status)
-              VALUES(:name,:creditCode,:contactName,:contactPhone,2,1)
-              """).params(Map.of("name",enterpriseName,"creditCode",creditCode,
-                "contactName",r.realName().trim(),"contactPhone",phone)).update();
+              INSERT INTO enterprise(name,credit_code,contact_name,contact_phone,audit_status,status,salesperson_user_id)
+              VALUES(:name,:creditCode,:contactName,:contactPhone,2,1,:salespersonId)
+              """).param("name",enterpriseName).param("creditCode",creditCode)
+                .param("contactName",r.realName().trim()).param("contactPhone",phone)
+                .param("salespersonId",salespersonId).update();
             enterpriseId=jdbc.sql("SELECT id FROM enterprise WHERE credit_code=:creditCode AND deleted_at IS NULL")
               .param("creditCode",creditCode).query(Long.class).single();
         } else {
@@ -77,6 +85,13 @@ public class ClientAuthController {
             long enabled=jdbc.sql("SELECT COUNT(*) FROM enterprise WHERE id=:id AND status=1 AND deleted_at IS NULL")
               .param("id",enterpriseId).query(Long.class).single();
             if(enabled==0) throw new IllegalArgumentException("该企业当前已停用，请联系平台管理员");
+            Long bound=jdbc.sql("SELECT salesperson_user_id FROM enterprise WHERE id=:id")
+              .param("id",enterpriseId).query(Long.class).optional().orElse(null);
+            if(salespersonId!=null&&bound!=null&&!salespersonId.equals(bound))
+                throw new IllegalArgumentException("该企业已关联其他业务员，请联系平台管理员");
+            if(salespersonId!=null&&bound==null)
+                jdbc.sql("UPDATE enterprise SET salesperson_user_id=:salespersonId WHERE id=:id AND salesperson_user_id IS NULL")
+                  .param("salespersonId",salespersonId).param("id",enterpriseId).update();
         }
         String roleCode=newEnterprise?"ENTERPRISE_ADMIN":"BUYER";
         int status=2;
@@ -160,5 +175,6 @@ public class ClientAuthController {
     public record RegisterRequest(@NotBlank String enterpriseName,
       @NotBlank @Pattern(regexp="[0-9A-Z]{18}",message="请输入正确的18位统一社会信用代码") String creditCode,
       @NotBlank @Size(min=3,max=80) String username,@NotBlank @Size(min=8,max=72) String password,
-      @NotBlank String realName,@NotBlank @Pattern(regexp="1\\d{10}",message="请输入11位手机号码") String phone){}
+      @NotBlank String realName,@NotBlank @Pattern(regexp="1\\d{10}",message="请输入11位手机号码") String phone,
+      @Size(max=16) String inviteCode){}
 }

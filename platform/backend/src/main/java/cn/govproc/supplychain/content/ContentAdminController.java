@@ -45,7 +45,7 @@ public class ContentAdminController {
                 @RequestParam(defaultValue="10") int pageSize,@RequestParam(defaultValue="") String keyword,
                 @RequestParam(required=false) Integer status) {
         String base="""
-            SELECT id,title,subtitle,description,price_prefix AS pricePrefix,image_url AS imageUrl,mobile_image_url AS mobileImageUrl,link_url AS linkUrl,
+            SELECT id,title,scenario_name AS scenarioName,budget_amount AS budgetAmount,subtitle,description,price_prefix AS pricePrefix,image_url AS imageUrl,mobile_image_url AS mobileImageUrl,link_url AS linkUrl,
                    sort_order AS sortOrder,status,created_at AS createdAt,updated_at AS updatedAt
             FROM portal_resource
             WHERE resource_type=:type AND deleted_at IS NULL
@@ -63,9 +63,10 @@ public class ContentAdminController {
     @PostMapping("/{type}") @ResponseStatus(HttpStatus.CREATED) @Transactional
     Map<String, Object> create(@PathVariable String type, @Valid @RequestBody ResourceRequest request) {
         jdbc.sql("""
-            INSERT INTO portal_resource(resource_type,title,subtitle,description,price_prefix,image_url,mobile_image_url,link_url,sort_order,status)
-            VALUES(:type,:title,:subtitle,:description,:pricePrefix,:imageUrl,:mobileImageUrl,:linkUrl,:sortOrder,:status)
+            INSERT INTO portal_resource(resource_type,title,scenario_name,budget_amount,subtitle,description,price_prefix,image_url,mobile_image_url,link_url,sort_order,status)
+            VALUES(:type,:title,:scenarioName,:budgetAmount,:subtitle,:description,:pricePrefix,:imageUrl,:mobileImageUrl,:linkUrl,:sortOrder,:status)
             """).param("type", normalize(type)).param("title", request.title())
+            .param("scenarioName", solutionValue(type,request.scenarioName())).param("budgetAmount", solutionValue(type,request.budgetAmount()))
             .param("subtitle", request.subtitle()).param("description", description(type, request)).param("imageUrl", request.imageUrl())
             .param("mobileImageUrl", request.mobileImageUrl())
             .param("pricePrefix", pricePrefix(type, request))
@@ -78,11 +79,12 @@ public class ContentAdminController {
     @PutMapping("/{type}/{id}") @Transactional
     void update(@PathVariable String type, @PathVariable long id, @Valid @RequestBody ResourceRequest request) {
         int changed = jdbc.sql("""
-            UPDATE portal_resource SET title=:title,subtitle=:subtitle,description=:description,image_url=:imageUrl,
+            UPDATE portal_resource SET title=:title,scenario_name=:scenarioName,budget_amount=:budgetAmount,subtitle=:subtitle,description=:description,image_url=:imageUrl,
                 mobile_image_url=:mobileImageUrl,price_prefix=:pricePrefix,
                 link_url=:linkUrl,sort_order=:sortOrder,status=:status
             WHERE id=:id AND resource_type=:type AND deleted_at IS NULL
             """).param("id", id).param("type", normalize(type)).param("title", request.title())
+            .param("scenarioName", solutionValue(type,request.scenarioName())).param("budgetAmount", solutionValue(type,request.budgetAmount()))
             .param("subtitle", request.subtitle()).param("description", description(type, request)).param("imageUrl", request.imageUrl())
             .param("mobileImageUrl", request.mobileImageUrl())
             .param("pricePrefix", pricePrefix(type, request))
@@ -360,7 +362,9 @@ public class ContentAdminController {
             ? richTextSanitizer.clean(request.description()) : request.description();
     }
 
-    public record ResourceRequest(@NotBlank String title, String subtitle, String description, String pricePrefix, String imageUrl,
+    private Object solutionValue(String type,Object value){ return "SOLUTION".equals(normalize(type))?value:null; }
+
+    public record ResourceRequest(@NotBlank String title, String scenarioName, BigDecimal budgetAmount, String subtitle, String description, String pricePrefix, String imageUrl,
                                   String mobileImageUrl, String linkUrl,
                                   @NotNull Integer sortOrder, @NotNull Integer status) {}
     public record BrandRequest(@NotBlank String name, String logo, String description,

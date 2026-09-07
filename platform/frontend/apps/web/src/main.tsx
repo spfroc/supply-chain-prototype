@@ -702,7 +702,7 @@ function App() {
           notify={notify}
         />
       )}
-      {displayView === "orders" && <Orders go={(target) => navigate(target)} />}
+      {displayView === "orders" && <Orders go={(target) => navigate(target)} reloadCart={loadCart} />}
       {displayView === "profile" && (
         <Profile profile={profile} summary={summary} go={setView} />
       )}
@@ -747,7 +747,7 @@ function App() {
           <div className="footer-copyright">© {copyrightYears} {companyName} 版权所有 | <a href="https://beian.miit.gov.cn/#/Integrated/recordQuery" target="_blank" rel="noreferrer">{icpFiling}</a> | 电信增值业务许可证：{telecomLicense} | <a href="https://beian.mps.gov.cn/#/query/webSearch" target="_blank" rel="noreferrer">{policeFiling}</a></div>
         </section>
       </footer>
-      <FloatingContact config={siteConfig}/>
+      {String(siteConfig["contact.floatingEnabled"] ?? "true") !== "false" && <FloatingContact config={siteConfig}/>}
       {toast && <div className="toast">✓ {toast}</div>}
       {authOpen && !current && (
         <div className="auth-modal-backdrop">
@@ -922,6 +922,12 @@ function AuthPage({
               <input value={form.creditCode || ""} maxLength={18} autoCapitalize="characters"
                 onChange={(e) => setForm({ ...form, creditCode: e.target.value.toUpperCase() })}
                 placeholder="请输入18位统一社会信用代码" />
+            </label>
+            <label>
+              业务员邀请码（选填）
+              <input value={form.inviteCode || ""} maxLength={16}
+                onChange={(e) => setForm({ ...form, inviteCode: e.target.value.toUpperCase() })}
+                placeholder="如有邀请码请填写" />
             </label>
           </>
         )}
@@ -2372,7 +2378,7 @@ function Checkout({
   );
 }
 
-function Orders({ go }: { go: (v: View) => void }) {
+function Orders({ go,reloadCart }: { go: (v: View) => void;reloadCart:()=>Promise<void> }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [tab, setTab] = useState(-1);
   const [detail, setDetail] = useState<Row>();
@@ -2387,7 +2393,7 @@ function Orders({ go }: { go: (v: View) => void }) {
     try{await api(`/api/client/service/orders/${detail.order.id}/deliveries/${encodeURIComponent(delivery.subOrderNo)}/confirm-receipt`, { method: "POST" });
     setDetail(await api<Row>(`/api/client/orders/${detail.order.id}`));await load();}catch(e){window.alert((e as Error).message);}
   };
-  const repurchase=async(row:Row)=>{try{await api(`/api/client/purchase-tools/orders/${row.id}/repurchase`,{method:"POST"});go("cart");}catch(e){window.alert((e as Error).message);}};
+  const repurchase=async(row:Row)=>{try{await api(`/api/client/purchase-tools/orders/${row.id}/repurchase`,{method:"POST"});await reloadCart();go("cart");}catch(e){window.alert((e as Error).message);}};
   return (
     <main className="page account-page">
       <aside>

@@ -22,6 +22,7 @@ public class SecurityConfig {
                 .requestMatchers("/error", "/actuator/health/**", "/api/openapi/**", "/api/docs/**", "/api/public/**", "/api/auth/**", "/api/client/**").permitAll()
                 .requestMatchers("/api/admin/system/me").authenticated()
                 .requestMatchers("/api/admin/system/summary").hasAuthority("dashboard:view")
+                .requestMatchers("/api/admin/system/my-invited-enterprises").hasAuthority("sales:enterprise:view")
                 .requestMatchers("/api/admin/system/users/**").hasAuthority("system:user")
                 .requestMatchers("/api/admin/system/roles/**","/api/admin/system/permissions/**").hasAuthority("system:role")
                 .requestMatchers("/api/admin/system/configs/**","/api/admin/system/options/**",
