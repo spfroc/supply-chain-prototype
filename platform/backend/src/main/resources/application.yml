@@ -62,3 +62,11 @@ app:
     access-code: ${SMS_MARKETING_BTYPE:}
     password: ${SMS_MARKETING_PASSWORD:}
     timestamp-format: ${SMS_MARKETING_TIMESTAMP_FORMAT:unix}
+  miniapps:
+    base-url: ${MINIAPPS_BASE_URL:https://main.miniappss.com/terminal}
+    api-id: ${MINIAPPS_API_ID:}
+    secret: ${MINIAPPS_SECRET:}
+    iv: ${MINIAPPS_IV:}
+    sync-page-size: ${MINIAPPS_SYNC_PAGE_SIZE:100}
+    detail-concurrency: ${MINIAPPS_DETAIL_CONCURRENCY:16}
+    message-poll-ms: ${MINIAPPS_MESSAGE_POLL_MS:30000}
