@@ -337,6 +337,8 @@ function App() {
           back={() => history.back()}
           add={add}
           buyNow={buyNow}
+          openCart={() => { setDetail(undefined); navigateTab("cart"); }}
+          cartCount={cart.reduce((sum,row)=>sum+Number(row.quantity||0),0)}
           loggedIn={Boolean(current)}
         />
         {authOpen && !current && (
@@ -408,7 +410,7 @@ function App() {
           />
         )}
         {tab === "cart" && (
-          <Cart rows={cart} reload={loadCart} checkout={() => navigateTab("checkout")} />
+          <Cart rows={cart} reload={loadCart} back={() => navigateTab("home")} checkout={() => navigateTab("checkout")} />
         )}
         {tab === "checkout" && (
           <Checkout
@@ -1041,12 +1043,16 @@ function ProductDetail({
   back,
   add,
   buyNow,
+  openCart,
+  cartCount,
   loggedIn,
 }: {
   product: Row;
   back: () => void;
   add: (r: Row) => void;
   buyNow: (r: Row) => void;
+  openCart: () => void;
+  cartCount: number;
   loggedIn: boolean;
 }) {
   const variants:Row[]=typeof product.variants==="string"?JSON.parse(product.variants||"[]"):(product.variants||[]);
@@ -1181,6 +1187,7 @@ function ProductDetail({
         )}
       </article>
       <footer className="buybar">
+        <button className="cart-entry" onClick={openCart}>购物车{cartCount>0&&<b>{cartCount>99?"99+":cartCount}</b>}</button>
         <button onClick={()=>void toggleFavorite()}>{favorite ? "已常购" : "加入常购"}</button>
         {Number(current.availableStock)<=0?<button className="arrival-reminder" onClick={()=>void subscribeArrival()}>到货提醒</button>:<><button onClick={() => void add(current)}>加入购物车</button><button onClick={() => void buyNow(current)}>立即采购</button></>}
       </footer>
@@ -1190,10 +1197,12 @@ function ProductDetail({
 function Cart({
   rows,
   reload,
+  back,
   checkout,
 }: {
   rows: Row[];
   reload: () => Promise<void>;
+  back: () => void;
   checkout: () => void;
 }) {
   const selected = rows.filter((r) => Number(r.selected) === 1);
@@ -1225,8 +1234,9 @@ function Cart({
   return (
     <div className="subpage cart">
       <header>
+        <button onClick={back}>‹ 返回</button>
         <h1>购物车</h1>
-        <button>管理</button>
+        <span />
       </header>
       <div className="agreement-tip">{selected.some((row)=>Number(row.agreementPriced)===1) ? "协议商品按协议价结算，其他商品按原价结算" : "当前无协议价格，商品按原价结算"}</div>
       {rows.map((r) => (
