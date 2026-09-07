@@ -8,6 +8,7 @@ import {
   Checkbox,
   ConfigProvider,
   Descriptions,
+  Dropdown,
   Drawer,
   Form,
   Input,
@@ -801,7 +802,6 @@ const navItems = [
     key: "enterpriseCenter", label: "企业管理", children: [
       { key: "enterprises", label: "企业管理", icon: <MenuIcon name="enterprise" /> },
       { key: "enterpriseUsers", label: "用户管理", icon: <MenuIcon name="user" /> },
-      { key: "salesEnterprises", label: "我邀请的企业", icon: <MenuIcon name="enterprise" /> },
     ],
   },
   {
@@ -1061,16 +1061,26 @@ function AdminApp({ logout }: { logout: () => void }) {
               <small>{health?.components?.api||"—"} API · {health?.components?.database||"—"} 数据库</small>
             </span>
           </div>
-          <div className="admin-account">
-            <span>{String(admin.realName || "管").slice(0, 1)}</span>
-            <div>
-              <strong>{admin.realName || admin.username || "后台用户"}</strong>
-              <small>{admin.roleNames || "后台角色"}</small>
-            </div>
-            <Button type="text" onClick={logout}>
-              退出
-            </Button>
-          </div>
+          <Dropdown
+            trigger={["click"]}
+            placement="bottomRight"
+            menu={{
+              items: [
+                ...(allowed("salesEnterprises") ? [{key:"invited",label:"我邀请的企业"}] : []),
+                {key:"logout",label:"退出登录",danger:true},
+              ],
+              onClick:({key})=>key==="logout"?logout():setModule("salesEnterprises"),
+            }}
+          >
+            <button className="admin-account" type="button" aria-label="打开账号菜单">
+              <span>{String(admin.realName || "管").slice(0, 1)}</span>
+              <div>
+                <strong>{admin.realName || admin.username || "后台用户"}</strong>
+                <small>{admin.roleNames || "后台角色"}</small>
+              </div>
+              <em>⌄</em>
+            </button>
+          </Dropdown>
         </Layout.Header>
         <Layout.Content className="admin-content">
           <div className="page-heading">
