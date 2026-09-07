@@ -69,4 +69,4 @@ app:
     iv: ${MINIAPPS_IV:}
     sync-page-size: ${MINIAPPS_SYNC_PAGE_SIZE:100}
     detail-concurrency: ${MINIAPPS_DETAIL_CONCURRENCY:16}
-    message-poll-ms: ${MINIAPPS_MESSAGE_POLL_MS:30000}
+    message-poll-ms: ${MINIAPPS_MESSAGE_POLL_MS:300000}

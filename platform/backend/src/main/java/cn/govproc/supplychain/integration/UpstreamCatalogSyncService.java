@@ -180,7 +180,7 @@ public class UpstreamCatalogSyncService {
         }
     }
 
-    @Scheduled(fixedDelayString="${app.miniapps.message-poll-ms:30000}", initialDelayString="${app.miniapps.message-initial-delay-ms:15000}")
+    @Scheduled(fixedDelayString="${app.miniapps.message-poll-ms:300000}", initialDelayString="${app.miniapps.message-initial-delay-ms:15000}")
     public void pollMessages() {
         if (messagePolling) return;
         messagePolling = true;
