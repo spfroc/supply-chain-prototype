@@ -46,7 +46,7 @@ public class ContentAdminController {
                 @RequestParam(required=false) Integer status) {
         String base="""
             SELECT p.id,p.title,p.scene_id AS sceneId,COALESCE(s.name,p.scenario_name) AS scenarioName,p.budget_amount AS budgetAmount,p.subtitle,p.description,p.price_prefix AS pricePrefix,p.image_url AS imageUrl,p.mobile_image_url AS mobileImageUrl,p.link_url AS linkUrl,
-                   sort_order AS sortOrder,status,created_at AS createdAt,updated_at AS updatedAt
+                   p.sort_order AS sortOrder,p.status,p.created_at AS createdAt,p.updated_at AS updatedAt
             FROM portal_resource p LEFT JOIN solution_scene s ON s.id=p.scene_id AND s.deleted_at IS NULL
             WHERE p.resource_type=:type AND p.deleted_at IS NULL
             """;
