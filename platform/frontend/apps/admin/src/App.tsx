@@ -4124,7 +4124,7 @@ function PortalManager({ module }: { module: Module }) {
           </>}
           <Form.Item
             name={isBrand ? "description" : "subtitle"}
-            label={module === "solutions" ? "适用场景" : "说明"}
+            label={module === "solutions" ? "方案副标题" : "说明"}
             className="full"
           >
             <Input.TextArea rows={3} />
