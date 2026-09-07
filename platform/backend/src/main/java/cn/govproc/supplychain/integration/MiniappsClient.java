@@ -1,6 +1,7 @@
 package cn.govproc.supplychain.integration;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
@@ -18,6 +19,7 @@ import org.springframework.web.client.RestClient;
 @Component
 public class MiniappsClient {
     private final RestClient http;
+    private final ObjectMapper mapper = new ObjectMapper();
     private final String apiId;
     private final String secret;
 
@@ -72,8 +74,11 @@ public class MiniappsClient {
         body.put("api_id", apiId);
         body.put("sign", signature(data, secret));
         body.put("data", data);
-        JsonNode response = http.post().uri(path).contentType(MediaType.APPLICATION_JSON)
-            .body(body).retrieve().body(JsonNode.class);
+        String raw = http.post().uri(path).contentType(MediaType.APPLICATION_JSON)
+            .body(body).retrieve().body(String.class);
+        JsonNode response;
+        try { response = raw == null ? null : mapper.readTree(raw); }
+        catch (Exception error) { throw new IllegalStateException("上游接口返回了无效 JSON", error); }
         if (response == null || response.path("code").asInt() != 200) {
             throw new IllegalStateException("上游接口调用失败：" + (response == null ? "无响应" : response.path("msg").asText("未知错误")));
         }
