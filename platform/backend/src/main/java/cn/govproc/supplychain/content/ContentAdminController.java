@@ -45,10 +45,10 @@ public class ContentAdminController {
                 @RequestParam(defaultValue="10") int pageSize,@RequestParam(defaultValue="") String keyword,
                 @RequestParam(required=false) Integer status) {
         String base="""
-            SELECT id,title,scenario_name AS scenarioName,budget_amount AS budgetAmount,subtitle,description,price_prefix AS pricePrefix,image_url AS imageUrl,mobile_image_url AS mobileImageUrl,link_url AS linkUrl,
+            SELECT p.id,p.title,p.scene_id AS sceneId,COALESCE(s.name,p.scenario_name) AS scenarioName,p.budget_amount AS budgetAmount,p.subtitle,p.description,p.price_prefix AS pricePrefix,p.image_url AS imageUrl,p.mobile_image_url AS mobileImageUrl,p.link_url AS linkUrl,
                    sort_order AS sortOrder,status,created_at AS createdAt,updated_at AS updatedAt
-            FROM portal_resource
-            WHERE resource_type=:type AND deleted_at IS NULL
+            FROM portal_resource p LEFT JOIN solution_scene s ON s.id=p.scene_id AND s.deleted_at IS NULL
+            WHERE p.resource_type=:type AND p.deleted_at IS NULL
             """;
         var params=Map.of("type",normalize(type));
         if(page==null) {
@@ -62,11 +62,13 @@ public class ContentAdminController {
 
     @PostMapping("/{type}") @ResponseStatus(HttpStatus.CREATED) @Transactional
     Map<String, Object> create(@PathVariable String type, @Valid @RequestBody ResourceRequest request) {
+        String sceneName=solutionSceneName(type,request.sceneId());
         jdbc.sql("""
-            INSERT INTO portal_resource(resource_type,title,scenario_name,budget_amount,subtitle,description,price_prefix,image_url,mobile_image_url,link_url,sort_order,status)
-            VALUES(:type,:title,:scenarioName,:budgetAmount,:subtitle,:description,:pricePrefix,:imageUrl,:mobileImageUrl,:linkUrl,:sortOrder,:status)
+            INSERT INTO portal_resource(resource_type,title,scene_id,scenario_name,budget_amount,subtitle,description,price_prefix,image_url,mobile_image_url,link_url,sort_order,status)
+            VALUES(:type,:title,:sceneId,:scenarioName,:budgetAmount,:subtitle,:description,:pricePrefix,:imageUrl,:mobileImageUrl,:linkUrl,:sortOrder,:status)
             """).param("type", normalize(type)).param("title", request.title())
-            .param("scenarioName", solutionValue(type,request.scenarioName())).param("budgetAmount", solutionValue(type,request.budgetAmount()))
+            .param("sceneId",solutionValue(type,request.sceneId()))
+            .param("scenarioName", sceneName).param("budgetAmount", solutionValue(type,request.budgetAmount()))
             .param("subtitle", request.subtitle()).param("description", description(type, request)).param("imageUrl", request.imageUrl())
             .param("mobileImageUrl", request.mobileImageUrl())
             .param("pricePrefix", pricePrefix(type, request))
@@ -78,13 +80,15 @@ public class ContentAdminController {
 
     @PutMapping("/{type}/{id}") @Transactional
     void update(@PathVariable String type, @PathVariable long id, @Valid @RequestBody ResourceRequest request) {
+        String sceneName=solutionSceneName(type,request.sceneId());
         int changed = jdbc.sql("""
-            UPDATE portal_resource SET title=:title,scenario_name=:scenarioName,budget_amount=:budgetAmount,subtitle=:subtitle,description=:description,image_url=:imageUrl,
+            UPDATE portal_resource SET title=:title,scene_id=:sceneId,scenario_name=:scenarioName,budget_amount=:budgetAmount,subtitle=:subtitle,description=:description,image_url=:imageUrl,
                 mobile_image_url=:mobileImageUrl,price_prefix=:pricePrefix,
                 link_url=:linkUrl,sort_order=:sortOrder,status=:status
             WHERE id=:id AND resource_type=:type AND deleted_at IS NULL
             """).param("id", id).param("type", normalize(type)).param("title", request.title())
-            .param("scenarioName", solutionValue(type,request.scenarioName())).param("budgetAmount", solutionValue(type,request.budgetAmount()))
+            .param("sceneId",solutionValue(type,request.sceneId()))
+            .param("scenarioName", sceneName).param("budgetAmount", solutionValue(type,request.budgetAmount()))
             .param("subtitle", request.subtitle()).param("description", description(type, request)).param("imageUrl", request.imageUrl())
             .param("mobileImageUrl", request.mobileImageUrl())
             .param("pricePrefix", pricePrefix(type, request))
@@ -364,7 +368,15 @@ public class ContentAdminController {
 
     private Object solutionValue(String type,Object value){ return "SOLUTION".equals(normalize(type))?value:null; }
 
-    public record ResourceRequest(@NotBlank String title, String scenarioName, BigDecimal budgetAmount, String subtitle, String description, String pricePrefix, String imageUrl,
+    private String solutionSceneName(String type,Long sceneId) {
+        if(!"SOLUTION".equals(normalize(type))) return null;
+        if(sceneId==null) throw new IllegalArgumentException("请选择应用场景");
+        return jdbc.sql("SELECT name FROM solution_scene WHERE id=:id AND status=1 AND deleted_at IS NULL")
+            .param("id",sceneId).query(String.class).optional()
+            .orElseThrow(()->new IllegalArgumentException("所选应用场景不存在或已停用"));
+    }
+
+    public record ResourceRequest(@NotBlank String title, Long sceneId, String scenarioName, BigDecimal budgetAmount, String subtitle, String description, String pricePrefix, String imageUrl,
                                   String mobileImageUrl, String linkUrl,
                                   @NotNull Integer sortOrder, @NotNull Integer status) {}
     public record BrandRequest(@NotBlank String name, String logo, String description,

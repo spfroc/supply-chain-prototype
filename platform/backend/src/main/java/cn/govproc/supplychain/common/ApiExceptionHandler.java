@@ -23,8 +23,28 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler({MethodArgumentNotValidException.class, ConstraintViolationException.class})
     ProblemDetail validation(Exception exception) {
-        var detail = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, exception.getMessage());
-        detail.setTitle("请求参数校验失败");
+        String message="请检查填写内容";
+        if(exception instanceof MethodArgumentNotValidException validation&&validation.getBindingResult().hasErrors()) {
+            var error=validation.getBindingResult().getFieldErrors().getFirst();
+            message=switch(error.getField()) {
+                case "password" -> "登录密码需为8至72位";
+                case "creditCode" -> "请输入正确的18位统一社会信用代码";
+                case "phone","contactPhone" -> "请输入正确的11位手机号码";
+                case "email" -> "请输入正确的邮箱地址";
+                default -> error.getDefaultMessage()==null?message:error.getDefaultMessage();
+            };
+        } else if(exception instanceof ConstraintViolationException violation&&!violation.getConstraintViolations().isEmpty()) {
+            message=violation.getConstraintViolations().iterator().next().getMessage();
+        }
+        var detail = ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, message);
+        detail.setTitle("填写内容有误");
+        return detail;
+    }
+
+    @ExceptionHandler(Exception.class)
+    ProblemDetail unexpected(Exception exception) {
+        var detail=ProblemDetail.forStatusAndDetail(HttpStatus.INTERNAL_SERVER_ERROR,"系统暂时无法完成请求，请稍后重试");
+        detail.setTitle("操作失败");
         return detail;
     }
 

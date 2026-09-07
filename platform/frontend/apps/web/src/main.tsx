@@ -279,6 +279,7 @@ function App() {
   const footerOfficialTitle = String(siteConfig["footer.officialTitle"] || "官方平台").trim();
   const footerServiceTitle = String(siteConfig["footer.serviceTitle"] || "我们的服务").trim();
   const footerContactTitle = String(siteConfig["footer.contactTitle"] || "联系我们").trim();
+  const footerContactEnabled = String(siteConfig["footer.contactEnabled"] ?? "true") !== "false";
   const copyrightYears = String(siteConfig["footer.copyrightYears"] || "2023-2025").trim();
   const companyName = String(siteConfig["footer.companyName"] || "山东壹知产数字科技有限公司").trim();
   useEffect(()=>{
@@ -738,12 +739,12 @@ function App() {
             <h3>{footerServiceTitle}</h3>
             {(portal.footerLinks || []).filter((row:Row)=>row.linkGroup==="SERVICE").map((row:Row)=><a key={row.id} href={row.linkUrl} target={row.openTarget==="BLANK"?"_blank":undefined} rel={row.openTarget==="BLANK"?"noreferrer":undefined}>{row.title}</a>)}
           </nav>
-          <div className="footer-contact">
+          {footerContactEnabled && <div className="footer-contact">
             <h3>{footerContactTitle}</h3>
             <p>电话：{contactLandline}</p>
             <p>邮箱：<a href={`mailto:${String(siteConfig["contact.email"] || "")}`}>{String(siteConfig["contact.email"] || "")}</a></p>
             <p>地址：{footerAddress}</p>
-          </div>
+          </div>}
           <div className="footer-copyright">© {copyrightYears} {companyName} 版权所有 | <a href="https://beian.miit.gov.cn/#/Integrated/recordQuery" target="_blank" rel="noreferrer">{icpFiling}</a> | 电信增值业务许可证：{telecomLicense} | <a href="https://beian.mps.gov.cn/#/query/webSearch" target="_blank" rel="noreferrer">{policeFiling}</a></div>
         </section>
       </footer>
@@ -1418,6 +1419,10 @@ function PortalList({
   back: () => void;
   openSolution: (id: number) => void;
 }) {
+  const solutionGroups=Object.values(rows.reduce<Record<string,{name:string;items:Row[]}>>((all,row)=>{
+    const key=String(row.sceneId||row.scenarioName||row.id),name=String(row.scenarioName||"其他场景");
+    (all[key]||={name,items:[]}).items.push(row); return all;
+  },{}));
   useEffect(() => {
     if (type !== "content" || !rows.length || !location.hash) return;
     requestAnimationFrame(() => document.querySelector(location.hash)?.scrollIntoView({ behavior: "smooth", block: "start" }));
@@ -1457,8 +1462,9 @@ function PortalList({
             <p>内容由管理后台统一维护并实时发布</p>
           </div>
         </div>
-        <div className="product-grid">
-          {rows.map((row, index) => (
+        {type === "solutions" ? solutionGroups.map((group)=><section className="solution-scene-group" key={group.name}>
+          <header><h3>{group.name}</h3><span>{group.items.length} 套方案</span></header><div className="product-grid">
+          {group.items.map((row, index) => (
             <article
               className="product-card"
               key={row.id}
@@ -1471,13 +1477,13 @@ function PortalList({
                 <small>{title}</small>
                 <h3>{row.title}</h3>
                 <p>{row.subtitle || "暂无说明"}</p>
+                {row.budgetAmount!=null&&<b>预算 {money(row.budgetAmount)}</b>}
                 {type === "solutions" ? (
                   <button className="solution-detail-link">查看方案并选购 ›</button>
                 ) : row.linkUrl ? <a href={row.linkUrl}>查看详情 ›</a> : null}
               </div>
             </article>
-          ))}
-        </div>
+          ))}</div></section>) : <div className="product-grid">{rows.map((row,index)=><article className="product-card" key={row.id}><div className={`product-image p${index%5}`}>{row.imageUrl?<img src={row.imageUrl} alt={row.title}/>:<i>{row.title.slice(0,1)}</i>}</div><div className="product-info"><small>{title}</small><h3>{row.title}</h3><p>{row.subtitle||"暂无说明"}</p>{row.linkUrl?<a href={row.linkUrl}>查看详情 ›</a>:null}</div></article>)}</div>}
       </section>
     </main>
   );
@@ -1555,9 +1561,10 @@ function SolutionDetail({
       </section>
       <section className="solution-summary">
         <div>
-          <span>SCENE SOLUTION</span>
+          <span>{data.solution?.scenarioName||"SCENE SOLUTION"}</span>
           <h1>{data.solution?.title}</h1>
           <h3>{data.solution?.subtitle}</h3>
+          {data.solution?.budgetAmount!=null&&<b>方案预算 {money(data.solution.budgetAmount)}</b>}
           <p>{data.solution?.description || "根据场景需求搭配设备组合，可按实际需要调整数量后直接下单。"}</p>
         </div>
         <button className="share-button" onClick={()=>void sharePage(data.solution?.title||"场景方案",data.solution?.subtitle||"查看企业采购场景方案",notify)}>分享方案</button>

@@ -33,15 +33,16 @@ public class PortalController {
         var result = new LinkedHashMap<String, Object>();
         for (String type : List.of("NAVIGATION", "BANNER", "PLATFORM", "SOLUTION", "CONTENT")) {
             var rows = jdbc.sql("""
-                SELECT id,title,scenario_name AS scenarioName,budget_amount AS budgetAmount,subtitle,description,price_prefix AS pricePrefix,image_url AS imageUrl,mobile_image_url AS mobileImageUrl,
+                SELECT p.id,p.title,p.scene_id AS sceneId,COALESCE(s.name,p.scenario_name) AS scenarioName,p.budget_amount AS budgetAmount,p.subtitle,p.description,p.price_prefix AS pricePrefix,p.image_url AS imageUrl,p.mobile_image_url AS mobileImageUrl,
                        link_url AS linkUrl,sort_order AS sortOrder
-                FROM portal_resource
-                WHERE resource_type=:type AND status=1 AND deleted_at IS NULL
-                ORDER BY sort_order,id
+                FROM portal_resource p LEFT JOIN solution_scene s ON s.id=p.scene_id AND s.status=1 AND s.deleted_at IS NULL
+                WHERE p.resource_type=:type AND p.status=1 AND p.deleted_at IS NULL
+                ORDER BY p.sort_order,p.id
                 """).param("type", type).query().listOfRows();
             result.put(type.toLowerCase(), "CONTENT".equals(type)
                 ? richTextSanitizer.cleanRows(rows, "description") : rows);
         }
+        result.put("solutionScenes",jdbc.sql("SELECT id,name,description,sort_order AS sortOrder FROM solution_scene WHERE status=1 AND deleted_at IS NULL ORDER BY sort_order,id").query().listOfRows());
         result.put("brands", jdbc.sql("""
             SELECT id,name,logo,description FROM brand
             WHERE status=1 AND deleted_at IS NULL ORDER BY sort_order,id
@@ -86,10 +87,12 @@ public class PortalController {
     @GetMapping("/solutions/{solutionId}")
     Map<String, Object> solution(@PathVariable long solutionId) {
         var solutions = jdbc.sql("""
-            SELECT id,title,scenario_name AS scenarioName,budget_amount AS budgetAmount,subtitle,description,image_url AS imageUrl,mobile_image_url AS mobileImageUrl,
-                   sort_order AS sortOrder
-            FROM portal_resource
-            WHERE id=:id AND resource_type='SOLUTION' AND status=1 AND deleted_at IS NULL
+            SELECT p.id,p.title,p.scene_id AS sceneId,COALESCE(s.name,p.scenario_name) AS scenarioName,
+                   p.budget_amount AS budgetAmount,p.subtitle,p.description,p.image_url AS imageUrl,
+                   p.mobile_image_url AS mobileImageUrl,p.sort_order AS sortOrder
+            FROM portal_resource p
+            LEFT JOIN solution_scene s ON s.id=p.scene_id AND s.status=1 AND s.deleted_at IS NULL
+            WHERE p.id=:id AND p.resource_type='SOLUTION' AND p.status=1 AND p.deleted_at IS NULL
             """).param("id", solutionId).query().listOfRows();
         if (solutions.isEmpty()) throw new org.springframework.web.server.ResponseStatusException(
             org.springframework.http.HttpStatus.NOT_FOUND, "方案不存在或未发布");

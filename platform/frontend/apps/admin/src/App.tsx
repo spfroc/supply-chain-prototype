@@ -203,6 +203,7 @@ type Module =
   | "homeFloors"
   | "homeAds"
   | "solutions"
+  | "solutionScenes"
   | "solutionProducts"
   | "contents"
   | "contactSettings"
@@ -791,6 +792,7 @@ const navItems = [
   },
   {
     key: "solutionCenter", label: "方案管理", children: [
+      { key: "solutionScenes", label: "场景管理", icon: <MenuIcon name="solution" /> },
       { key: "solutions", label: "方案管理", icon: <MenuIcon name="solution" /> },
       { key: "solutionProducts", label: "方案商品管理", icon: <MenuIcon name="goods" /> },
     ],
@@ -833,7 +835,7 @@ const modulePermission: Partial<Record<Module, string>> = {
   overview: "dashboard:view", products: "product:manage", collectJobs: "product:manage", categories: "product:manage",
   attributes: "product:manage", brands: "product:manage", platforms: "product:manage",
   platformProducts: "product:manage", platformOrders: "order:manage",
-  navigations: "product:manage", banners: "product:manage", solutions: "product:manage",
+  navigations: "product:manage", banners: "product:manage", solutions: "product:manage", solutionScenes:"product:manage",
   homeFloors: "product:manage", homeAds:"product:manage",
   contents: "product:manage", contactSettings: "product:manage", serviceFeatures: "product:manage", footerSettings: "product:manage", seoSettings:"product:manage", enterprises: "enterprise:manage", enterpriseUsers: "enterprise:manage",
   salesEnterprises: "sales:enterprise:view",
@@ -988,6 +990,7 @@ function AdminApp({ logout }: { logout: () => void }) {
     homeFloors: ["首页楼层管理", "配置 Web 与 H5 首页商品、方案、分类和内容楼层"],
     homeAds: ["首页广告位", "配置首页广告组版式、插入位置、Web/H5 图片和跳转链接"],
     solutions: ["方案管理", "维护企业采购场景方案及客户端展示内容"],
+    solutionScenes: ["场景管理", "维护方案所属应用场景，同一场景可关联多个不同预算方案"],
     solutionProducts: ["方案商品管理", "按采购方案维护必选商品、可选商品、数量与排序"],
     contents: ["内容管理", "维护采购指南、服务说明及其他门户内容"],
     contactSettings: ["联系方式", "配置 Web 门户右侧悬浮栏中的座机、手机、微信二维码和邮箱"],
@@ -1096,6 +1099,7 @@ function AdminApp({ logout }: { logout: () => void }) {
           {module === "attributes" && <AttributeTemplates />}
           {module === "homeFloors" && <HomeFloors />}
           {module === "homeAds" && <HomeAds />}
+          {module === "solutionScenes" && <SolutionScenes />}
           {(
             [
               "brands",
@@ -3454,6 +3458,7 @@ function FooterSettings() {
         <Form.Item name="officialTitle" label="平台栏目" rules={[{required:true},{pattern:/^[\u3400-\u9fff]{2,6}$/,message:"请输入2至6个汉字"}]}><Input maxLength={6} showCount placeholder="官方平台" /></Form.Item>
         <Form.Item name="serviceTitle" label="服务栏目" rules={[{required:true},{pattern:/^[\u3400-\u9fff]{2,6}$/,message:"请输入2至6个汉字"}]}><Input maxLength={6} showCount placeholder="我们的服务" /></Form.Item>
         <Form.Item name="contactTitle" label="联系栏目" rules={[{required:true},{pattern:/^[\u3400-\u9fff]{2,6}$/,message:"请输入2至6个汉字"}]}><Input maxLength={6} showCount placeholder="联系我们" /></Form.Item>
+        <Form.Item name="contactEnabled" label="联系栏目显示" valuePropName="checked"><Switch checkedChildren="显示" unCheckedChildren="隐藏" /></Form.Item>
       </div></section>
       <section className="form-section"><header><strong>基础信息</strong><span>用于页脚的公司介绍和联系信息</span></header><div className="form-grid">
         <Form.Item className="form-span-2" name="about" label="关于我们" rules={[{required:true,message:"请输入公司简介"}]}><Input.TextArea rows={4} showCount maxLength={300}/></Form.Item>
@@ -3830,6 +3835,17 @@ function HomeFloors() {
   </>;
 }
 
+function SolutionScenes(){
+  const {message,modal}=AntApp.useApp();const rows=useLoad<Row[]>(()=>rootApi("/api/admin/content/solution-scenes"));
+  const [form]=Form.useForm();const[open,setOpen]=useState(false);const[editing,setEditing]=useState<Row>();
+  const show=(row?:Row)=>{setEditing(row);form.resetFields();form.setFieldsValue(row||{sortOrder:0,status:1});setOpen(true);};
+  const save=async()=>{try{const values=await form.validateFields();await rootMutation(`/api/admin/content/solution-scenes${editing?`/${editing.id}`:""}`,{method:editing?"PUT":"POST",body:JSON.stringify(values)});message.success("应用场景已保存");setOpen(false);void rows.refresh();}catch(error){if(error instanceof Error)message.error(error.message);}};
+  const remove=(row:Row)=>modal.confirm({title:`删除场景“${row.name}”？`,content:"已关联方案的场景不能删除。",okButtonProps:{danger:true},onOk:async()=>{await rootMutation(`/api/admin/content/solution-scenes/${row.id}`,{method:"DELETE"});void rows.refresh();}});
+  return <Card className="data-card" title="应用场景列表" extra={<Button type="primary" onClick={()=>show()}>＋ 新增场景</Button>}><LoadBoundary load={rows} empty={!rows.loading&&!rows.error&&!rows.data?.length} emptyText="暂无应用场景"><Table rowKey="id" dataSource={rows.data||[]} columns={[
+    {title:"场景名称",dataIndex:"name"},{title:"场景说明",dataIndex:"description"},{title:"关联方案",dataIndex:"solutionCount",width:110,render:v=>`${v||0} 个`},{title:"排序",dataIndex:"sortOrder",width:80},{title:"状态",dataIndex:"status",width:90,render:v=><Tag color={Number(v)===1?"green":"default"}>{Number(v)===1?"启用":"停用"}</Tag>},{title:"操作",width:150,render:(_,row)=><Space><Button type="link" onClick={()=>show(row)}>编辑</Button><Button type="link" danger onClick={()=>remove(row)}>删除</Button></Space>}
+  ]}/></LoadBoundary><Modal open={open} title={`${editing?"编辑":"新增"}应用场景`} onCancel={()=>setOpen(false)} onOk={()=>void save()}><Form form={form} layout="vertical"><Form.Item name="name" label="场景名称" rules={[{required:true}]}><Input placeholder="例如：会议室采购"/></Form.Item><Form.Item name="description" label="场景说明"><Input.TextArea rows={3}/></Form.Item><Form.Item name="sortOrder" label="排序" rules={[{required:true}]}><InputNumber min={0} style={{width:"100%"}}/></Form.Item><Form.Item name="status" label="状态" rules={[{required:true}]}><Select options={[{value:1,label:"启用"},{value:0,label:"停用"}]}/></Form.Item></Form></Modal></Card>;
+}
+
 function PortalManager({ module }: { module: Module }) {
   const { message, modal } = AntApp.useApp();
   const meta: Record<string, { title: string; type: string; name: string }> = {
@@ -3846,6 +3862,7 @@ function PortalManager({ module }: { module: Module }) {
   const resourceRows = usePagedLoad(endpoint,10,[module]);
   const brandRows = usePagedLoad("/api/admin/content/brands/list", 10, [module]);
   const rows = isBrand ? brandRows : resourceRows;
+  const scenes=useLoad<Row[]>(()=>rootApi("/api/admin/content/solution-scenes"),[],module==="solutions");
   const products = useLoad<Row[]>(() =>
     rootApi("/api/admin/business/products"),
   [],["platforms","solutions"].includes(module));
@@ -4119,7 +4136,7 @@ function PortalManager({ module }: { module: Module }) {
             <InputNumber min={0} style={{ width: "100%" }} />
           </Form.Item>
           {module === "solutions" && <>
-            <Form.Item name="scenarioName" label="应用场景" rules={[{required:true,message:"请输入应用场景"}]}><Input placeholder="例如：会议室、新员工入职" /></Form.Item>
+            <Form.Item name="sceneId" label="应用场景" rules={[{required:true,message:"请选择应用场景"}]}><Select placeholder="请先在场景管理中添加" options={(scenes.data||[]).filter(row=>Number(row.status)===1).map(row=>({value:row.id,label:row.name}))}/></Form.Item>
             <Form.Item name="budgetAmount" label="方案预算" rules={[{required:true,message:"请输入方案预算"}]}><InputNumber min={0} precision={2} prefix="¥" style={{width:"100%"}} /></Form.Item>
           </>}
           <Form.Item
@@ -4892,6 +4909,7 @@ function Users() {
   const columns: ColumnsType<Row> = [
     {
       title: "用户",
+      width: 165,
       render: (_, row) => (
         <div className="user-cell">
           <i>{row.realName?.slice(0, 1)}</i>
@@ -4904,6 +4922,7 @@ function Users() {
     },
     {
       title: "联系方式",
+      width: 175,
       render: (_, row) => (
         <span>
           {row.phone || "—"}
@@ -4913,21 +4932,23 @@ function Users() {
     },
     {
       title: "角色",
+      width: 125,
       dataIndex: "roleNames",
       render: (value) => <Tag color="blue">{value || "未分配"}</Tag>,
     },
-    {title:"业务员邀请码",width:160,render:(_,row)=>row.inviteCode?<Typography.Text copyable={{text:row.inviteCode}}>{row.inviteCode}</Typography.Text>:<Button type="link" onClick={()=>void generateInvite(row)}>生成邀请码</Button>},
+    {title:"业务员邀请码",width:145,render:(_,row)=>row.inviteCode?<Typography.Text copyable={{text:row.inviteCode}}>{row.inviteCode}</Typography.Text>:<Button type="link" onClick={()=>void generateInvite(row)}>生成邀请码</Button>},
     {
       title: "状态",
+      width: 80,
       dataIndex: "status",
       render: (value) => (
         <Tag color={value ? "green" : "default"}>{value ? "启用" : "停用"}</Tag>
       ),
     },
-    { title: "最近登录", dataIndex: "lastLoginAt", render: dateTime },
-    { title: "创建时间", dataIndex: "createdAt", render: dateTime },
+    { title: "登录 / 创建时间", width: 170, render:(_,row)=><span>{dateTime(row.lastLoginAt)}<small className="subline">创建：{dateTime(row.createdAt)}</small></span> },
     {
       title: "操作",
+      width: 190,
       fixed: "right",
       render: (_, row) => (
         <Space>
@@ -4950,6 +4971,7 @@ function Users() {
       }
     >
       <Table
+        size="small"
         rowKey="id"
         loading={users.loading}
         dataSource={users.data}

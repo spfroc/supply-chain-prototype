@@ -191,9 +191,9 @@ function App() {
     await loadCart();
   };
   const initializeAccount=async()=>{setAuthReady(false);setAccountError("");try{await loadAccount(true);}catch(error){setAccountError((error as Error).message||"登录状态加载失败");}finally{setAuthReady(true);}};
-  const requireAuth = (action: () => void) => {
+  const requireAuth = (action: () => void | Promise<void>) => {
     if (current) {
-      action();
+      void Promise.resolve(action()).catch((error)=>Toast.show((error as Error).message||"操作失败，请重试"));
       return;
     }
     pendingAction.current = action;
@@ -259,8 +259,10 @@ function App() {
       });
       await loadCart();
       Toast.show({ icon: "success", content: "已加入购物车" });
+      return true;
     } catch (e) {
       Toast.show((e as Error).message);
+      return false;
     }
   };
   const add = async (p: Row) => {
@@ -286,9 +288,9 @@ function App() {
             }),
           ),
       );
-      await addToCart(product);
+      if(!await addToCart(product))return;
       setDetail(undefined);
-      setTab("checkout");
+      navigateTab("checkout");
     });
   const openProtectedTab = (target: Tab) =>
     requireAuth(() => navigateTab(target));
@@ -314,7 +316,7 @@ function App() {
           }}
           requireAuth={requireAuth}
           reloadCart={loadCart}
-          checkout={() => setTab("checkout")}
+          checkout={() => navigateTab("checkout")}
         />
         {authOpen && !current && (
           <div className="m-auth-modal"><MobileAuth onSuccess={() => void authSuccess()} onCancel={() => setAuthOpen(false)} /></div>
@@ -406,21 +408,22 @@ function App() {
           />
         )}
         {tab === "cart" && (
-          <Cart rows={cart} reload={loadCart} checkout={() => setTab("checkout")} />
+          <Cart rows={cart} reload={loadCart} checkout={() => navigateTab("checkout")} />
         )}
         {tab === "checkout" && (
           <Checkout
             rows={cart}
             reload={loadCart}
-            back={() => setTab("cart")}
-            orders={() => setTab("orders")}
+            back={() => navigateTab("cart")}
+            orders={() => navigateTab("orders")}
           />
         )}
         {tab === "orders" && <Orders cart={async()=>{await loadCart();setTab("cart");}} />}
         {tab === "mine" && (
           <Mine
             profile={profile}
-            orders={() => setTab("orders")}
+            orders={() => navigateTab("orders")}
+            cart={() => navigateTab("cart")}
             logout={logout}
           />
         )}
@@ -631,16 +634,21 @@ function MobileAuth({
 }
 
 function MobileSolutionList({ solutions, back, open }: { solutions: Row[]; back: () => void; open: (id: number) => void }) {
+  const groups=Object.values(solutions.reduce<Record<string,{name:string;items:Row[]}>>((all,row)=>{
+    const key=String(row.sceneId||row.scenarioName||row.id),name=String(row.scenarioName||"其他场景");
+    (all[key]||={name,items:[]}).items.push(row); return all;
+  },{}));
   return (
     <div className="mobile-app m-solution-list">
       <header className="sub-header"><button onClick={back}>‹ 返回</button><h2>场景方案</h2><span>{solutions.length}个方案</span></header>
       <main>
-        {solutions.map((row) => (
-          <article key={row.id} onClick={() => open(Number(row.id))}>
+        {groups.map((group) => <section className="m-solution-scene" key={group.name}>
+          <header><h3>{group.name}</h3><span>{group.items.length}套方案</span></header>
+          {group.items.map((row) => <article key={row.id} onClick={() => open(Number(row.id))}>
             <div>{row.mobileImageUrl || row.imageUrl ? <img src={row.mobileImageUrl || row.imageUrl} alt={row.title} /> : <span>方案海报</span>}</div>
-            <section><small>SCENE SOLUTION</small><h2>{row.title}</h2><p>{row.subtitle || "企业场景设备组合方案"}</p><button>查看方案配置 ›</button></section>
-          </article>
-        ))}
+            <section><small>{row.scenarioName||"SCENE SOLUTION"}</small><h2>{row.title}</h2><p>{row.subtitle || "企业场景设备组合方案"}</p>{row.budgetAmount!=null&&<b>预算 {money(row.budgetAmount)}</b>}<button>查看方案配置 ›</button></section>
+          </article>)}
+        </section>)}
         {!solutions.length && <div className="m-empty">暂无已发布方案</div>}
       </main>
     </div>
@@ -683,7 +691,7 @@ function MobileSolutionDetail({ solutionId, back, requireAuth, reloadCart, check
         {data.solution?.mobileImageUrl || data.solution?.imageUrl ? <img src={data.solution.mobileImageUrl || data.solution.imageUrl} alt={`${data.solution.title}宣传海报`} /> : <div>请上传9:16方案宣传海报</div>}
       </section>
       <section className="m-solution-hero">
-        <span>SCENE SOLUTION</span><h1>{data.solution?.title}</h1><h3>{data.solution?.subtitle}</h3><p>{data.solution?.description}</p>
+        <span>{data.solution?.scenarioName||"SCENE SOLUTION"}</span><h1>{data.solution?.title}</h1><h3>{data.solution?.subtitle}</h3>{data.solution?.budgetAmount!=null&&<b>方案预算 {money(data.solution.budgetAmount)}</b>}<p>{data.solution?.description}</p>
       </section>
       <section className="m-solution-items">
         <header><h2>设备组合</h2><p>确认每件商品的数量，可选配件可按需勾选。</p></header>
@@ -1625,16 +1633,18 @@ function Mine({
   profile,
   orders,
   logout,
+  cart,
 }: {
   profile: Row;
   orders: () => void;
   logout: () => Promise<void>;
+  cart: () => void;
 }) {
   const [view, setView] = useState<"addresses" | "invoices" | "members" | "finance" | "afterSales" | "notifications" | "frequent" | "purchaseImport">();
   if (view === "finance") return <H5Finance back={() => setView(undefined)} />;
   if (view === "afterSales") return <H5AfterSales back={() => setView(undefined)} />;
   if (view === "notifications") return <H5Notifications back={() => setView(undefined)} />;
-  if (view === "frequent") return <H5Frequent back={() => setView(undefined)} />;
+  if (view === "frequent") return <H5Frequent back={() => setView(undefined)} cart={cart} />;
   if (view === "purchaseImport") return <H5PurchaseImport back={() => setView(undefined)} />;
   if (view) return <H5Manage view={view} back={() => setView(undefined)} />;
   return (
@@ -1729,7 +1739,7 @@ function Mine({
     </div>
   );
 }
-function H5Frequent({back}:{back:()=>void}){const[rows,setRows]=useState<Row[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState("");const load=async()=>{setLoading(true);try{setRows(await api<Row[]>("/api/client/purchase-tools/frequent-items"));setError("");}catch(e){setError((e as Error).message);}finally{setLoading(false);}};useEffect(()=>{void load();},[]);const remove=async(id:number)=>{try{await api(`/api/client/purchase-tools/frequent-items/${id}`,{method:"DELETE"});await load();}catch(e){Toast.show((e as Error).message);}};const addAll=async()=>{try{await api("/api/client/purchase-tools/frequent-items/add-to-cart",{method:"POST",body:JSON.stringify({skuIds:[]})});Toast.show("已加入购物车");}catch(e){Toast.show((e as Error).message);}};return <div className="subpage h5-frequent"><header><button onClick={back}>‹</button><h1>常购清单</h1><button disabled={loading||!rows.length} onClick={()=>void addAll()}>全部加购</button></header><H5LoadState loading={loading} error={error} empty={!rows.length} emptyText="暂无常购商品" retry={()=>void load()}>{rows.map(r=><article key={r.skuId}><img src={r.image}/><div><strong>{r.title}</strong><small>{r.skuCode}</small><span>默认 {r.defaultQuantity} 件 · 库存 {r.availableStock}</span></div><button onClick={()=>void remove(r.skuId)}>移除</button></article>)}</H5LoadState></div>}
+function H5Frequent({back,cart}:{back:()=>void;cart:()=>void}){const[rows,setRows]=useState<Row[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState("");const load=async()=>{setLoading(true);try{setRows(await api<Row[]>("/api/client/purchase-tools/frequent-items"));setError("");}catch(e){setError((e as Error).message);}finally{setLoading(false);}};useEffect(()=>{void load();},[]);const remove=async(id:number)=>{try{await api(`/api/client/purchase-tools/frequent-items/${id}`,{method:"DELETE"});await load();}catch(e){Toast.show((e as Error).message);}};const addAll=async()=>{try{await api("/api/client/purchase-tools/frequent-items/add-to-cart",{method:"POST",body:JSON.stringify({skuIds:[]})});Toast.show({icon:"success",content:"已加入购物车"});cart();}catch(e){Toast.show((e as Error).message);}};return <div className="subpage h5-frequent"><header><button onClick={back}>‹</button><h1>常购清单</h1><button disabled={loading||!rows.length} onClick={()=>void addAll()}>全部加购</button></header><H5LoadState loading={loading} error={error} empty={!rows.length} emptyText="暂无常购商品" retry={()=>void load()}>{rows.map(r=><article key={r.skuId}><img src={r.image}/><div><strong>{r.title}</strong><small>{r.skuCode}</small><span>默认 {r.defaultQuantity} 件 · 库存 {r.availableStock}</span></div><button onClick={()=>void remove(r.skuId)}>移除</button></article>)}</H5LoadState></div>}
 
 function H5PurchaseImport({back}:{back:()=>void}){
   const[tasks,setTasks]=useState<Row[]>([]),[detail,setDetail]=useState<Row>(),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true),[error,setError]=useState("");
