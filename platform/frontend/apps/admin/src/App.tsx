@@ -1329,6 +1329,9 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
   const [batchText, setBatchText] = useState("");
   const [batchRows, setBatchRows] = useState<{ url: string; memberPrice?: number; error?: string }[]>([]);
   const [collecting, setCollecting] = useState(false);
+  const [upstreamSync,setUpstreamSync]=useState<Row>();
+  const [upstreamSyncStarting,setUpstreamSyncStarting]=useState(false);
+  const upstreamSyncActive=useRef(false);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [productTab,setProductTab]=useState("basic");
@@ -1363,6 +1366,37 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
     }
     const text = await r.text();
     return text ? JSON.parse(text) : undefined;
+  };
+  useEffect(()=>{
+    if(module!=="products")return;
+    let disposed=false;
+    const load=async()=>{
+      try {
+        const status=await rootApi<Row>("/api/admin/business/products/upstream-sync/status");
+        if(!disposed){
+          const active=["PENDING","RUNNING"].includes(String(status.status||""));
+          if(upstreamSyncActive.current&&!active){
+            message.success(status.status==="SUCCEEDED"?"徽E采商品同步完成":"徽E采商品同步已结束，请查看失败数量");
+            void rows.refresh();
+          }
+          upstreamSyncActive.current=active;
+          setUpstreamSync(status);
+        }
+      } catch { /* 页面主列表仍可独立使用，启动同步时再显示具体错误 */ }
+    };
+    void load();
+    const timer=window.setInterval(()=>void load(),3000);
+    return ()=>{disposed=true;window.clearInterval(timer);};
+  },[module]);
+  const startUpstreamSync=async()=>{
+    setUpstreamSyncStarting(true);
+    try {
+      const job=await business("/products/upstream-sync",{method:"POST"});
+      upstreamSyncActive.current=true;
+      setUpstreamSync({...job,totalCount:upstreamSync?.totalCount||0,successCount:0,failCount:0});
+      message.success("徽E采商品同步任务已启动，可继续使用其他功能");
+    } catch(error) { message.error((error as Error).message); }
+    finally { setUpstreamSyncStarting(false); }
   };
   const collectProduct = async () => {
     try {
@@ -2131,6 +2165,16 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
         extra={
           module !== "orders" && (
             <Space>
+              {module === "products" && (
+                <Button
+                  loading={upstreamSyncStarting}
+                  disabled={["PENDING","RUNNING"].includes(String(upstreamSync?.status||""))}
+                  title={upstreamSync?.errorMessage||"从徽E采接口异步同步全部商品并保存到数据库"}
+                  onClick={()=>void startUpstreamSync()}
+                >
+                  同步徽E采商品 {Number(upstreamSync?.successCount||0)}/{Number(upstreamSync?.totalCount||0)}
+                </Button>
+              )}
               {module === "products" && (
                 <Button onClick={() => {
                   collectForm.resetFields();

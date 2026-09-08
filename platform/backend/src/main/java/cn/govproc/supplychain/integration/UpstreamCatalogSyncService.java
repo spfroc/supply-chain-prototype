@@ -71,6 +71,23 @@ public class UpstreamCatalogSyncService {
         return rows.get(0);
     }
 
+    public Map<String,Object> latestJob() {
+        List<Map<String,Object>> rows = jdbc.sql("""
+            SELECT id,status,total_count AS totalCount,total_pages AS totalPages,current_page AS currentPage,
+              success_count AS successCount,fail_count AS failCount,error_message AS errorMessage,
+              DATE_FORMAT(started_at,'%Y-%m-%d %H:%i:%s') AS startedAt,
+              DATE_FORMAT(finished_at,'%Y-%m-%d %H:%i:%s') AS finishedAt
+            FROM upstream_product_sync_job ORDER BY id DESC LIMIT 1
+            """).query().listOfRows();
+        if (!rows.isEmpty()) return rows.getFirst();
+        long synchronizedCount = jdbc.sql("SELECT COUNT(*) FROM upstream_product_mapping WHERE provider=:provider")
+            .param("provider",PROVIDER).query(Long.class).single();
+        return new LinkedHashMap<>(Map.of(
+            "status","IDLE","totalCount",synchronizedCount,"successCount",synchronizedCount,
+            "failCount",0,"currentPage",0,"totalPages",0
+        ));
+    }
+
     void runFullSync(long jobId) {
         jdbc.sql("UPDATE upstream_product_sync_job SET status='RUNNING',started_at=NOW() WHERE id=:id")
             .param("id",jobId).update();

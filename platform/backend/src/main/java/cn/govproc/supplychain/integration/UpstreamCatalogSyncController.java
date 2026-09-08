@@ -18,6 +18,9 @@ public class UpstreamCatalogSyncController {
     @PostMapping @ResponseStatus(HttpStatus.ACCEPTED)
     Map<String,Object> start(){long id=service.startFullSync();return Map.of("id",id,"status","PENDING");}
 
+    @GetMapping("/status")
+    Map<String,Object> latestStatus(){return service.latestJob();}
+
     @GetMapping("/{id}")
     Map<String,Object> status(@PathVariable long id){return service.job(id);}
 
