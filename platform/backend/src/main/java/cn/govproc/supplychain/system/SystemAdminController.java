@@ -231,6 +231,23 @@ public class SystemAdminController {
         return pagedOrAll(base,"q.id DESC",page,pageSize,keyword,null,List.of("operatorType","module","action","targetType","targetId","ip","requestId","result"),null);
     }
 
+    @GetMapping("/miniapps-messages")
+    Object miniappsMessages(@RequestParam(required=false) Integer page,
+                            @RequestParam(defaultValue="20") int pageSize,
+                            @RequestParam(defaultValue="") String keyword) {
+        String base="""
+            SELECT id, provider, remote_message_id AS remoteMessageId, message_type AS messageType,
+              message_content AS messageContent, process_status AS processStatus,
+              process_result AS processResult, remote_deleted AS remoteDeleted,
+              DATE_FORMAT(received_at, '%Y-%m-%d %H:%i:%s') AS createdAt,
+              DATE_FORMAT(processed_at, '%Y-%m-%d %H:%i:%s') AS processedAt,
+              DATE_FORMAT(deleted_at, '%Y-%m-%d %H:%i:%s') AS deletedAt
+            FROM upstream_message
+            """;
+        return pagedOrAll(base,"q.createdAt DESC,q.id DESC",page,pageSize,keyword,null,
+            List.of("provider","remoteMessageId","messageType","messageContent","processStatus","processResult"),null);
+    }
+
     @GetMapping("/configs")
     Object configs(@RequestParam(required=false) Integer page,@RequestParam(defaultValue="10") int pageSize,
                    @RequestParam(defaultValue="") String keyword) {

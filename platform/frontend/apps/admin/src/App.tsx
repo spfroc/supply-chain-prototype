@@ -224,6 +224,7 @@ type Module =
   | "roles"
   | "permissions"
   | "logs"
+  | "miniappsMessages"
   | "configs";
 const adminCredential = () => sessionStorage.getItem("adminCredential") || "";
 const expandProductSkus=(products:Row[])=>products.flatMap((product)=>{
@@ -827,6 +828,7 @@ const navItems = [
       { key: "roles", label: "角色管理", icon: <MenuIcon name="role" /> },
       { key: "permissions", label: "权限管理", icon: <MenuIcon name="permission" /> },
       { key: "logs", label: "操作日志", icon: <MenuIcon name="log" /> },
+      { key: "miniappsMessages", label: "徽E采消息", icon: <MenuIcon name="log" /> },
       { key: "configs", label: "基本配置", icon: <MenuIcon name="config" /> },
     ],
   },
@@ -842,7 +844,7 @@ const modulePermission: Partial<Record<Module, string>> = {
   agreements: "agreement:manage", agreementProducts: "agreement:manage", agreementOrders: "order:manage",
   solutionProducts: "product:manage",
   orders: "order:manage", afterSales: "order:manage", finance: "order:manage", users: "system:user", roles: "system:role",
-  permissions: "system:role", logs: "system:log", configs: "system:config",
+  permissions: "system:role", logs: "system:log", miniappsMessages: "system:log", configs: "system:config",
 };
 
 export function App() {
@@ -1010,6 +1012,7 @@ function AdminApp({ logout }: { logout: () => void }) {
     roles: ["角色管理", "按岗位配置角色与操作权限"],
     permissions: ["权限管理", "查看系统权限点及所属业务模块"],
     logs: ["操作日志", "追踪关键管理操作，支持审计与问题定位"],
+    miniappsMessages: ["徽E采消息", "查看上游商品消息的接收、消费和远端删除结果"],
     configs: ["基本配置", "维护平台信息、订单和库存参数"],
   };
   const runGlobalSearch=()=>{
@@ -1130,6 +1133,7 @@ function AdminApp({ logout }: { logout: () => void }) {
           {module === "roles" && <Roles />}
           {module === "permissions" && <Permissions />}
           {module === "logs" && <Logs />}
+          {module === "miniappsMessages" && <MiniappsMessages />}
           {module === "configs" && <Configs />}
         </Layout.Content>
       </Layout>
@@ -5358,6 +5362,86 @@ function Logs() {
               : []
           }
         />
+      </Modal>
+    </Card>
+  );
+}
+
+function MiniappsMessages() {
+  const result = usePagedLoad("/api/admin/system/miniapps-messages", 20);
+  const [detail, setDetail] = useState<Row>();
+  const typeNames: Record<number, string> = {
+    1: "上下架变更",
+    2: "商品新增/删除",
+    3: "商品信息变更",
+    4: "商品价格变更",
+  };
+  const statusNames: Record<string, string> = {
+    RECEIVED: "待处理",
+    PROCESSED: "处理成功",
+    IGNORED: "已忽略",
+    FAILED: "处理失败",
+  };
+  return (
+    <Card
+      className="data-card"
+      title="徽E采消息"
+      extra={<Button onClick={result.refresh}>刷新</Button>}
+    >
+      <Table
+        rowKey="id"
+        loading={result.loading}
+        dataSource={result.data}
+        server={result.server}
+        searchPlaceholder="搜索消息编号、类型、内容或处理结果"
+        columns={[
+          { title: "接收时间", dataIndex: "createdAt", width: 160, render: dateTime },
+          {
+            title: "消息",
+            render: (_, r) => (
+              <>
+                <strong>{typeNames[Number(r.messageType)] || `其他类型 ${r.messageType}`}</strong>
+                <small className="subline">编号：{r.remoteMessageId}</small>
+              </>
+            ),
+          },
+          {
+            title: "处理状态",
+            dataIndex: "processStatus",
+            width: 110,
+            render: (v) => <Tag color={v === "PROCESSED" ? "green" : v === "FAILED" ? "red" : v === "IGNORED" ? "default" : "blue"}>{statusNames[v] || v}</Tag>,
+          },
+          {
+            title: "处理结果",
+            dataIndex: "processResult",
+            ellipsis: true,
+          },
+          { title: "处理时间", dataIndex: "processedAt", width: 160, render: dateTime },
+          {
+            title: "远端消息",
+            dataIndex: "remoteDeleted",
+            width: 100,
+            render: (v) => <Tag color={Number(v) === 1 ? "green" : "orange"}>{Number(v) === 1 ? "已删除" : "未删除"}</Tag>,
+          },
+          {
+            title: "操作",
+            width: 72,
+            render: (_, r) => <Button type="link" onClick={() => setDetail(r)}>详情</Button>,
+          },
+        ]}
+      />
+      <Modal open={!!detail} footer={null} width={760} title="消息消费详情" onCancel={() => setDetail(undefined)}>
+        {detail && <Descriptions column={1} bordered items={[
+          { key: "id", label: "本地记录", children: `#${detail.id}` },
+          { key: "remote", label: "远端消息编号", children: detail.remoteMessageId },
+          { key: "type", label: "消息类型", children: `${typeNames[Number(detail.messageType)] || "其他类型"}（${detail.messageType}）` },
+          { key: "status", label: "处理状态", children: statusNames[String(detail.processStatus)] || detail.processStatus },
+          { key: "result", label: "处理结果", children: detail.processResult || "—" },
+          { key: "created", label: "接收时间", children: detail.createdAt || "—" },
+          { key: "processed", label: "处理时间", children: detail.processedAt || "—" },
+          { key: "deleted", label: "远端删除时间", children: detail.deletedAt || "—" },
+          { key: "content", label: "原始消息内容", children: <pre style={{margin:0,whiteSpace:"pre-wrap",wordBreak:"break-all"}}>{String(detail.messageContent || "—")}</pre> },
+        ]} />}
       </Modal>
     </Card>
   );
