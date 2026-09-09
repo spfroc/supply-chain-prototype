@@ -4,6 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PreDestroy;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -92,6 +94,7 @@ public class UpstreamCatalogSyncService {
         jdbc.sql("UPDATE upstream_product_sync_job SET status='RUNNING',started_at=NOW() WHERE id=:id")
             .param("id",jobId).update();
         try {
+            synchronizeCategories();
             int page = 0;
             JsonNode first = client.goodsPage(page, pageSize);
             int total = first.path("total").asInt();
@@ -195,6 +198,7 @@ public class UpstreamCatalogSyncService {
             jdbc.sql("UPDATE upstream_product_mapping SET raw_json=:raw,last_synced_at=NOW() WHERE provider=:provider AND external_sku=:sku AND library=:library")
                 .param("raw",detail.toString()).param("provider",PROVIDER).param("sku",externalSku).param("library",library).update();
         }
+        saveStructuredAttributes(productId, categoryId, detail.path("attribute"));
     }
 
     @Scheduled(fixedDelayString="${app.miniapps.message-poll-ms:300000}", initialDelayString="${app.miniapps.message-initial-delay-ms:15000}")
@@ -260,11 +264,37 @@ public class UpstreamCatalogSyncService {
         }
     }
 
+    private void synchronizeCategories() {
+        JsonNode roots = client.categories(0).path("list");
+        for (JsonNode root : nodes(roots)) {
+            long localRoot = saveCategory(root, null, 1);
+            long externalRoot = root.path("id").asLong();
+            for (JsonNode child : nodes(client.categories(externalRoot).path("list"))) saveCategory(child, localRoot, 2);
+        }
+    }
+
+    private long saveCategory(JsonNode source, Long parentId, int level) {
+        String externalId = source.path("id").asText();
+        String name = trim(source.path("title").asText("未命名分类"),50);
+        long categoryId = ensureCategoryNode(name,parentId,level);
+        jdbc.sql("""
+            INSERT INTO upstream_category_mapping(provider,external_category_id,category_id,external_parent_id,raw_json,last_synced_at)
+            VALUES(:provider,:externalId,:categoryId,:parentId,:raw,NOW())
+            ON DUPLICATE KEY UPDATE category_id=VALUES(category_id),external_parent_id=VALUES(external_parent_id),
+              raw_json=VALUES(raw_json),last_synced_at=NOW()
+            """).param("provider",PROVIDER).param("externalId",externalId).param("categoryId",categoryId)
+            .param("parentId",source.path("parent_id").asText()).param("raw",source.toString()).update();
+        return categoryId;
+    }
+
     private long ensureCategory(String title, String cid) {
-        long root = ensureCategoryNode("外部同步商品",null,1);
-        long second = ensureCategoryNode("子商城商品",root,2);
-        String leaf = title == null || title.isBlank() ? (cid == null || cid.isBlank() || "0".equals(cid) ? "未分类" : "分类"+cid) : title;
-        return ensureCategoryNode(trim(leaf,50),second,3);
+        if (cid != null && !cid.isBlank() && !"0".equals(cid)) {
+            Long mapped = jdbc.sql("SELECT category_id FROM upstream_category_mapping WHERE provider=:provider AND external_category_id=:cid")
+                .param("provider",PROVIDER).param("cid",cid).query(Long.class).optional().orElse(null);
+            if (mapped != null) return mapped;
+        }
+        String name = title == null || title.isBlank() ? "未分类" : trim(title,50);
+        return ensureCategoryNode(name,null,1);
     }
 
     private long ensureCategoryNode(String name, Long parent, int level) {
@@ -284,6 +314,41 @@ public class UpstreamCatalogSyncService {
         if (id != null) { jdbc.sql("UPDATE brand SET status=1,deleted_at=NULL WHERE id=:id").param("id",id).update(); return id; }
         jdbc.sql("INSERT INTO brand(name,status) VALUES(:name,1)").param("name",name).update();
         return jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single();
+    }
+
+    private void saveStructuredAttributes(long productId, long categoryId, JsonNode attributes) {
+        if (!attributes.isArray()) return;
+        for (JsonNode source : attributes) {
+            String name = trim(source.path("name").asText(),100);
+            String value = source.path("value").asText();
+            if (name.isBlank() || value.isBlank()) continue;
+            Long attributeId = jdbc.sql("SELECT id FROM attribute_definition WHERE name=:name AND deleted_at IS NULL ORDER BY id LIMIT 1")
+                .param("name",name).query(Long.class).optional().orElse(null);
+            if (attributeId == null) {
+                String code = "UPSTREAM_" + digest(name).substring(0,16);
+                jdbc.sql("""
+                    INSERT INTO attribute_definition(code,name,group_name,attribute_type,input_type,required_flag,
+                      filterable,searchable,visible_flag,allow_custom,sort_order,status)
+                    VALUES(:code,:name,'规格参数','BASIC','TEXT',0,0,0,1,1,100,1)
+                    ON DUPLICATE KEY UPDATE name=VALUES(name),status=1,deleted_at=NULL
+                    """).param("code",code).param("name",name).update();
+                attributeId = jdbc.sql("SELECT id FROM attribute_definition WHERE code=:code")
+                    .param("code",code).query(Long.class).single();
+            }
+            jdbc.sql("INSERT IGNORE INTO category_attribute(category_id,attribute_id,sort_order) VALUES(:category,:attribute,100)")
+                .param("category",categoryId).param("attribute",attributeId).update();
+            jdbc.sql("""
+                INSERT INTO product_attribute_value(product_id,attribute_id,value_text)
+                VALUES(:product,:attribute,:value)
+                ON DUPLICATE KEY UPDATE value_text=VALUES(value_text),option_ids=NULL
+                """).param("product",productId).param("attribute",attributeId).param("value",value).update();
+        }
+    }
+
+    private String digest(String value) {
+        try { return java.util.HexFormat.of().withUpperCase().formatHex(MessageDigest.getInstance("MD5")
+            .digest(value.getBytes(StandardCharsets.UTF_8))); }
+        catch (Exception error) { throw new IllegalStateException("生成属性编码失败",error); }
     }
 
     private String detailHtml(JsonNode content) {

@@ -1727,7 +1727,7 @@ function ProductCard({
           )}
         </div>
         <h3>{product.title}</h3>
-        <p>{product.summary || "政企采购自营商品，全国配送"}</p>
+        {product.summary && <p>{product.summary}</p>}
         <div className={`price${platformTitle ? " platform-price" : ""}`}>
           {platformTitle ? <><span className="price-item"><small>{platformPricePrefix || platformTitle}价</small><strong>{money(product.platformPrice)}</strong></span><span className="price-item member-price"><small>会员价</small><strong>{money(product.memberPrice??product.marketPrice)}</strong></span></> : <><span className="price-item"><small>市场价</small><strong>{money(product.marketPrice)}</strong></span>{loggedIn?<span className="price-item member-price"><small>会员价</small><strong>{money(product.memberPrice??salePrice)}</strong></span>:<span className="login-price-hint">登录后查看会员价</span>}</>}
         </div>

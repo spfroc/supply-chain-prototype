@@ -50,6 +50,13 @@ public class MiniappsClient {
         return call("/api.goods/getGoodsInfo", data).path("data");
     }
 
+    public JsonNode categories(long parentId) {
+        var data = new LinkedHashMap<String,Object>();
+        data.put("time", Instant.now().getEpochSecond());
+        data.put("parent_id", parentId);
+        return call("/api.goods/getCategory", data).path("data");
+    }
+
     public List<JsonNode> messages() {
         var data = new LinkedHashMap<String,Object>();
         data.put("time", Instant.now().getEpochSecond());
