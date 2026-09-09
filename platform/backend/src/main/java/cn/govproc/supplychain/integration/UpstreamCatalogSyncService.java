@@ -15,6 +15,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.ConcurrentHashMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -36,6 +37,7 @@ public class UpstreamCatalogSyncService {
     private final java.util.concurrent.Executor background;
     private final ExecutorService detailPool;
     private final int pageSize;
+    private final Map<String,String> categoryTitleCache = new ConcurrentHashMap<>();
     private volatile boolean messagePolling;
 
     public UpstreamCatalogSyncService(JdbcClient jdbc, MiniappsClient client,
@@ -149,7 +151,7 @@ public class UpstreamCatalogSyncService {
         int library = detail.path("library").asInt();
         String skuCode = "MINI-" + library + "-" + externalSku;
         String title = trim(detail.path("title").asText("未命名商品"), 200);
-        long categoryId = ensureCategory(detail.path("cid_title").asText(), detail.path("cid").asText());
+        long categoryId = ensureCategory(detail);
         long brandId = ensureBrand(detail.path("brand_name").asText());
         BigDecimal member = money(detail.path("shop_price").asText());
         BigDecimal market = money(detail.path("line_price").asText());
@@ -287,14 +289,57 @@ public class UpstreamCatalogSyncService {
         return categoryId;
     }
 
-    private long ensureCategory(String title, String cid) {
+    private long ensureCategory(JsonNode detail) {
+        String cid=detail.path("cid").asText();
+        long parentExternalId=detail.path("parent_id").asLong(0);
         if (cid != null && !cid.isBlank() && !"0".equals(cid)) {
             Long mapped = jdbc.sql("SELECT category_id FROM upstream_category_mapping WHERE provider=:provider AND external_category_id=:cid")
                 .param("provider",PROVIDER).param("cid",cid).query(Long.class).optional().orElse(null);
-            if (mapped != null) return mapped;
+            if (mapped != null) {
+                Long localParent=jdbc.sql("SELECT parent_id FROM category WHERE id=:id AND deleted_at IS NULL")
+                    .param("id",mapped).query(Long.class).optional().orElse(null);
+                if(parentExternalId<=0||localParent!=null)return mapped;
+            }
         }
-        String name = title == null || title.isBlank() ? "未分类" : trim(title,50);
-        return ensureCategoryNode(name,null,1);
+        String childFallback=detail.path("cid_title").asText();
+        if(parentExternalId<=0){
+            String name=categoryTitle(cid,childFallback);
+            long id=ensureCategoryNode(name,null,1);
+            saveCategoryMapping(cid,id,"0",detail);
+            return id;
+        }
+        String parentExternal=String.valueOf(parentExternalId);
+        Long parentId=jdbc.sql("SELECT category_id FROM upstream_category_mapping WHERE provider=:provider AND external_category_id=:cid")
+            .param("provider",PROVIDER).param("cid",parentExternal).query(Long.class).optional().orElse(null);
+        if(parentId==null){
+            String parentName=categoryTitle(parentExternal,"未分类");
+            parentId=ensureCategoryNode(parentName,null,1);
+            saveCategoryMapping(parentExternal,parentId,"0",null);
+        }
+        String childName=categoryTitle(cid,childFallback);
+        long childId=ensureCategoryNode(childName,parentId,2);
+        saveCategoryMapping(cid,childId,parentExternal,detail);
+        return childId;
+    }
+
+    private String categoryTitle(String externalId,String fallback){
+        String safeFallback=fallback==null||fallback.isBlank()?"未分类":trim(fallback,50);
+        if(externalId==null||externalId.isBlank()||"0".equals(externalId))return safeFallback;
+        return categoryTitleCache.computeIfAbsent(externalId,key->{
+            try{String title=client.categories(Long.parseLong(key)).path("title").asText();return title.isBlank()?safeFallback:trim(title,50);}
+            catch(Exception error){log.warn("upstream category {} lookup failed: {}",key,error.getMessage());return safeFallback;}
+        });
+    }
+
+    private void saveCategoryMapping(String externalId,long categoryId,String externalParentId,JsonNode raw){
+        if(externalId==null||externalId.isBlank()||"0".equals(externalId))return;
+        jdbc.sql("""
+          INSERT INTO upstream_category_mapping(provider,external_category_id,category_id,external_parent_id,raw_json,last_synced_at)
+          VALUES(:provider,:externalId,:categoryId,:parentId,:raw,NOW())
+          ON DUPLICATE KEY UPDATE category_id=VALUES(category_id),external_parent_id=VALUES(external_parent_id),
+            raw_json=VALUES(raw_json),last_synced_at=NOW()
+          """).param("provider",PROVIDER).param("externalId",externalId).param("categoryId",categoryId)
+          .param("parentId",externalParentId).param("raw",raw==null?null:raw.toString()).update();
     }
 
     private long ensureCategoryNode(String name, Long parent, int level) {
@@ -317,10 +362,15 @@ public class UpstreamCatalogSyncService {
     }
 
     private void saveStructuredAttributes(long productId, long categoryId, JsonNode attributes) {
-        if (!attributes.isArray()) return;
-        for (JsonNode source : attributes) {
+        List<JsonNode> sources=new ArrayList<>();
+        if(attributes.isArray())attributes.forEach(sources::add);
+        else if(attributes.isObject())attributes.fields().forEachRemaining(entry->{
+            var node=mapper.createObjectNode();node.put("name",entry.getKey());node.set("value",entry.getValue());sources.add(node);
+        });
+        for (JsonNode source : sources) {
             String name = trim(source.path("name").asText(),100);
-            String value = source.path("value").asText();
+            JsonNode valueNode=source.path("value");
+            String value=valueNode.isArray()?String.join("、",nodes(valueNode).stream().map(JsonNode::asText).filter(v->!v.isBlank()).toList()):valueNode.asText();
             if (name.isBlank() || value.isBlank()) continue;
             Long attributeId = jdbc.sql("SELECT id FROM attribute_definition WHERE name=:name AND deleted_at IS NULL ORDER BY id LIMIT 1")
                 .param("name",name).query(Long.class).optional().orElse(null);
@@ -337,11 +387,28 @@ public class UpstreamCatalogSyncService {
             }
             jdbc.sql("INSERT IGNORE INTO category_attribute(category_id,attribute_id,sort_order) VALUES(:category,:attribute,100)")
                 .param("category",categoryId).param("attribute",attributeId).update();
-            jdbc.sql("""
-                INSERT INTO product_attribute_value(product_id,attribute_id,value_text)
-                VALUES(:product,:attribute,:value)
-                ON DUPLICATE KEY UPDATE value_text=VALUES(value_text),option_ids=NULL
-                """).param("product",productId).param("attribute",attributeId).param("value",value).update();
+            String inputType=jdbc.sql("SELECT input_type FROM attribute_definition WHERE id=:id")
+                .param("id",attributeId).query(String.class).single();
+            if(List.of("SELECT","RADIO","CHECKBOX").contains(inputType)){
+                String optionCode="UPSTREAM_"+digest(value).substring(0,16);
+                jdbc.sql("""
+                  INSERT INTO attribute_option(attribute_id,option_code,option_label,status)
+                  VALUES(:attribute,:code,:label,1)
+                  ON DUPLICATE KEY UPDATE option_label=VALUES(option_label),status=1,deleted_at=NULL
+                  """).param("attribute",attributeId).param("code",optionCode).param("label",trim(value,100)).update();
+                long optionId=jdbc.sql("SELECT id FROM attribute_option WHERE attribute_id=:attribute AND option_code=:code")
+                    .param("attribute",attributeId).param("code",optionCode).query(Long.class).single();
+                jdbc.sql("""
+                  INSERT INTO product_attribute_value(product_id,attribute_id,value_text,option_ids)
+                  VALUES(:product,:attribute,:value,CAST(:options AS JSON))
+                  ON DUPLICATE KEY UPDATE value_text=VALUES(value_text),option_ids=VALUES(option_ids)
+                  """).param("product",productId).param("attribute",attributeId).param("value",value)
+                  .param("options",json(List.of(optionId))).update();
+            }else jdbc.sql("""
+              INSERT INTO product_attribute_value(product_id,attribute_id,value_text)
+              VALUES(:product,:attribute,:value)
+              ON DUPLICATE KEY UPDATE value_text=VALUES(value_text),option_ids=NULL
+              """).param("product",productId).param("attribute",attributeId).param("value",value).update();
         }
     }
 
