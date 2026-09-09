@@ -1030,7 +1030,13 @@ function floorProducts(floor: Row, products: Row[], categories: Row[], portal: R
 
 const adGroupItems=(value:unknown):Row[]=>{try{return Array.isArray(value)?value:JSON.parse(String(value||"[]"));}catch{return [];}};
 function HomeAdGroup({group}:{group:Row}){const items=adGroupItems(group.items).sort((a,b)=>Number(a.sortOrder||0)-Number(b.sortOrder||0));if(!items.length)return null;return <section className={`home-ad-group ad-layout-${String(group.layoutType||"FULL").toLowerCase()}`} style={{width:"100%",marginLeft:0,marginRight:0}}>{items.map((item)=><a key={item.id} href={item.linkUrl||undefined} target={item.openTarget==="BLANK"?"_blank":undefined} rel={item.openTarget==="BLANK"?"noreferrer":undefined}>{item.webImageUrl&&<img src={item.webImageUrl} alt={item.title||group.name}/>} {item.title&&<span>{item.title}</span>}</a>)}</section>}
+function BrandCategoryFloor({floor,portal}:{floor:Row;portal:Row}){
+  const groups=adGroupItems(floor.brandGroups);const [active,setActive]=useState(0);if(!groups.length)return null;
+  const group=groups[Math.min(active,groups.length-1)]||groups[0];const brandRows:Row[]=group.brands||[];
+  return <section className="brand-category-floor"><div className="brand-floor-heading"><span>BRAND COLLECTION</span><h2>{floor.title}</h2><p>{floor.subtitle}</p></div><nav>{groups.map((item:Row,index:number)=>{const category=(portal.categories||[]).find((c:Row)=>Number(c.id)===Number(item.categoryId));return <button key={`${item.categoryId}-${index}`} className={index===active?"active":""} onClick={()=>setActive(index)}>{item.title||category?.name||`分类 ${index+1}`}</button>})}</nav><div className="brand-logo-grid">{brandRows.map((item:Row,index:number)=>{const brand=(portal.brands||[]).find((b:Row)=>Number(b.id)===Number(item.brandId));if(!brand)return null;const href=item.linkUrl||`/web/?view=products&q=${encodeURIComponent(brand.name)}`;return <a key={`${item.brandId}-${index}`} href={href} title={`查看${brand.name}商品`}>{brand.logo?<img src={brand.logo} alt={brand.name}/>:<strong>{brand.name}</strong>}</a>})}</div></section>;
+}
 function HomeFloor({ floor, products, categories, portal, hasAgreement, loggedIn, open, add, all }: { floor: Row; products: Row[]; categories: Row[]; portal: Row; hasAgreement: boolean; loggedIn:boolean; open: (row: Row) => void; add: (row: Row) => void; all: (id?:number) => void }) {
+  if(floor.contentType==="BRAND_CATEGORY")return <BrandCategoryFloor floor={floor} portal={{...portal,categories}}/>;
   if (floor.contentType === "PRODUCT") {
     const rows = floorProducts(floor, products, categories, portal, hasAgreement);
     if (!rows.length) return null;

@@ -813,6 +813,7 @@ function Home({
       {(portal.floors || []).filter((floor:Row)=>["ALL","H5"].includes(floor.targetScope)).map((floor:Row)=>{
         const before=(portal.adGroups||[]).filter((g:Row)=>["ALL","H5"].includes(g.targetScope)&&g.placement==="BEFORE_FLOOR"&&Number(g.anchorFloorId)===Number(floor.id));
         const after=(portal.adGroups||[]).filter((g:Row)=>["ALL","H5"].includes(g.targetScope)&&g.placement==="AFTER_FLOOR"&&Number(g.anchorFloorId)===Number(floor.id));
+        if(floor.contentType === "BRAND_CATEGORY")return <React.Fragment key={floor.id}>{before.map((g:Row)=><MobileAdGroup key={`ad-${g.id}`} group={g}/>)}<MobileBrandCategoryFloor floor={floor} portal={{...portal,categories}}/>{after.map((g:Row)=><MobileAdGroup key={`ad-${g.id}`} group={g}/>)}</React.Fragment>;
         if(floor.contentType === "PRODUCT"){
           let rows=[...products]; const rule=String(floor.selectionRule||"LATEST");
           const ids=String(floor.contentIds||"").split(",").map(Number).filter(Boolean);
@@ -841,6 +842,7 @@ function Home({
   );
 }
 function MobileAdGroup({group}:{group:Row}){let items:Row[]=[];try{items=Array.isArray(group.items)?group.items:JSON.parse(String(group.items||"[]"));}catch{}items.sort((a,b)=>Number(a.sortOrder||0)-Number(b.sortOrder||0));if(!items.length)return null;return <section className={`m-ad-group m-ad-${String(group.layoutType||"FULL").toLowerCase()}`}>{items.map(item=><a key={item.id} href={item.linkUrl||undefined} target={item.openTarget==="BLANK"?"_blank":undefined} rel={item.openTarget==="BLANK"?"noreferrer":undefined}><img src={item.h5ImageUrl||item.webImageUrl} alt={item.title||group.name}/>{item.title&&<span>{item.title}</span>}</a>)}</section>}
+function MobileBrandCategoryFloor({floor,portal}:{floor:Row;portal:Row}){let groups:Row[]=[];try{groups=Array.isArray(floor.brandGroups)?floor.brandGroups:JSON.parse(String(floor.brandGroups||"[]"));}catch{}const[active,setActive]=useState(0);if(!groups.length)return null;const group=groups[Math.min(active,groups.length-1)]||groups[0];return <section className="m-section m-brand-floor"><header><div><span>BRAND COLLECTION</span><h2>{floor.title}</h2><small>{floor.subtitle}</small></div></header><nav>{groups.map((item:Row,index:number)=>{const category=(portal.categories||[]).find((c:Row)=>Number(c.id)===Number(item.categoryId));return <button key={`${item.categoryId}-${index}`} className={active===index?"active":""} onClick={()=>setActive(index)}>{item.title||category?.name||`分类 ${index+1}`}</button>})}</nav><div>{(group.brands||[]).map((item:Row,index:number)=>{const brand=(portal.brands||[]).find((b:Row)=>Number(b.id)===Number(item.brandId));if(!brand)return null;return <a key={`${item.brandId}-${index}`} href={item.linkUrl||`/h5/?tab=category&q=${encodeURIComponent(brand.name)}`}>{brand.logo?<img src={brand.logo} alt={brand.name}/>:<strong>{brand.name}</strong>}</a>})}</div></section>}
 function Product({
   row,
   index,

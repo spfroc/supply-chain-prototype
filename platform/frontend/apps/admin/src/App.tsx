@@ -3800,7 +3800,8 @@ function HomeFloors() {
   const show = async (row?: Row) => {
     setEditing(row);
     form.resetFields();
-    form.setFieldsValue(row || { contentType: "PRODUCT", selectionRule: "LATEST", displayCount: 4, targetScope: "ALL", sortOrder: 0, status: 1 });
+    const initial=row?{...row,brandGroups:parseTemplateList(row.brandGroups)}:{ contentType: "PRODUCT", selectionRule: "LATEST", displayCount: 4, targetScope: "ALL", sortOrder: 0, status: 1 };
+    form.setFieldsValue(initial);
     setOpen(true);
     setSelectionError("");
     if(row?.selectionRule === "MANUAL") await loadSelection(row);
@@ -3843,7 +3844,7 @@ function HomeFloors() {
       message.success("展示顺序已更新");
     }catch(error){message.error((error as Error).message);}
   };
-  const typeLabels: Record<string,string> = { PRODUCT: "商品", SOLUTION: "方案", CATEGORY: "分类", CONTENT: "文章" };
+  const typeLabels: Record<string,string> = { PRODUCT: "商品", SOLUTION: "方案", CATEGORY: "分类", CONTENT: "文章", BRAND_CATEGORY:"品牌分类展示" };
   const ruleLabels: Record<string,string> = { MANUAL: "手动选择", LATEST: "最新上架", SALES: "销量排行", VIEWS: "浏览排行", CATEGORY: "指定分类", BRAND: "指定品牌", PLATFORM: "指定平台", AGREEMENT: "协议商品" };
   return <>
     <LoadFeedback loads={[products,categories,brands,platforms,articles]}/>
@@ -3863,14 +3864,16 @@ function HomeFloors() {
       <Form form={form} disabled={selectionLoading||!!selectionError} layout="vertical" className="two-column-form">
         <Form.Item name="title" label="楼层名称" rules={[{required:true}]}><Input placeholder="例如：最新上架" /></Form.Item>
         <Form.Item name="subtitle" label="楼层副标题"><Input /></Form.Item>
-        <Form.Item name="contentType" label="内容类型" rules={[{required:true}]}><Select options={Object.entries(typeLabels).map(([value,label])=>({value,label}))} /></Form.Item>
-        <Form.Item name="selectionRule" label="选取规则" rules={[{required:true}]}><Select options={Object.entries(ruleLabels).filter(([value])=>contentType==="PRODUCT"||["MANUAL","LATEST"].includes(value)).map(([value,label])=>({value,label}))} /></Form.Item>
+        <Form.Item name="contentType" label="内容类型" rules={[{required:true}]}><Select onChange={(value)=>{if(value==="BRAND_CATEGORY"){form.setFieldValue("selectionRule","MANUAL");form.setFieldValue("displayCount",4);}}} options={Object.entries(typeLabels).map(([value,label])=>({value,label}))} /></Form.Item>
+        <Form.Item name="selectionRule" label="选取规则" rules={[{required:true}]}><Select disabled={contentType==="BRAND_CATEGORY"} options={Object.entries(ruleLabels).filter(([value])=>contentType==="PRODUCT"||["MANUAL","LATEST"].includes(value)).map(([value,label])=>({value,label}))} /></Form.Item>
         {selectionRule === "MANUAL" && ["PRODUCT","CONTENT"].includes(contentType) && <Form.Item name="contentIds" label={contentType==="PRODUCT"?"楼层商品":"楼层文章"} className="full" rules={[{required:true,type:"array",min:1,message:`请至少选择一${contentType==="PRODUCT"?"个商品":"篇文章"}`}]} extra="已选顺序即楼层展示顺序。">
           <Select mode="multiple" showSearch optionFilterProp="label" placeholder="搜索并选择商品 SKU" maxTagCount="responsive"
             options={(contentType==="PRODUCT"?selectableSkus:articles.data||[]).filter((row)=>Number(row.status)===1).map((row)=>({value:Number(row.id||row.skuId),label:contentType==="PRODUCT"?`${row.title} · ${row.skuCode}`:`${row.title}${row.subtitle?` · ${row.subtitle}`:""}`}))} />
         </Form.Item>}
         {["CATEGORY","BRAND","PLATFORM"].includes(selectionRule) && <Form.Item name="referenceId" label={selectionRule==="CATEGORY"?"指定分类":selectionRule==="BRAND"?"指定品牌":"指定平台"} rules={[{required:true}]}><Select showSearch optionFilterProp="label" placeholder="请选择" options={(selectionRule==="CATEGORY"?categories.data||[]:selectionRule==="BRAND"?brands.data||[]:platforms.data||[]).map(row=>({value:Number(row.id),label:selectionRule==="CATEGORY"?`${"　".repeat(Math.max(0,Number(row.level)-1))}${row.name}`:row.name||row.title}))} /></Form.Item>}
-        <Form.Item name="displayCount" label="展示数量" rules={[{required:true}]}><InputNumber min={1} max={50} style={{width:"100%"}} /></Form.Item>
+        {contentType==="BRAND_CATEGORY"&&<Form.Item className="full" label="分类与品牌" required extra="至少选择 4 个品牌。品牌链接留空时，自动进入该品牌的商品搜索列表。"><Form.List name="brandGroups" rules={[{validator:async(_,groups)=>{if(!groups?.length)throw new Error("至少添加一个分类");const count=(groups||[]).flatMap((g:Row)=>g?.brands||[]).filter((b:Row)=>b?.brandId).length;if(count<4)throw new Error("至少选择 4 个品牌");}}]}>{(fields,{add,remove},{errors})=><div className="brand-floor-editor">{fields.map((field,index)=><Card size="small" key={field.key} title={`分类 ${index+1}`} extra={<Button type="link" danger onClick={()=>remove(field.name)}>移除</Button>}><div className="brand-floor-category"><Form.Item name={[field.name,"categoryId"]} label="商品分类" rules={[{required:true,message:"请选择分类"}]}><Select showSearch optionFilterProp="label" options={(categories.data||[]).map(row=>({value:Number(row.id),label:`${"　".repeat(Math.max(0,Number(row.level)-1))}${row.name}`}))}/></Form.Item><Form.Item name={[field.name,"title"]} label="自定义标签名"><Input placeholder="留空使用分类名称"/></Form.Item></div><Form.List name={[field.name,"brands"]}>{(brandFields,{add:addBrand,remove:removeBrand})=><>{brandFields.map(brandField=><div className="brand-floor-brand" key={brandField.key}><Form.Item name={[brandField.name,"brandId"]} rules={[{required:true,message:"请选择品牌"}]}><Select showSearch optionFilterProp="label" placeholder="选择品牌" options={(brands.data||[]).filter(row=>Number(row.status)===1).map(row=>({value:Number(row.id),label:row.name}))}/></Form.Item><Form.Item name={[brandField.name,"linkUrl"]}><Input placeholder="品牌链接（留空自动生成）"/></Form.Item><Button danger type="text" onClick={()=>removeBrand(brandField.name)}>删除</Button></div>)}<Button block onClick={()=>addBrand({})}>＋ 添加品牌</Button></>}</Form.List></Card>)}<Button block type="dashed" onClick={()=>add({brands:[]})}>＋ 添加分类</Button><Form.ErrorList errors={errors}/></div>}</Form.List></Form.Item>}
+        {contentType!=="BRAND_CATEGORY"&&<Form.Item name="displayCount" label="展示数量" rules={[{required:true}]}><InputNumber min={1} max={50} style={{width:"100%"}} /></Form.Item>}
+        {contentType==="BRAND_CATEGORY"&&<Form.Item name="displayCount" hidden><InputNumber/></Form.Item>}
         <Form.Item name="targetScope" label="展示端" rules={[{required:true}]}><Select options={[{value:"ALL",label:"Web + H5"},{value:"WEB",label:"仅 Web"},{value:"H5",label:"仅 H5"}]} /></Form.Item>
         <Form.Item name="linkUrl" label="查看全部跳转链接" className="full"><Input placeholder="/web/products" /></Form.Item>
         <Form.Item name="sortOrder" label="楼层排序"><InputNumber min={0} style={{width:"100%"}} /></Form.Item>

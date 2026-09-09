@@ -66,7 +66,7 @@ public class PortalController {
         result.put("floors", jdbc.sql("""
             SELECT f.id,f.title,f.subtitle,f.content_type AS contentType,f.selection_rule AS selectionRule,
                    f.reference_id AS referenceId,f.display_count AS displayCount,f.target_scope AS targetScope,
-                   f.link_url AS linkUrl,f.sort_order AS sortOrder,
+                   f.link_url AS linkUrl,f.brand_groups_json AS brandGroups,f.sort_order AS sortOrder,
                    (SELECT GROUP_CONCAT(i.content_id ORDER BY i.sort_order,i.id SEPARATOR ',')
                     FROM home_floor_item i WHERE i.floor_id=f.id AND i.deleted_at IS NULL) AS contentIds
             FROM home_floor f WHERE f.status=1 AND f.deleted_at IS NULL ORDER BY f.sort_order,f.id
