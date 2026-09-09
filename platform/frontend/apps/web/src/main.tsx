@@ -924,12 +924,6 @@ function AuthPage({
                 onChange={(e) => setForm({ ...form, creditCode: e.target.value.toUpperCase() })}
                 placeholder="请输入18位统一社会信用代码" />
             </label>
-            <label>
-              业务员邀请码（选填）
-              <input value={form.inviteCode || ""} maxLength={16}
-                onChange={(e) => setForm({ ...form, inviteCode: e.target.value.toUpperCase() })}
-                placeholder="如有邀请码请填写" />
-            </label>
           </>
         )}
         <label>
@@ -978,6 +972,12 @@ function AuthPage({
             }}
           />
         </label>
+        {mode === "register" && <label>
+          邀请码（选填）
+          <input value={form.inviteCode || ""} maxLength={16}
+            onChange={(e) => setForm({ ...form, inviteCode: e.target.value.toUpperCase() })}
+            placeholder="如有邀请码请填写" />
+        </label>}
         {error && <div className="auth-error">{error}</div>}
         {notice && <div className="auth-notice">{notice}</div>}
         <button
