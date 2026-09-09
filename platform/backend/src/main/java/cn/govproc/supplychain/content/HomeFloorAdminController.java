@@ -24,8 +24,8 @@ public class HomeFloorAdminController {
     private static final Set<String> RULES=Set.of("MANUAL","LATEST","SALES","VIEWS","CATEGORY","BRAND","PLATFORM","AGREEMENT");
     private static final Set<String> SCOPES=Set.of("ALL","WEB","H5");
     private final JdbcClient jdbc;
-    private final ObjectMapper objectMapper;
-    public HomeFloorAdminController(JdbcClient jdbc,ObjectMapper objectMapper){this.jdbc=jdbc;this.objectMapper=objectMapper;}
+    private final ObjectMapper objectMapper=new ObjectMapper();
+    public HomeFloorAdminController(JdbcClient jdbc){this.jdbc=jdbc;}
 
     @GetMapping
     Object list(@RequestParam(defaultValue="1") int page,@RequestParam(defaultValue="10") int pageSize,
