@@ -1,6 +1,7 @@
 package cn.govproc.supplychain.business;
 
 import cn.govproc.supplychain.common.PageSupport;
+import cn.govproc.supplychain.common.PageResult;
 import cn.govproc.supplychain.common.RichTextSanitizer;
 import cn.govproc.supplychain.order.OrderInventoryService;
 import cn.govproc.supplychain.order.OrderStatePolicy;
@@ -101,28 +102,32 @@ public class AdminBusinessController {
           """;
         String normalizedBadgeType=badgeType==null?"":badgeType.trim().toUpperCase();
         var params=new java.util.HashMap<String,Object>();
-        if(categoryId!=null) { base+=" AND p.category_id=:categoryId"; params.put("categoryId",categoryId); }
-        if(brandId!=null) { base+=" AND p.brand_id=:brandId"; params.put("brandId",brandId); }
+        var filters=new StringBuilder(" WHERE p.deleted_at IS NULL");
+        if(categoryId!=null) { base+=" AND p.category_id=:categoryId"; filters.append(" AND p.category_id=:categoryId"); params.put("categoryId",categoryId); }
+        if(brandId!=null) { base+=" AND p.brand_id=:brandId"; filters.append(" AND p.brand_id=:brandId"); params.put("brandId",brandId); }
         if(selfOperated!=null) {
             if(selfOperated!=0&&selfOperated!=1) throw new IllegalArgumentException("自营筛选条件不正确");
-            base+=" AND p.self_operated=:selfOperated"; params.put("selfOperated",selfOperated);
+            base+=" AND p.self_operated=:selfOperated"; filters.append(" AND p.self_operated=:selfOperated"); params.put("selfOperated",selfOperated);
         }
         if(stockMin!=null&&stockMin<0||stockMax!=null&&stockMax<0) throw new IllegalArgumentException("库存区间不能小于0");
         if(stockMin!=null&&stockMax!=null&&stockMin>stockMax) throw new IllegalArgumentException("最低库存不能大于最高库存");
         if(stockMin!=null) {
             base+=" AND (SELECT COALESCE(SUM(st.stock-st.reserved_stock),0) FROM product_sku st WHERE st.spu_id=p.id AND st.deleted_at IS NULL)>=:stockMin";
+            filters.append(" AND (SELECT COALESCE(SUM(st.stock-st.reserved_stock),0) FROM product_sku st WHERE st.spu_id=p.id AND st.deleted_at IS NULL)>=:stockMin");
             params.put("stockMin",stockMin);
         }
         if(stockMax!=null) {
             base+=" AND (SELECT COALESCE(SUM(st.stock-st.reserved_stock),0) FROM product_sku st WHERE st.spu_id=p.id AND st.deleted_at IS NULL)<=:stockMax";
+            filters.append(" AND (SELECT COALESCE(SUM(st.stock-st.reserved_stock),0) FROM product_sku st WHERE st.spu_id=p.id AND st.deleted_at IS NULL)<=:stockMax");
             params.put("stockMax",stockMax);
         }
         if(!normalizedBadgeType.isBlank()) {
-            if("AUTO".equals(normalizedBadgeType)) base+=" AND p.badge_type IS NULL";
+            if("AUTO".equals(normalizedBadgeType)) {base+=" AND p.badge_type IS NULL";filters.append(" AND p.badge_type IS NULL");}
             else {
                 if(!Set.of("AGREEMENT","PLATFORM","CUSTOM").contains(normalizedBadgeType))
                     throw new IllegalArgumentException("角标类型不正确");
                 base+=" AND p.badge_type=:badgeType";
+                filters.append(" AND p.badge_type=:badgeType");
                 params.put("badgeType",normalizedBadgeType);
             }
         }
@@ -138,17 +143,32 @@ public class AdminBusinessController {
                 )
               )
               """;
+            filters.append("""
+              AND (p.title LIKE :listKeyword OR p.spu_code LIKE :listKeyword
+                OR IFNULL(p.model,'') LIKE :listKeyword OR IFNULL(p.summary,'') LIKE :listKeyword
+                OR EXISTS (SELECT 1 FROM product_sku kx WHERE kx.spu_id=p.id AND kx.deleted_at IS NULL
+                  AND (kx.sku_code LIKE :listKeyword OR IFNULL(kx.title,'') LIKE :listKeyword)))
+              """);
             params.put("listKeyword","%"+keyword.trim()+"%");
         }
         if(status!=null) {
             base+=" AND p.status=:listStatus";
+            filters.append(" AND p.status=:listStatus");
             params.put("listStatus",status);
         }
         if(page==null) return richTextSanitizer.cleanRows(
           jdbc.sql(base+" ORDER BY id DESC").params(params).query().listOfRows(), "detailHtml", "afterSalesHtml");
-        return richTextSanitizer.cleanPage(
-          PageSupport.query(jdbc,base,"q.id DESC",params,page,pageSize,"",null,List.of(),"status"),
-          "detailHtml", "afterSalesHtml");
+        int safePage=Math.max(1,page),safeSize=Math.max(1,Math.min(100,pageSize));
+        long total=jdbc.sql("SELECT COUNT(*) FROM product_spu p"+filters).params(params).query(Long.class).single();
+        var idParams=new java.util.HashMap<String,Object>(params);
+        idParams.put("pageLimit",safeSize);idParams.put("pageOffset",(safePage-1)*safeSize);
+        List<Long> productIds=jdbc.sql("SELECT p.id FROM product_spu p"+filters+" ORDER BY p.id DESC LIMIT :pageLimit OFFSET :pageOffset")
+          .params(idParams).query(Long.class).list();
+        if(productIds.isEmpty())return new PageResult<>(List.of(),total,safePage,safeSize);
+        var detailParams=new java.util.HashMap<String,Object>(params);detailParams.put("productIds",productIds);
+        var records=richTextSanitizer.cleanRows(jdbc.sql(base+" AND p.id IN (:productIds) ORDER BY p.id DESC")
+          .params(detailParams).query().listOfRows(),"detailHtml","afterSalesHtml");
+        return new PageResult<>(records,total,safePage,safeSize);
     }
 
     @GetMapping("/product-associations")

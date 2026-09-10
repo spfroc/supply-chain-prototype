@@ -126,7 +126,8 @@ public class UpstreamCatalogSyncService {
         } catch (Exception exception) {
             log.error("upstream full product sync {} failed", jobId, exception);
             jdbc.sql("UPDATE upstream_product_sync_job SET status='FAILED',error_message=:error,finished_at=NOW() WHERE id=:id")
-                .param("error",trim(exception.getMessage(),1000)).param("id",jobId).update();
+                .param("error","商品同步失败，系统已保留当前进度，请重新点击同步继续处理")
+                .param("id",jobId).update();
         }
     }
 
@@ -163,6 +164,19 @@ public class UpstreamCatalogSyncService {
         String detailHtml = detailHtml(detail.path("content"));
         Long productId = jdbc.sql("SELECT product_id FROM upstream_product_mapping WHERE provider=:provider AND external_sku=:sku AND library=:library")
             .param("provider",PROVIDER).param("sku",externalSku).param("library",library).query(Long.class).optional().orElse(null);
+        if(productId==null){
+            productId=jdbc.sql("""
+              SELECT p.id FROM product_spu p LEFT JOIN product_sku s ON s.spu_id=p.id
+              WHERE p.spu_code=:spuCode OR s.sku_code=:skuCode ORDER BY p.id LIMIT 1
+              """).param("spuCode","MINI-SPU-"+library+"-"+externalSku).param("skuCode",skuCode)
+              .query(Long.class).optional().orElse(null);
+            if(productId!=null)jdbc.sql("""
+              INSERT INTO upstream_product_mapping(provider,external_sku,library,product_id,raw_json,last_synced_at)
+              VALUES(:provider,:sku,:library,:product,:raw,NOW())
+              ON DUPLICATE KEY UPDATE product_id=VALUES(product_id),raw_json=VALUES(raw_json),last_synced_at=NOW()
+              """).param("provider",PROVIDER).param("sku",externalSku).param("library",library)
+              .param("product",productId).param("raw",detail.toString()).update();
+        }
         if (productId == null) {
             jdbc.sql("""
                 INSERT INTO product_spu(spu_code,title,category_id,brand_id,main_image,gallery_json,attributes_json,

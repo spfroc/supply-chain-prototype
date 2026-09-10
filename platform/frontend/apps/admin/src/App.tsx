@@ -1318,8 +1318,18 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
   const collectNeedPrice = collectPlatform === "jd";
   const selectedProductCategory = Form.useWatch("categoryId", form);
   const listBadgeType = Form.useWatch("badgeType", listBadgeForm);
+  const [editing, setEditing] = useState<Row>();
   const attributeLoad = useLoad<Row[]>(() => rootApi(`/api/admin/business/attributes/category/${selectedProductCategory}`), [module, selectedProductCategory], module === "products" && !!selectedProductCategory);
-  const attributeTemplate = selectedProductCategory ? attributeLoad.data || [] : [];
+  const loadedAttributeTemplate = selectedProductCategory ? attributeLoad.data || [] : [];
+  const editingAttributeValues: Row = editing
+    ? (typeof editing.attributeValues === "string" ? JSON.parse(editing.attributeValues || "{}") : (editing.attributeValues || {}))
+    : {};
+  const populatedUpstreamAttributeIds = new Set(Object.entries(editingAttributeValues)
+    .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== "")
+    .map(([id]) => String(id)));
+  const attributeTemplate = editing?.collectionPlatform === "huiecai" && populatedUpstreamAttributeIds.size
+    ? loadedAttributeTemplate.filter((attribute) => populatedUpstreamAttributeIds.has(String(attribute.id)))
+    : loadedAttributeTemplate;
   const [memberForm] = Form.useForm();
   const [logisticsForm] = Form.useForm();
   const [refundForm] = Form.useForm();
@@ -1335,7 +1345,6 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [productTab,setProductTab]=useState("basic");
-  const [editing, setEditing] = useState<Row>();
   const [batchStockRows, setBatchStockRows] = useState<Row[]>([]);
   const [platformProduct, setPlatformProduct] = useState<Row>();
   const [agreementProduct, setAgreementProduct] = useState<Row>();
@@ -1482,10 +1491,10 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
           : {
               title: [
                 (brands.data || []).find((x)=>Number(x.status)===1)?.name,
-                (categories.data || []).find((x)=>Number(x.level)===3&&Number(x.status)===1)?.name,
+                (categories.data || []).find((x)=>Number(x.childCount||0)===0&&Number(x.status)===1)?.name,
               ].filter(Boolean).join(" "),
               categoryId: (categories.data || []).find(
-                (x) => Number(x.level) === 3,
+                (x) => Number(x.childCount || 0) === 0 && Number(x.status) === 1,
               )?.id,
               brandId: (brands.data || []).find((x)=>Number(x.status)===1)?.id,
               selfOperated: 0,
@@ -2421,7 +2430,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
           ) : module === "products" ? (
             <Tabs className="full" destroyOnHidden={false} activeKey={productTab} onChange={setProductTab} items={[
               { key: "basic", label: "基本信息", children: <div className="two-column-form">
-                <Form.Item name="categoryId" label="分类" className="full" rules={[{ required: true, message: "请选择三级分类" }]}><Select showSearch optionFilterProp="label" placeholder="搜索或选择三级分类" options={(categories.data || []).filter((x) => Number(x.level) === 3 && Number(x.status) === 1).map((x) => ({ value: Number(x.id), label: `${x.parentName || ""} / ${x.name}` }))} /></Form.Item>
+                <Form.Item name="categoryId" label="分类" className="full" rules={[{ required: true, message: "请选择末级分类" }]}><Select showSearch optionFilterProp="label" placeholder="搜索或选择末级分类" options={(categories.data || []).filter((x) => Number(x.childCount || 0) === 0 && Number(x.status) === 1).map((x) => ({ value: Number(x.id), label: `${x.parentName ? `${x.parentName} / ` : ""}${x.name}` }))} /></Form.Item>
                 <div className="full product-brand-model-row">
                   <Form.Item name="brandId" label="品牌" rules={[{required:true,message:"请选择品牌"}]}><Select loading={brands.loading} showSearch optionFilterProp="label" options={(brands.data||[]).filter((x)=>Number(x.status)===1).map((x)=>({ value:Number(x.id),label:x.name }))} placeholder="请选择已启用品牌" /></Form.Item>
                   <Form.Item name="model" label="型号"><Input placeholder="请输入商品型号" /></Form.Item>
@@ -2462,7 +2471,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
                 </Form.List>
               </div> },
               { key: "attributes", label: `规格属性${attributeTemplate.length ? `（${attributeTemplate.length}）` : ""}`, children: <div className="two-column-form">
-                <div className="full"><Alert type="info" showIcon message="以下字段根据所选三级分类生成；标有“继承自上级分类”的属性由一级或二级分类自动提供。" /></div>
+                <div className="full"><Alert type="info" showIcon message={editing?.collectionPlatform === "huiecai" ? "以下为徽E采已同步的商品规格属性。" : "以下字段根据所选末级分类生成；标有“继承自上级分类”的属性由上级分类自动提供。"} /></div>
                 <div className="full"><LoadFeedback loads={[attributeLoad]} /></div>
                 {!attributeLoad.loading && !attributeLoad.error && attributeTemplate.length === 0 && <div className="full"><Alert type="warning" showIcon message="当前分类尚未配置属性模板，可在“属性模板”页面添加。" /></div>}
                 {attributeTemplate.map((attribute) => {
