@@ -310,6 +310,8 @@ public class UpstreamCatalogSyncService {
             Long mapped = jdbc.sql("SELECT category_id FROM upstream_category_mapping WHERE provider=:provider AND external_category_id=:cid")
                 .param("provider",PROVIDER).param("cid",cid).query(Long.class).optional().orElse(null);
             if (mapped != null) {
+                jdbc.sql("UPDATE category SET status=1,deleted_at=NULL WHERE id=:id")
+                    .param("id",mapped).update();
                 Long localParent=jdbc.sql("SELECT parent_id FROM category WHERE id=:id AND deleted_at IS NULL")
                     .param("id",mapped).query(Long.class).optional().orElse(null);
                 if(parentExternalId<=0||localParent!=null)return mapped;
@@ -361,7 +363,10 @@ public class UpstreamCatalogSyncService {
             ? jdbc.sql("SELECT id FROM category WHERE name=:name AND parent_id IS NULL ORDER BY id LIMIT 1").param("name",name)
             : jdbc.sql("SELECT id FROM category WHERE name=:name AND parent_id=:parent ORDER BY id LIMIT 1").param("name",name).param("parent",parent);
         Long id = query.query(Long.class).optional().orElse(null);
-        if (id != null) return id;
+        if (id != null) {
+            jdbc.sql("UPDATE category SET status=1,deleted_at=NULL WHERE id=:id").param("id",id).update();
+            return id;
+        }
         jdbc.sql("INSERT INTO category(name,parent_id,level,status) VALUES(:name,:parent,:level,1)")
             .param("name",name).param("parent",parent).param("level",level).update();
         return jdbc.sql("SELECT LAST_INSERT_ID()").query(Long.class).single();
