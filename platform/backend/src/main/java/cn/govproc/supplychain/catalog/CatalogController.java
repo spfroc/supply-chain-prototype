@@ -2,11 +2,13 @@ package cn.govproc.supplychain.catalog;
 
 import cn.govproc.supplychain.auth.ClientAuthService;
 import cn.govproc.supplychain.common.RichTextSanitizer;
+import cn.govproc.supplychain.common.PageResult;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -97,6 +99,49 @@ public class CatalogController {
                 rs.getBigDecimal("agreement_price"), rs.getInt("available_stock"),rs.getLong("sold_count"),rs.getLong("click_count"),rs.getString("structured_attributes"),rs.getString("platform_names"),rs.getString("platform_prices"),rs.getString("variants"),
                 rs.getString("badge_type"),rs.getString("custom_badge"),rs.getString("badge_platform_prefix"),rs.getString("services")
             )).list();
+    }
+
+    @GetMapping("/product-page")
+    PageResult<Map<String,Object>> productPage(@RequestParam(defaultValue="1") int page,
+                                                @RequestParam(defaultValue="24") int pageSize,
+                                                @RequestParam(defaultValue="") String keyword,
+                                                @RequestParam(required=false) Long categoryId,
+                                                @RequestParam(required=false) Long productId) {
+        int safePage=Math.max(1,page),safeSize=Math.max(1,Math.min(60,pageSize));
+        var params=new java.util.HashMap<String,Object>();
+        StringBuilder filter=new StringBuilder(" WHERE p.status=1 AND p.deleted_at IS NULL AND s.status=1 AND s.deleted_at IS NULL AND s.id=(SELECT MIN(s0.id) FROM product_sku s0 WHERE s0.spu_id=p.id AND s0.status=1 AND s0.deleted_at IS NULL)");
+        if(categoryId!=null){
+            filter.append(" AND (p.category_id=:categoryId OR p.category_id IN (SELECT c.id FROM category c WHERE c.parent_id=:categoryId AND c.deleted_at IS NULL) OR p.category_id IN (SELECT c3.id FROM category c3 JOIN category c2 ON c2.id=c3.parent_id WHERE c2.parent_id=:categoryId AND c3.deleted_at IS NULL))");
+            params.put("categoryId",categoryId);
+        }
+        if(productId!=null){filter.append(" AND p.id=:productId");params.put("productId",productId);}
+        if(keyword!=null&&!keyword.isBlank()){
+            filter.append(" AND (p.title LIKE :keyword OR IFNULL(p.model,'') LIKE :keyword OR p.spu_code LIKE :keyword OR s.sku_code LIKE :keyword OR EXISTS(SELECT 1 FROM brand bx WHERE bx.id=p.brand_id AND bx.name LIKE :keyword))");
+            params.put("keyword","%"+keyword.trim()+"%");
+        }
+        long total=jdbc.sql("SELECT COUNT(*) FROM product_spu p JOIN product_sku s ON s.spu_id=p.id"+filter).params(params).query(Long.class).single();
+        var queryParams=new java.util.HashMap<String,Object>(params);
+        queryParams.put("enterpriseId",auth.optionalCurrent().map(ClientAuthService.CurrentUser::enterpriseId).orElse(null));
+        queryParams.put("limit",safeSize);queryParams.put("offset",(safePage-1)*safeSize);
+        var rows=jdbc.sql("""
+            SELECT p.id,s.id AS skuId,p.spu_code AS spuCode,s.sku_code AS skuCode,p.title,p.model,
+              COALESCE(NULLIF(s.sku_image,''),p.main_image) AS mainImage,p.category_id AS categoryId,p.self_operated AS selfOperated,
+              b.id AS brandId,b.name AS brandName,s.market_price AS marketPrice,s.member_price AS memberPrice,
+              s.stock-s.reserved_stock AS availableStock,ai.agreement_price AS agreementPrice,
+              JSON_UNQUOTE(JSON_EXTRACT(p.gallery_json,'$.content')) AS gallery,
+              JSON_UNQUOTE(JSON_EXTRACT(p.attributes_json,'$.content')) AS attributes,p.summary,p.detail_html AS detailHtml,
+              p.delivery_description AS deliveryDescription,p.after_sales_html AS afterSalesHtml,p.badge_type AS badgeType,p.custom_badge AS customBadge,
+              COALESCE((SELECT JSON_ARRAYAGG(o.label) FROM product_service_option pso JOIN system_option o ON o.id=pso.option_id AND o.status=1 AND o.deleted_at IS NULL WHERE pso.product_id=p.id),JSON_ARRAY()) AS services,
+              COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('id',ad.id,'code',ad.code,'name',ad.name,'groupName',ad.group_name,'value',COALESCE(pav.value_text,JSON_UNQUOTE(JSON_EXTRACT(pav.option_ids,'$[0]'))),'unit',ad.unit,'filterable',ad.filterable,'searchable',ad.searchable,'sortOrder',ad.sort_order)) FROM product_attribute_value pav JOIN attribute_definition ad ON ad.id=pav.attribute_id WHERE pav.product_id=p.id AND ad.visible_flag=1 AND ad.status=1 AND ad.deleted_at IS NULL),JSON_ARRAY()) AS structuredAttributes,
+              COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('skuId',sx.id,'skuCode',sx.sku_code,'skuTitle',sx.title,'specValues',sx.spec_json,'skuImage',COALESCE(NULLIF(sx.sku_image,''),p.main_image),'marketPrice',sx.market_price,'memberPrice',sx.member_price,'availableStock',sx.stock-sx.reserved_stock,'status',sx.status)) FROM product_sku sx WHERE sx.spu_id=p.id AND sx.status=1 AND sx.deleted_at IS NULL),JSON_ARRAY()) AS variants,
+              COALESCE((SELECT JSON_ARRAYAGG(JSON_OBJECT('platformId',pp.platform_id,'platformTitle',pr.title,'pricePrefix',pr.price_prefix,'platformPrice',pp.platform_price,'sortOrder',pr.sort_order)) FROM product_platform pp JOIN portal_resource pr ON pr.id=pp.platform_id AND pr.resource_type='PLATFORM' AND pr.status=1 AND pr.deleted_at IS NULL WHERE pp.sku_id=s.id AND pp.listing_status=1 AND pp.deleted_at IS NULL),JSON_ARRAY()) AS platformPrices,
+              (SELECT GROUP_CONCAT(DISTINCT pr.title ORDER BY pr.sort_order,pr.id SEPARATOR '、') FROM product_platform pp JOIN portal_resource pr ON pr.id=pp.platform_id AND pr.resource_type='PLATFORM' AND pr.status=1 AND pr.deleted_at IS NULL WHERE pp.sku_id=s.id AND pp.listing_status=1 AND pp.deleted_at IS NULL) AS platformNames
+            FROM product_spu p JOIN product_sku s ON s.spu_id=p.id
+            LEFT JOIN brand b ON b.id=p.brand_id AND b.status=1 AND b.deleted_at IS NULL
+            LEFT JOIN agreement a ON a.enterprise_id=:enterpriseId AND a.status=1 AND CURRENT_DATE BETWEEN a.effective_date AND a.expiry_date AND a.deleted_at IS NULL
+            LEFT JOIN agreement_item ai ON ai.agreement_id=a.id AND ai.sku_id=s.id AND ai.status=1 AND ai.deleted_at IS NULL
+            """+filter+" ORDER BY p.id DESC LIMIT :limit OFFSET :offset").params(queryParams).query().listOfRows();
+        return new PageResult<>(richTextSanitizer.cleanRows(rows,"detailHtml","afterSalesHtml"),total,safePage,safeSize);
     }
 
     public record ProductSummary(

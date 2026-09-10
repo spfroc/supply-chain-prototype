@@ -181,8 +181,8 @@ function App() {
       Toast.show((e as Error).message);
     }
   };
-  const loadProducts = () => api<Row[]>("/api/public/catalog/products").then(setProducts);
-  const loadCatalog=async()=>{setCatalogLoading(true);setCatalogError("");try{const[nextProducts,nextCategories]=await Promise.all([api<Row[]>("/api/public/catalog/products"),api<Row[]>("/api/public/catalog/categories")]);setProducts(nextProducts);setCategories(nextCategories);}catch(error){setCatalogError((error as Error).message||"商品数据加载失败");}finally{setCatalogLoading(false);}};
+  const loadProducts = () => api<Row>("/api/public/catalog/product-page?page=1&pageSize=60").then(result=>setProducts(result.records||[]));
+  const loadCatalog=async()=>{setCatalogLoading(true);setCatalogError("");try{const[nextProducts,nextCategories]=await Promise.all([api<Row>("/api/public/catalog/product-page?page=1&pageSize=60"),api<Row[]>("/api/public/catalog/categories")]);setProducts(nextProducts.records||[]);setCategories(nextCategories);}catch(error){setCatalogError((error as Error).message||"商品数据加载失败");}finally{setCatalogLoading(false);}};
   const loadAccount = async (initial=false) => {
     const session = await api<Row>("/api/auth/session");
     if (!session.authenticated) {if(initial)return;throw new Error("请先登录");}
@@ -228,7 +228,7 @@ function App() {
   useEffect(()=>{
     if(detail||!products.length) return;
     const productId=Number(new URLSearchParams(location.search).get("productId"));
-    if(productId) setDetail(products.find(row=>Number(row.id)===productId));
+    if(productId){const found=products.find(row=>Number(row.id)===productId);if(found)setDetail(found);else void api<Row>(`/api/public/catalog/product-page?page=1&pageSize=1&productId=${productId}`).then(result=>setDetail(result.records?.[0]));}
   },[detail,products]);
   const navigateTab=(target:Tab,q="")=>{
     const url=new URL(location.href);
@@ -927,6 +927,27 @@ function Category({
   const [brand,setBrand]=useState("");
   const [sort,setSort]=useState<"default"|"priceAsc"|"priceDesc">("default");
   const [attributeFilters,setAttributeFilters]=useState<Record<string,string>>({});
+  const [serverProducts,setServerProducts]=useState<Row[]>(products);
+  const [serverTotal,setServerTotal]=useState(products.length);
+  const [serverPage,setServerPage]=useState(1);
+  const [serverLoading,setServerLoading]=useState(false);
+  useEffect(()=>{setServerProducts(products);},[products]);
+  useEffect(()=>{
+    setServerPage(1);setServerLoading(true);
+    const query=new URLSearchParams({page:"1",pageSize:"30"});
+    if(keyword.trim())query.set("keyword",keyword.trim());
+    if(active)query.set("categoryId",String(active));
+    const timer=window.setTimeout(()=>void api<Row>(`/api/public/catalog/product-page?${query}`).then(result=>{
+      setServerProducts(result.records||[]);setServerTotal(Number(result.total||0));
+    }).finally(()=>setServerLoading(false)),250);
+    return()=>window.clearTimeout(timer);
+  },[keyword,active]);
+  const loadMore=async()=>{
+    const next=serverPage+1;setServerLoading(true);
+    const query=new URLSearchParams({page:String(next),pageSize:"30"});
+    if(keyword.trim())query.set("keyword",keyword.trim());if(active)query.set("categoryId",String(active));
+    try{const result=await api<Row>(`/api/public/catalog/product-page?${query}`);setServerProducts(rows=>[...rows,...(result.records||[])]);setServerTotal(Number(result.total||0));setServerPage(next);}finally{setServerLoading(false);}
+  };
   const children = active
     ? categories.filter((x) => Number(x.parentId) === active)
     : categories.filter((x) => Number(x.level) === 2);
@@ -941,11 +962,11 @@ function Category({
         ]),
       ]
     : [];
-  const categoryProducts=products.filter((p)=>!active||ids.includes(Number(p.categoryId)));
+  const categoryProducts=serverProducts;
   const brands=Array.from(new Set(categoryProducts.map((p)=>String(p.brandName||"")).filter(Boolean))).sort();
   const filterDefinitions=Array.from(new Map(categoryProducts.flatMap((p)=>structuredSpecs(p.structuredAttributes))
     .filter((item)=>Number(item.filterable)===1&&item.value).map((item)=>[String(item.code),item])).values());
-  const visible = products.filter(
+  const visible = serverProducts.filter(
     (p) => (!active || ids.includes(Number(p.categoryId))) && (!brand||String(p.brandName||"")===brand) &&
       Object.entries(attributeFilters).every(([code,value])=>!value||structuredSpecs(p.structuredAttributes)
         .some((item)=>String(item.code)===code&&String(item.value)===value)) &&
@@ -959,7 +980,7 @@ function Category({
     <div className="subpage">
       <header>
         <h1>商品分类</h1>
-        <span>{visible.length}款</span>
+        <span>{serverTotal}款</span>
       </header>
       <div className="category-layout">
         <aside>
@@ -1029,6 +1050,7 @@ function Category({
               <em>›</em>
             </button>
           ))}
+          {visible.length<serverTotal&&<button className="m-load-more" disabled={serverLoading} onClick={()=>void loadMore()}>{serverLoading?"加载中…":"加载更多"}</button>}
           {!visible.length && (
             <div className="m-empty">
               <h2>暂无商品</h2>

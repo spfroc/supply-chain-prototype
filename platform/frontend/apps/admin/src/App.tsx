@@ -2430,7 +2430,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
           ) : module === "products" ? (
             <Tabs className="full" destroyOnHidden={false} activeKey={productTab} onChange={setProductTab} items={[
               { key: "basic", label: "基本信息", children: <div className="two-column-form">
-                <Form.Item name="categoryId" label="分类" className="full" rules={[{ required: true, message: "请选择末级分类" }]}><Select showSearch optionFilterProp="label" placeholder="搜索或选择末级分类" options={(categories.data || []).filter((x) => Number(x.childCount || 0) === 0 && Number(x.status) === 1).map((x) => ({ value: Number(x.id), label: `${x.parentName ? `${x.parentName} / ` : ""}${x.name}` }))} /></Form.Item>
+                <Form.Item name="categoryId" label="分类" className="full" rules={[{ required: true, message: "请选择末级分类" }]}><Select showSearch optionFilterProp="label" placeholder="搜索或选择末级分类" options={(categories.data || []).filter((x) => (Number(x.childCount || 0) === 0 && Number(x.status) === 1) || Number(x.id) === Number(selectedProductCategory)).map((x) => ({ value: Number(x.id), label: `${x.parentName ? `${x.parentName} / ` : ""}${x.name}` }))} /></Form.Item>
                 <div className="full product-brand-model-row">
                   <Form.Item name="brandId" label="品牌" rules={[{required:true,message:"请选择品牌"}]}><Select loading={brands.loading} showSearch optionFilterProp="label" options={(brands.data||[]).filter((x)=>Number(x.status)===1).map((x)=>({ value:Number(x.id),label:x.name }))} placeholder="请选择已启用品牌" /></Form.Item>
                   <Form.Item name="model" label="型号"><Input placeholder="请输入商品型号" /></Form.Item>

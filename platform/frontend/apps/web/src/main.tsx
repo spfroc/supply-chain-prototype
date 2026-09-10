@@ -293,10 +293,10 @@ function App() {
     setToast(text);
     setTimeout(() => setToast(""), 2200);
   };
-  const loadProducts = () => api<Row[]>("/api/public/catalog/products").then(setProducts);
+  const loadProducts = () => api<Row>("/api/public/catalog/product-page?page=1&pageSize=60").then((result)=>setProducts(result.records||[]));
   const loadCatalog=async()=>{
     setCatalogLoading(true);setCatalogError("");
-    try{const [nextProducts,nextCategories]=await Promise.all([api<Row[]>("/api/public/catalog/products"),api<Row[]>("/api/public/catalog/categories")]);setProducts(nextProducts);setCategories(nextCategories);}
+    try{const [nextProducts,nextCategories]=await Promise.all([api<Row>("/api/public/catalog/product-page?page=1&pageSize=60"),api<Row[]>("/api/public/catalog/categories")]);setProducts(nextProducts.records||[]);setCategories(nextCategories);}
     catch(error){setCatalogError((error as Error).message||"商品数据加载失败");}
     finally{setCatalogLoading(false);}
   };
@@ -470,6 +470,7 @@ function App() {
     const id = parseRoute().productId;
     const product = products.find((row) => Number(row.id) === id);
     if (product) setSelected(product);
+    else if(id) void api<Row>(`/api/public/catalog/product-page?page=1&pageSize=1&productId=${id}`).then(result=>setSelected(result.records?.[0]));
   }, [products, selected, view]);
   const search = () => {
     const keyword = searchKeyword.trim();
@@ -1206,6 +1207,22 @@ function Products({
   const [hovered, setHovered] = useState<number>();
   const [sort, setSort] = useState<"default" | "price">("default");
   const [page,setPage]=useState(1);const pageSize=12;
+  const [serverProducts,setServerProducts]=useState<Row[]>(products);
+  const [serverTotal,setServerTotal]=useState(products.length);
+  const [serverLoading,setServerLoading]=useState(false);
+  useEffect(()=>{setServerProducts(products);},[products]);
+  useEffect(()=>{
+    const timer=window.setTimeout(()=>{
+      setServerLoading(true);
+      const query=new URLSearchParams({page:String(page),pageSize:String(pageSize)});
+      if(keyword.trim())query.set("keyword",keyword.trim());
+      if(active)query.set("categoryId",String(active));
+      void api<Row>(`/api/public/catalog/product-page?${query}`).then(result=>{
+        setServerProducts(result.records||[]);setServerTotal(Number(result.total||0));
+      }).finally(()=>setServerLoading(false));
+    },250);
+    return()=>window.clearTimeout(timer);
+  },[page,keyword,active]);
   const ids = active
     ? [
         active,
@@ -1219,7 +1236,7 @@ function Products({
           ]),
       ]
     : [];
-  const categoryProducts=products.filter((p)=>!active||ids.includes(Number(p.categoryId)));
+  const categoryProducts=serverProducts;
   const filterDefinitions=active ? Array.from(new Map(categoryProducts.flatMap((p)=>structuredSpecs(p.structuredAttributes))
     .filter((item)=>Number(item.filterable)===1&&item.value)
     .map((item)=>[String(item.code),item])).values()) : [];
@@ -1232,7 +1249,7 @@ function Products({
     setAttributeFilters({});
     routeChanged(next,keyword);
   };
-  const filtered = products
+  const filtered = serverProducts
     .filter(
       (p) =>
         (!active || ids.includes(Number(p.categoryId))) &&
@@ -1254,8 +1271,8 @@ function Products({
     ? solutions.filter((row)=>`${row.title||""} ${row.subtitle||""} ${row.description||""}`.toLowerCase().includes(normalizedKeyword))
     : [];
   const roots = categories.filter((x) => Number(x.level) === 1);
-  const totalPages=Math.max(1,Math.ceil(filtered.length/pageSize));
-  const paged=filtered.slice((page-1)*pageSize,page*pageSize);
+  const totalPages=Math.max(1,Math.ceil(serverTotal/pageSize));
+  const paged=filtered;
   useEffect(()=>setPage(1),[keyword,active,onlyStock,onlyAgreement,brand,attributeFilters,sort]);
   return (
     <main className="page">
@@ -1338,7 +1355,7 @@ function Products({
                 {forceAgreement ? "我的协议商品" : categories.find((x) => Number(x.id) === active)?.name ||
                   "办公集采"}
               </h1>
-              <p>共 {filtered.length} 款自营商品</p>
+              <p>共 {serverTotal} 款自营商品{serverLoading ? " · 加载中" : ""}</p>
             </div>
           </div>
           <div className="product-search-panel">
@@ -1401,7 +1418,7 @@ function Products({
               />
             ))}
           </div>
-          {filtered.length>pageSize&&<div className="web-pagination"><button disabled={page===1} onClick={()=>setPage(page-1)}>上一页</button><span>第 {page} / {totalPages} 页</span><button disabled={page===totalPages} onClick={()=>setPage(page+1)}>下一页</button></div>}
+          {serverTotal>pageSize&&<div className="web-pagination"><button disabled={page===1||serverLoading} onClick={()=>setPage(page-1)}>上一页</button><span>第 {page} / {totalPages} 页</span><button disabled={page===totalPages||serverLoading} onClick={()=>setPage(page+1)}>下一页</button></div>}
           {!filtered.length && (
             <div className="empty">
               <h2>该分类暂无在售商品</h2>
