@@ -1327,7 +1327,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
   const populatedUpstreamAttributeIds = new Set(Object.entries(editingAttributeValues)
     .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== "")
     .map(([id]) => String(id)));
-  const attributeTemplate = editing?.collectionPlatform === "huiecai" && populatedUpstreamAttributeIds.size
+  const attributeTemplate = editing?.collectionPlatform === "huiecai"
     ? loadedAttributeTemplate.filter((attribute) => populatedUpstreamAttributeIds.has(String(attribute.id)))
     : loadedAttributeTemplate;
   const [memberForm] = Form.useForm();
@@ -2473,7 +2473,7 @@ function BusinessModule({ module,endpointOverride,listTitle,extraColumn,onOpenCo
               { key: "attributes", label: `规格属性${attributeTemplate.length ? `（${attributeTemplate.length}）` : ""}`, children: <div className="two-column-form">
                 <div className="full"><Alert type="info" showIcon message={editing?.collectionPlatform === "huiecai" ? "以下为徽E采已同步的商品规格属性。" : "以下字段根据所选末级分类生成；标有“继承自上级分类”的属性由上级分类自动提供。"} /></div>
                 <div className="full"><LoadFeedback loads={[attributeLoad]} /></div>
-                {!attributeLoad.loading && !attributeLoad.error && attributeTemplate.length === 0 && <div className="full"><Alert type="warning" showIcon message="当前分类尚未配置属性模板，可在“属性模板”页面添加。" /></div>}
+                {!attributeLoad.loading && !attributeLoad.error && attributeTemplate.length === 0 && <div className="full"><Alert type="warning" showIcon message={editing?.collectionPlatform === "huiecai" ? "徽E采接口未提供该商品的规格属性。" : "当前分类尚未配置属性模板，可在“属性模板”页面添加。"} /></div>}
                 {attributeTemplate.map((attribute) => {
                   const name = ["attributeValues", String(attribute.id)];
                   const rules = Number(attribute.requiredFlag) === 1 ? [{ required: true, message: `请填写${attribute.name}` }] : [];
