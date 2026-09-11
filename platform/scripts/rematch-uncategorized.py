@@ -63,7 +63,7 @@ def predict(model, idf, title, brand):
 
 def load_rows():
     training_sql = """
-      SELECT p.id,REPLACE(REPLACE(p.title,'\\t',' '),'\\n',' '),IFNULL(b.name,''),p.category_id
+      SELECT p.id,REPLACE(REPLACE(p.title,'\\t',' '),'\\n',' '),REPLACE(REPLACE(IFNULL(b.name,''),'\\t',' '),'\\n',' '),p.category_id
       FROM upstream_product_mapping m JOIN product_spu p ON p.id=m.product_id
       JOIN category c ON c.id=p.category_id AND c.deleted_at IS NULL
       LEFT JOIN brand b ON b.id=p.brand_id
@@ -71,12 +71,18 @@ def load_rows():
         AND c.parent_id IS NOT NULL;
     """
     target_sql = """
-      SELECT p.id,REPLACE(REPLACE(p.title,'\\t',' '),'\\n',' '),IFNULL(b.name,''),p.category_id
+      SELECT p.id,REPLACE(REPLACE(p.title,'\\t',' '),'\\n',' '),REPLACE(REPLACE(IFNULL(b.name,''),'\\t',' '),'\\n',' '),p.category_id
       FROM upstream_product_mapping m JOIN product_spu p ON p.id=m.product_id LEFT JOIN brand b ON b.id=p.brand_id
       WHERE m.provider='miniapps' AND p.deleted_at IS NULL AND p.category_id=64
         AND JSON_UNQUOTE(JSON_EXTRACT(m.raw_json,'$.cid'))='0';
     """
-    parse = lambda text: [line.split("\t", 3) for line in text.splitlines() if line.strip()]
+    def parse(text):
+        rows=[]
+        for line in text.splitlines():
+            fields=line.split("\t")
+            if len(fields)>=4:
+                rows.append([fields[0],fields[1]," ".join(fields[2:-1]),fields[-1]])
+        return rows
     return parse(mysql(training_sql)), parse(mysql(target_sql))
 
 
