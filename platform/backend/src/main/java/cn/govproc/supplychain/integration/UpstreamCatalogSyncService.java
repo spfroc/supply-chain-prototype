@@ -152,7 +152,6 @@ public class UpstreamCatalogSyncService {
         int library = detail.path("library").asInt();
         String skuCode = "MINI-" + library + "-" + externalSku;
         String title = trim(detail.path("title").asText("未命名商品"), 200);
-        long categoryId = ensureCategory(detail);
         long brandId = ensureBrand(detail.path("brand_name").asText());
         BigDecimal member = money(detail.path("shop_price").asText());
         BigDecimal market = money(detail.path("line_price").asText());
@@ -177,6 +176,14 @@ public class UpstreamCatalogSyncService {
               """).param("provider",PROVIDER).param("sku",externalSku).param("library",library)
               .param("product",productId).param("raw",detail.toString()).update();
         }
+        Long existingCategoryId=productId==null?null:jdbc.sql("""
+            SELECT p.category_id FROM product_spu p JOIN category c ON c.id=p.category_id AND c.deleted_at IS NULL
+            WHERE p.id=:id AND c.name<>'未分类'
+            """).param("id",productId).query(Long.class).optional().orElse(null);
+        String upstreamCategoryId=detail.path("cid").asText();
+        boolean upstreamCategoryMissing=upstreamCategoryId==null||upstreamCategoryId.isBlank()||"0".equals(upstreamCategoryId);
+        long categoryId=upstreamCategoryMissing&&existingCategoryId!=null
+            ? existingCategoryId : ensureCategory(detail);
         if (productId == null) {
             jdbc.sql("""
                 INSERT INTO product_spu(spu_code,title,category_id,brand_id,main_image,gallery_json,attributes_json,
