@@ -61,6 +61,40 @@ def predict(model, idf, title, brand):
     return best, best_score, best_score - second_score
 
 
+def build_neighbors(rows):
+    documents=[]
+    frequency=collections.Counter()
+    for _,title,brand,category in rows:
+        terms=set(features(title,brand))
+        documents.append((int(category),terms))
+        frequency.update(terms)
+    size=len(documents)
+    weights={term:math.log((size+1)/(count+1))+1 for term,count in frequency.items() if count<=1500}
+    postings=collections.defaultdict(list)
+    norms=[]
+    for index,(_,terms) in enumerate(documents):
+        useful=[term for term in terms if term in weights]
+        norms.append(math.sqrt(sum(weights[term]**2 for term in useful)) or 1)
+        for term in useful: postings[term].append(index)
+    return documents,weights,postings,norms
+
+
+def predict_neighbor(model,title,brand):
+    documents,weights,postings,norms=model
+    terms=[term for term in set(features(title,brand)) if term in weights]
+    query_norm=math.sqrt(sum(weights[term]**2 for term in terms)) or 1
+    scores=collections.defaultdict(float)
+    for term in terms:
+        weight=weights[term]**2
+        for index in postings[term]: scores[index]+=weight
+    category_scores=collections.defaultdict(list)
+    for index,dot in scores.items():
+        category_scores[documents[index][0]].append(dot/(query_norm*norms[index]))
+    ranked=sorted(((max(values),category) for category,values in category_scores.items()),reverse=True)
+    if not ranked:return 0,0,0
+    return ranked[0][1],ranked[0][0],ranked[0][0]-(ranked[1][0] if len(ranked)>1 else 0)
+
+
 def load_rows():
     training_sql = """
       SELECT p.id,REPLACE(REPLACE(p.title,'\\t',' '),'\\n',' '),REPLACE(REPLACE(IFNULL(b.name,''),'\\t',' '),'\\n',' '),p.category_id
@@ -96,14 +130,14 @@ def main():
     train, validation = [], []
     for row in training:
         (validation if int(hashlib.sha1(row[0].encode()).hexdigest(), 16) % 10 == 0 else train).append(row)
-    model, idf = build_model(train)
-    evaluated = [(*predict(model, idf, row[1], row[2]), int(row[3])) for row in validation]
+    model = build_neighbors(train)
+    evaluated = [(*predict_neighbor(model, row[1], row[2]), int(row[3])) for row in validation]
     accepted = [row for row in evaluated if row[1] >= args.min_score and row[2] >= args.min_margin]
     accuracy = sum(predicted == actual for predicted, _, _, actual in accepted) / max(1, len(accepted))
-    full_model, full_idf = build_model(training)
+    full_model = build_neighbors(training)
     assignments = []
     for row in targets:
-        category, score, margin = predict(full_model, full_idf, row[1], row[2])
+        category, score, margin = predict_neighbor(full_model, row[1], row[2])
         if score >= args.min_score and margin >= args.min_margin:
             assignments.append((int(row[0]), category, score, margin))
     print(f"training={len(training)} validation={len(validation)} accepted_validation={len(accepted)} accuracy={accuracy:.4f}")
